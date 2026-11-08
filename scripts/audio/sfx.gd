@@ -1,0 +1,203 @@
+class_name Sfx
+extends RefCounted
+const ItemPassives = preload("res://scripts/item_passives.gd")
+## The combat sound vocabulary, resolved from the thing that swung.
+##
+## Call sites say what happened ("a blade landed here"), never which file to
+## play: this class owns the weapon reading (dagger, blunt, two-handed, blade)
+## and hands the event name to the `Audio` autoload. Every entry point is a
+## no-op when the autoload is absent, so a headless regression that runs a scene
+## without the audio manager still exercises the same combat paths.
+##
+## A dagger is its own reading, not a small sword. It is the fastest weapon in
+## the game (a 0.5 s swing, and the shank passive makes it 0.167 s), so a sword's
+## 0.3 s whoosh arriving under every stab reads as a greatsword being swung by a
+## man with a knife. The dagger gets its own short takes, a quieter level and a
+## brighter pitch - the same recordings, cut to the flick.
+
+## Catalog pieces that are blunt: the makeshift club, the whole tree limb, and
+## both staves. Everything else that cuts or pokes is a blade.
+const BLUNT_ITEMS := ["club_makeshift", "branch_heavy", "staff_fire", "staff_bone"]
+## Catalog pieces that need both hands. The club is one-handed in the table, so
+## it gets the short whoosh and the heavy impact - a swing is a swing.
+const TWO_HAND_ITEMS := ["branch_heavy", "staff_fire", "staff_bone"]
+## Catalog pieces swung one-handed from a blade that is barely a blade.
+const DAGGER_ITEMS := ["dagger_iron", "dagger_ironwood"]
+## `Archer.shield_variant` of the wooden shield (`State.ITEMS["shield_wood"]`):
+## the one guard that answers a blow with wood instead of steel.
+const WOODEN_SHIELD := 3
+## What a weapon reads as when nothing else can say: an empty answer, not a
+## guess at a catalog index.
+const UNARMED := {"two_handed": false, "blunt": false, "dagger": false}
+
+
+## Play one loud noise through the manager, at a world point when one is given.
+static func play(event: String, at: Variant = null) -> void:
+	var audio := _audio()
+	if audio == null:
+		return
+	audio.play_event(event, at)
+
+
+## A menu or panel tick: the player's own hand, so it is flat and quiet.
+static func ui_click(at: Variant = null) -> void:
+	play("ui_click", at)
+
+
+## The soul changing bodies. One per real change of mercenary, at the body the
+## soul just stepped into.
+static func body_swap(at: Variant = null) -> void:
+	play("body_swap", at)
+
+
+## A piece lifted off the ground, at the drop's position.
+static func pickup(at: Variant = null) -> void:
+	play("pickup", at)
+
+
+## A weapon is on its way through the air. `hand` decides which blade of a dual
+## pair swung, because the off hand may be the dagger; `variant` is the swing
+## the melee already committed to, because a stab and a diagonal cut are not the
+## same sound even with the same knife in hand.
+static func swing(source: Variant, at: Variant = null, hand: String = "right",
+		variant: String = "") -> void:
+	var kind := kind_of(source, hand)
+	if bool(kind.get("dagger")):
+		# A stab is a push, not an arc: it gets the quietest take there is, so
+		# the slit of the impact is what the blow is heard as.
+		play("stab_dagger" if variant == "stab" else "swing_dagger", at)
+		return
+	play("swing_2h" if bool(kind.get("two_handed")) else "swing_1h", at)
+
+
+## A blow got through: the blade opens a body, the club crushes one, and a
+## dagger's cut is the same recording held small.
+static func landed(source: Variant, at: Variant = null, hand: String = "right") -> void:
+	var kind := kind_of(source, hand)
+	if bool(kind.get("dagger")):
+		play("hit_dagger", at)
+	elif bool(kind.get("blunt")):
+		play("hit_blunt", at)
+	else:
+		play("hit_blade", at)
+
+
+## Steel met steel - or wood, or a knife. A parry rings; a held block answers
+## with whatever the defender is actually holding: a wooden shield or a club
+## thuds, a dagger whispers, and only an edged guard rings.
+static func defense(at: Variant = null, parried: bool = false,
+		defender: Variant = null) -> void:
+	var guard: Variant = _guard_of(defender)
+	if parried:
+		# A stick or a club can turn a blade too, and it knocks rather than rings;
+		# a dagger never parries, but if a weak guard is reported as one it must
+		# still be the knife's whisper and not steel.
+		var p_kind := kind_of(guard)
+		if bool(p_kind.get("dagger")):
+			play("block_dagger", at)
+		elif bool(p_kind.get("blunt")):
+			play("block_wood", at)
+		else:
+			play("parry", at)
+		return
+	if _property(guard, "shield_equipped") == true:
+		if int(_property(guard, "shield_variant")) == WOODEN_SHIELD:
+			play("block_wood", at)
+			return
+		play("block", at)
+		return
+	var kind := kind_of(guard)
+	if bool(kind.get("dagger")):
+		play("block_dagger", at)
+		return
+	if bool(kind.get("blunt")):
+		play("block_wood", at)
+		return
+	play("block", at)
+
+
+static func arrow(at: Variant = null) -> void:
+	play("arrow", at)
+
+
+static func thrown(at: Variant = null) -> void:
+	play("throw", at)
+
+
+## One boot. The soul's own step is the full take; anybody else's is the same
+## recording heard small, and only from a few metres away.
+static func footstep(foot: Vector3, local: bool) -> void:
+	play("footstep" if local else "footstep_far", foot)
+
+
+## What a body is swinging: `{"two_handed": bool, "blunt": bool, "dagger": bool}`.
+##
+## Three shapes reach this: the ranger rig (`Archer`, which knows its own catalog
+## index and which hand holds what), a mob with a catalog piece in hand
+## (`held_weapon_id()` or the watcher's `weapon_item`), and a mob with a bare
+## limb - which reads as a blade because nothing in the profile says otherwise.
+static func kind_of(source: Variant, hand: String = "right") -> Dictionary:
+	if source == null or not is_instance_valid(source):
+		return UNARMED
+	var item := ""
+	if source.has_method("held_weapon_id"):
+		item = str(source.held_weapon_id())
+	if item.is_empty() and source.get("weapon_item") != null:
+		item = str(source.get("weapon_item"))
+	if not item.is_empty():
+		return {
+			"two_handed": item in TWO_HAND_ITEMS,
+			"blunt": item in BLUNT_ITEMS,
+			"dagger": item in DAGGER_ITEMS,
+		}
+	# The rig answers for the hand that swung, which is the only way an off-hand
+	# dagger behind a main-hand sword is heard as a dagger.
+	if source.has_method("swing_weapon_class"):
+		var blade_class := str(source.swing_weapon_class(hand))
+		if blade_class == "dagger":
+			return {"two_handed": false, "blunt": false, "dagger": true}
+		if blade_class == "staff":
+			return {"two_handed": true, "blunt": true, "dagger": false}
+		if blade_class == "blunt":
+			# The club and the whole tree limb. The class is read per hand, so an
+			# off-hand club is heard as wood beside a main-hand blade.
+			return {"two_handed": source.has_method("swings_two_handed") \
+				and bool(source.swings_two_handed()), "blunt": true, "dagger": false}
+	if not source.has_method("swings_two_handed"):
+		return UNARMED
+	var staff := bool(source.get("staff_active")) if source.get("staff_active") != null else false
+	var index := 0
+	if source.get("sword_index") != null:
+		index = int(source.get("sword_index"))
+	return {
+		"two_handed": bool(source.swings_two_handed()) or staff,
+		"blunt": staff or ItemPassives.is_blunt_index(index),
+		"dagger": false,
+	}
+
+
+## A property read that answers for anything: a missing property, a freed node
+## and a plain number all answer null rather than taking the call down.
+static func _property(source: Variant, property: String) -> Variant:
+	if not is_instance_valid(source):
+		return null
+	return source.get(property)
+
+
+## The thing that is actually holding the guard. An `ArenaActor` wears a rig and
+## answers nothing about weapons itself, so the rig is what is read; a mob that
+## carries its own piece answers for itself, and a bare body answers nothing.
+static func _guard_of(defender: Variant) -> Variant:
+	if not is_instance_valid(defender):
+		return null
+	if _property(defender, "shield_equipped") != null:
+		return defender
+	var rig: Variant = _property(defender, "rig")
+	return rig if is_instance_valid(rig) else defender
+
+
+static func _audio() -> Node:
+	var loop := Engine.get_main_loop()
+	if loop is SceneTree:
+		return (loop as SceneTree).root.get_node_or_null("Audio")
+	return null

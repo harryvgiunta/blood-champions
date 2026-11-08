@@ -1,0 +1,33 @@
+IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
+
+Every texture under assets/world/textures/ is original, procedurally generated
+work authored for this repository. No third-party source imagery, scans, photo
+textures or paid packs were used or downloaded for them. (The Weeping Hollow's
+cave kit in assets/world/cave/ is built from CC0 Poly Haven scans and has its own
+provenance in assets/world/cave/LICENSE.txt.)
+
+Authoring source: tools/world_textures.py (deterministic Python, numpy and
+Pillow only). Running the tool regenerates every PNG in this directory
+byte-identically. Colour maps are authored in display (sRGB) space; normal
+maps are derived from authored height fields in the OpenGL convention
+(+Y up, green = up) and carry no baked directional light.
+
+Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
+alpha atlases (incl. the grass-tuft cards), the height-blended terrain ground
+layers (grass, forest-floor litter, trail dirt, rock/scree: albedo + height
+alpha + normals), the linear terrain noise data map and macro variation,
+rock and water normals, building materials (planks, timber, plaster,
+shingles, stone) and the forest-camp surfaces (thatch, hide, bone) and the
+flame atlas.
+
+The textures are distributed under Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),
+section 3 of the LICENSE.md at the repository root:
+https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+Credit the project and say what you changed; do not sell them; share
+modifications under the same terms. Copies of these files published up to commit
+a6a4d55 were dedicated to the public domain under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/) and remain so in those
+copies; that dedication cannot be revoked, and every later change is licensed
+under LICENSE.md. This file records provenance either way.

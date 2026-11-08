@@ -1,0 +1,444 @@
+{
+  "asset": "ironwood_naked.glb",
+  "set": "naked",
+  "display": "Naked",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 65,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "spine_03",
+    "neck_01",
+    "Head",
+    "clavicle_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "hand_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
+    "clavicle_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "hand_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r"
+  ],
+  "slots": [
+    "chest",
+    "hands",
+    "legs",
+    "feet"
+  ],
+  "pieces": {
+    "Armor_Naked_Chest": {
+      "slot": "chest",
+      "bones": [
+        "Head",
+        "clavicle_l",
+        "clavicle_r",
+        "lowerarm_l",
+        "lowerarm_r",
+        "neck_01",
+        "pelvis",
+        "spine_01",
+        "spine_02",
+        "spine_03",
+        "thigh_l",
+        "thigh_r",
+        "upperarm_l",
+        "upperarm_r"
+      ],
+      "triangles": 6670,
+      "bounds_min": [
+        -0.32103,
+        0.88991,
+        -0.17271
+      ],
+      "bounds_max": [
+        0.32074,
+        1.57467,
+        0.13069
+      ],
+      "vertices": 4931,
+      "materials": [
+        "Naked_Skin",
+        "Naked_Shirt"
+      ]
+    },
+    "Armor_Naked_Hands": {
+      "slot": "hands",
+      "bones": [
+        "clavicle_l",
+        "clavicle_r",
+        "hand_l",
+        "hand_r",
+        "index_01_l",
+        "index_01_r",
+        "index_02_l",
+        "index_02_r",
+        "index_03_l",
+        "index_03_r",
+        "index_04_leaf_l",
+        "index_04_leaf_r",
+        "lowerarm_l",
+        "lowerarm_r",
+        "middle_01_l",
+        "middle_01_r",
+        "middle_02_l",
+        "middle_02_r",
+        "middle_03_l",
+        "middle_03_r",
+        "middle_04_leaf_l",
+        "middle_04_leaf_r",
+        "neck_01",
+        "pinky_01_l",
+        "pinky_01_r",
+        "pinky_02_l",
+        "pinky_02_r",
+        "pinky_03_l",
+        "pinky_03_r",
+        "pinky_04_leaf_l",
+        "pinky_04_leaf_r",
+        "ring_01_l",
+        "ring_01_r",
+        "ring_02_l",
+        "ring_02_r",
+        "ring_03_l",
+        "ring_03_r",
+        "ring_04_leaf_l",
+        "ring_04_leaf_r",
+        "spine_02",
+        "spine_03",
+        "thumb_01_l",
+        "thumb_01_r",
+        "thumb_02_l",
+        "thumb_02_r",
+        "thumb_03_l",
+        "thumb_03_r",
+        "thumb_04_leaf_l",
+        "thumb_04_leaf_r",
+        "upperarm_l",
+        "upperarm_r"
+      ],
+      "triangles": 4624,
+      "bounds_min": [
+        -0.92048,
+        1.36389,
+        -0.15485
+      ],
+      "bounds_max": [
+        0.92048,
+        1.53876,
+        0.02294
+      ],
+      "vertices": 2897,
+      "materials": [
+        "Naked_Skin"
+      ]
+    },
+    "Armor_Naked_Legs": {
+      "slot": "legs",
+      "bones": [
+        "calf_l",
+        "calf_r",
+        "foot_l",
+        "foot_r",
+        "pelvis",
+        "spine_01",
+        "spine_02",
+        "thigh_l",
+        "thigh_r"
+      ],
+      "triangles": 4456,
+      "bounds_min": [
+        -0.21719,
+        0.05462,
+        -0.16746
+      ],
+      "bounds_max": [
+        0.21822,
+        1.04575,
+        0.117
+      ],
+      "vertices": 3084,
+      "materials": [
+        "Naked_Skin",
+        "Naked_Shorts"
+      ]
+    },
+    "Armor_Naked_Feet": {
+      "slot": "feet",
+      "bones": [
+        "ball_l",
+        "ball_r",
+        "calf_l",
+        "calf_r",
+        "foot_l",
+        "foot_r"
+      ],
+      "triangles": 1332,
+      "bounds_min": [
+        -0.18651,
+        -0.00951,
+        -0.14159
+      ],
+      "bounds_max": [
+        0.18651,
+        0.13736,
+        0.12804
+      ],
+      "vertices": 842,
+      "materials": [
+        "Naked_Skin"
+      ]
+    }
+  },
+  "total_triangles": 17082,
+  "triangle_budget": 52000,
+  "materials": [
+    "Naked_Skin",
+    "Naked_Shirt",
+    "Naked_Shorts"
+  ],
+  "embedded_images": 9,
+  "image_mime_types": [
+    "image/png"
+  ],
+  "image_names": [
+    "T_Superhero_Male_Normal",
+    "T_Superhero_Male_Dark",
+    "T_Superhero_Male_Roughness",
+    "Naked_Shirt_normal",
+    "Naked_Shirt_albedo",
+    "Naked_Shirt_roughness",
+    "Naked_Shorts_normal",
+    "Naked_Shorts_albedo",
+    "Naked_Shorts_roughness"
+  ],
+  "image_bytes": {
+    "T_Superhero_Male_Normal": 4252937,
+    "T_Superhero_Male_Dark": 1384380,
+    "T_Superhero_Male_Roughness": 3152049,
+    "Naked_Shirt_normal": 1266720,
+    "Naked_Shirt_albedo": 1139286,
+    "Naked_Shirt_roughness": 654925,
+    "Naked_Shorts_normal": 1054776,
+    "Naked_Shorts_albedo": 806484,
+    "Naked_Shorts_roughness": 520275
+  },
+  "atlas_size": {
+    "skin": 2048,
+    "shirt": 1024,
+    "shorts": 1024
+  },
+  "animations": [],
+  "forward": [
+    0,
+    0,
+    1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "bind_axes": "+X is the character's left, -Y forward, +Z up, metres",
+  "unit": "metres",
+  "body": {
+    "source": "Universal Base Characters[Standard] - Superhero_Male_FullBody.gltf",
+    "creator": "Quaternius",
+    "licence": "CC0 1.0 Universal",
+    "skeleton": "same 65-bone rest skeleton as the ranger; weights from the source",
+    "skinned_vertices": 5806,
+    "head": "removed at the neck; the ranger head/eyes/brows stay on screen"
+  },
+  "garments": {
+    "shirt": {
+      "material": "Naked_Shirt",
+      "hem_z": 0.93,
+      "sleeve_end_m": 0.158,
+      "gap_m": [
+        0.013,
+        0.024
+      ],
+      "atlas": 1024,
+      "report": {
+        "vertices_inside_skin": 0,
+        "deepest_mm": 0.0,
+        "bands": 3,
+        "weighted_from_neighbour": 0,
+        "z_range": [
+          0.9135,
+          1.5501
+        ],
+        "x_range": [
+          -0.3203,
+          0.32
+        ],
+        "vertices": 1190
+      }
+    },
+    "shorts": {
+      "material": "Naked_Shorts",
+      "hem_z": 0.618,
+      "top_z": 1.046,
+      "gap_m": [
+        0.013,
+        0.02
+      ],
+      "atlas": 1024,
+      "report": {
+        "vertices_inside_skin": 1,
+        "deepest_mm": 0.0,
+        "bands": 3,
+        "weighted_from_neighbour": 0,
+        "z_range": [
+          0.6439,
+          1.0454
+        ],
+        "x_range": [
+          -0.2152,
+          0.2162
+        ],
+        "vertices": 627
+      }
+    },
+    "weave_m": {
+      "shirt": 0.0042,
+      "shorts": 0.0054
+    },
+    "skin_material": "Naked_Skin",
+    "skin_atlas": 2048
+  },
+  "neck_fit": {
+    "blend_z": 1.47,
+    "cut_z": 1.565,
+    "radial_scale": 0.87,
+    "vertices_moved": 1699,
+    "largest_shift_mm": 15.83,
+    "clearance": {
+      "x_mm": 17.95,
+      "back_mm": 8.6,
+      "ring_vertices": 41
+    }
+  },
+  "torso_fit": {
+    "depth_slim_max": 0.12,
+    "width_slim_max": 0.035,
+    "centre_z": 1.3,
+    "sigma_z": 0.135,
+    "vertices": 3897
+  },
+  "clearance": {
+    "strict": {
+      "Armor_Naked_Chest": {
+        "Ranger_Head_SuperHero_Male": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyes": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyebrows": {
+          "intersections": 0
+        }
+      },
+      "Armor_Naked_Hands": {
+        "Ranger_Head_SuperHero_Male": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyes": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyebrows": {
+          "intersections": 0
+        }
+      },
+      "Armor_Naked_Legs": {
+        "Ranger_Head_SuperHero_Male": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyes": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyebrows": {
+          "intersections": 0
+        }
+      },
+      "Armor_Naked_Feet": {
+        "Ranger_Head_SuperHero_Male": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyes": {
+          "intersections": 0
+        },
+        "Ranger_Head_Eyebrows": {
+          "intersections": 0
+        }
+      }
+    },
+    "garment_gap": {
+      "NAKED_Shirt": {
+        "vertices_inside_skin": 0,
+        "deepest_mm": 0.0,
+        "minimum_gap_mm": 10.866
+      },
+      "NAKED_Shorts": {
+        "vertices_inside_skin": 8,
+        "deepest_mm": 1.367,
+        "minimum_gap_mm": -1.367
+      }
+    }
+  },
+  "authoring_fps": 60,
+  "authoring_tool": "Blender 5.1",
+  "source": "body, skin maps and weights: Quaternius Universal Base Characters (CC0); shirt, shorts, bands, cloth maps and the neck fit: original procedural work authored by tools/prepare_naked_armor.py",
+  "reproducer": "python tools/build_naked_armor.py"
+}

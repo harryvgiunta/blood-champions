@@ -1,0 +1,325 @@
+class_name SoulRouter
+extends RefCounted
+## The soul: one player, many bodies. The authoritative registry of every
+## mercenary body that can be entered, who is inside it, and the transfer rules.
+##
+## Contract (Phase 0):
+##   * exactly one peer per body (`occupied_by_peer_id`);
+##   * a body can only be entered while it is ALIVE (a DOWNED body is revived,
+##     never jumped into);
+##   * a transfer is refused when the target is occupied by another peer, dead,
+##     downed or unknown, and the refusal names the reason;
+##   * a peer whose body is destroyed, downed or leaves is released rather than
+##     left pointing at a corpse.
+##
+## This class never touches the scene graph beyond `Node3D` lookups, so the cage
+## tutorial, the town hub, the admin arena and the expedition all share it.
+
+signal body_registered(body_id: int)
+signal body_unregistered(body_id: int)
+signal body_state_changed(body_id: int, state: int)
+signal body_possessed(peer_id: int, body_id: int)
+signal body_released(peer_id: int, body_id: int)
+signal transfer_refused(peer_id: int, body_id: int, reason: String)
+
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+
+## Refusal reasons, so the HUD can say something true.
+const REASON_UNKNOWN := "That body is not in the warband."
+const REASON_DEAD := "The dead do not answer."
+const REASON_DOWNED := "That one is down. Revive them first."
+const REASON_OCCUPIED := "Another soul is already inside that body."
+const REASON_AWAY := "That body is not with the party."
+const REASON_NONE := ""
+
+var _bodies: Dictionary = {}   # body_id -> {node, name, state, occupied_by_peer_id, last_owner_peer_id}
+var _peer_body: Dictionary = {}  # peer_id -> body_id
+## The bodies a soul may enter while the warband is split - a party below in the
+## delve and the rest in the town. Empty means every registered body.
+var _reach: Dictionary = {}   # body_id -> true
+
+# --- reach ------------------------------------------------------------------
+
+## Only these bodies may be entered until `clear_reach`: a soul that went down
+## with the party cannot hop into a body standing in the town, and no soul in the
+## town can hop into the cave. A body already worn keeps its soul either way.
+func set_reach(body_ids: Array) -> void:
+	_reach.clear()
+	for raw_id in body_ids:
+		if int(raw_id) > 0:
+			_reach[int(raw_id)] = true
+
+func clear_reach() -> void:
+	_reach.clear()
+
+## Whether a soul may be put into this body by the reach rule alone.
+func reachable(body_id: int) -> bool:
+	return _reach.is_empty() or _reach.has(body_id)
+
+# --- registration ----------------------------------------------------------
+
+func register_body(body_id: int, node: Node3D, display_name: String = "") -> void:
+	if body_id <= 0:
+		return
+	var record := {
+		"body_id": body_id,
+		"node": node,
+		"name": display_name,
+		"state": Contracts.HealthState.ALIVE,
+		"occupied_by_peer_id": 0,
+		"last_owner_peer_id": 0,
+	}
+	var previous: Variant = _bodies.get(body_id)
+	if previous is Dictionary:
+		var owner_id := int(previous.get("occupied_by_peer_id", 0))
+		if owner_id != 0:
+			_peer_body.erase(owner_id)
+	record["occupied_by_peer_id"] = int((previous as Dictionary).get("occupied_by_peer_id", 0)) if previous is Dictionary else 0
+	_bodies[body_id] = record
+	body_registered.emit(body_id)
+
+func unregister_body(body_id: int) -> void:
+	if not _bodies.has(body_id):
+		return
+	var record: Dictionary = _bodies[body_id]
+	var owner_id := int(record.get("occupied_by_peer_id", 0))
+	if owner_id != 0:
+		_peer_body.erase(owner_id)
+		body_released.emit(owner_id, body_id)
+	_bodies.erase(body_id)
+	body_unregistered.emit(body_id)
+
+func has_body(body_id: int) -> bool:
+	return _bodies.has(body_id)
+
+func body_ids() -> Array[int]:
+	var out: Array[int] = []
+	for id in _bodies:
+		out.append(int(id))
+	out.sort()
+	return out
+
+func body_node(body_id: int) -> Node3D:
+	var record: Variant = _bodies.get(body_id)
+	if record is Dictionary:
+		var node: Variant = record.get("node")
+		if node is Node3D and is_instance_valid(node):
+			return node
+	return null
+
+func body_name(body_id: int) -> String:
+	var record: Variant = _bodies.get(body_id)
+	return str((record as Dictionary).get("name", "")) if record is Dictionary else ""
+
+func body_state(body_id: int) -> int:
+	var record: Variant = _bodies.get(body_id)
+	if not record is Dictionary:
+		return Contracts.HealthState.DEAD
+	return int(record.get("state", Contracts.HealthState.DEAD))
+
+## 0 when nobody is inside. This is the lock the whole system hangs on.
+func occupied_by(body_id: int) -> int:
+	var record: Variant = _bodies.get(body_id)
+	if not record is Dictionary:
+		return 0
+	return int(record.get("occupied_by_peer_id", 0))
+
+## Every peer currently wearing a body, in id order. A scene asks this to build
+## the bubble's human list without knowing how many friends joined.
+func peers() -> Array[int]:
+	var out: Array[int] = []
+	for peer_id in _peer_body:
+		out.append(int(peer_id))
+	out.sort()
+	return out
+
+func body_of(peer_id: int) -> int:
+	return int(_peer_body.get(peer_id, -1))
+
+func is_possessed(peer_id: int) -> bool:
+	return _peer_body.has(peer_id)
+
+# --- state ------------------------------------------------------------------
+
+## Health/downed updates arrive from the body or the roster. A body that stops
+## being alive releases whoever was inside it.
+func set_body_state(body_id: int, state: int) -> void:
+	var record: Variant = _bodies.get(body_id)
+	if not record is Dictionary:
+		return
+	var previous := int(record.get("state", Contracts.HealthState.ALIVE))
+	record["state"] = state
+	if previous != state:
+		body_state_changed.emit(body_id, state)
+	# Only a death frees the peer. A downed body keeps the soul inside it on
+	# purpose: the player crawls it themselves and an ally stands them back up, so
+	# dropping the soul the moment a body hit the floor left a player watching a
+	# body slide away with no hands on it.
+	if state == Contracts.HealthState.DEAD:
+		var owner_id := int(record.get("occupied_by_peer_id", 0))
+		if owner_id != 0:
+			release_peer(owner_id, Contracts.state_name(state))
+
+# --- transfer ---------------------------------------------------------------
+
+## The one entry point for entering a body: hotkey cycling, a click in the
+## warband screen and the tutorial's forced shift all come through here.
+## Returns `{ok, message, body_id, previous_body_id, reason}`.
+func request_transfer(peer_id: int, target_body_id: int) -> Dictionary:
+	var result := _refuse(peer_id, target_body_id, "")
+	if not bool(result["ok"]):
+		return result
+	var current_id := body_of(peer_id)
+	if current_id == target_body_id:
+		return {"ok": true, "message": "Already inside %s." % _label(target_body_id),
+			"body_id": target_body_id, "previous_body_id": current_id, "reason": REASON_NONE}
+	if current_id != -1:
+		var current: Variant = _bodies.get(current_id)
+		if current is Dictionary:
+			current["last_owner_peer_id"] = peer_id
+			current["occupied_by_peer_id"] = 0
+		_peer_body.erase(peer_id)
+	var target: Dictionary = _bodies[target_body_id]
+	target["occupied_by_peer_id"] = peer_id
+	target["last_owner_peer_id"] = peer_id
+	_peer_body[peer_id] = target_body_id
+	if current_id != -1:
+		body_released.emit(peer_id, current_id)
+	body_possessed.emit(peer_id, target_body_id)
+	return {"ok": true, "message": "You are inside %s." % _label(target_body_id),
+		"body_id": target_body_id, "previous_body_id": current_id, "reason": REASON_NONE}
+
+## Check the rules without moving a soul.
+func can_transfer(peer_id: int, target_body_id: int) -> Dictionary:
+	return _refuse(peer_id, target_body_id, "")
+
+## The authority's word, taken as it is. A guest never decides who is inside
+## what - the host's ownership map does, and the host has already applied every
+## rule above - so a body this peer still believes is downed (a snapshot behind
+## the host) must still take the soul the host put in it. Whatever the peer held
+## and whoever held the body are released first, so the lock stays one-to-one.
+func assign(peer_id: int, body_id: int) -> bool:
+	if peer_id == 0 or not _bodies.has(body_id):
+		return false
+	var current := body_of(peer_id)
+	if current == body_id:
+		return true
+	if current != -1:
+		release_peer(peer_id, "moved")
+	var record: Dictionary = _bodies[body_id]
+	var holder := int(record.get("occupied_by_peer_id", 0))
+	if holder != 0 and holder != peer_id:
+		release_peer(holder, "moved")
+	record["occupied_by_peer_id"] = peer_id
+	record["last_owner_peer_id"] = peer_id
+	_peer_body[peer_id] = body_id
+	body_possessed.emit(peer_id, body_id)
+	return true
+
+func _refuse(peer_id: int, target_body_id: int, reason: String) -> Dictionary:
+	if not _bodies.has(target_body_id):
+		return _refused(peer_id, target_body_id, REASON_UNKNOWN)
+	var record: Dictionary = _bodies[target_body_id]
+	var state := int(record.get("state", Contracts.HealthState.ALIVE))
+	if state == Contracts.HealthState.DEAD:
+		return _refused(peer_id, target_body_id, REASON_DEAD)
+	if state == Contracts.HealthState.DOWNED:
+		return _refused(peer_id, target_body_id, REASON_DOWNED)
+	var holder := int(record.get("occupied_by_peer_id", 0))
+	if holder != 0 and holder != peer_id:
+		return _refused(peer_id, target_body_id, REASON_OCCUPIED)
+	if not reachable(target_body_id):
+		return _refused(peer_id, target_body_id, REASON_AWAY)
+	return {"ok": true, "message": "", "body_id": target_body_id,
+		"previous_body_id": body_of(peer_id), "reason": REASON_NONE}
+
+func _refused(peer_id: int, target_body_id: int, reason: String) -> Dictionary:
+	transfer_refused.emit(peer_id, target_body_id, reason)
+	return {"ok": false, "message": reason, "body_id": target_body_id,
+		"previous_body_id": body_of(peer_id), "reason": reason}
+
+## Give up the body (death, disconnect, scene hand-off).
+func release_peer(peer_id: int, reason: String = "") -> void:
+	var body_id := body_of(peer_id)
+	if body_id == -1:
+		return
+	var record: Variant = _bodies.get(body_id)
+	if record is Dictionary:
+		record["occupied_by_peer_id"] = 0
+		record["last_owner_peer_id"] = peer_id
+	_peer_body.erase(peer_id)
+	body_released.emit(peer_id, body_id)
+
+## Living bodies a peer could enter, in body-id order. The peer's own body is
+## included so cycling wraps onto itself rather than skipping.
+func possessable_ids() -> Array[int]:
+	var out: Array[int] = []
+	for body_id in body_ids():
+		if body_state(body_id) != Contracts.HealthState.ALIVE:
+			continue
+		if not reachable(body_id):
+			continue
+		var holder := occupied_by(body_id)
+		if holder != 0:
+			continue
+		out.append(body_id)
+	return out
+
+## Next/previous living body for the hotkey cycle. `direction` is +1 or -1.
+## The ring is the sorted set of living, unoccupied bodies, so cycling is stable
+## whatever spawned first; a soul that holds the only surviving body stays put
+## instead of failing. Returns the same `request_transfer` payload; a refusal
+## leaves the soul where it is.
+func cycle(peer_id: int, direction: int = 1) -> Dictionary:
+	var target := cycle_target(peer_id, direction)
+	var body_id := int(target.get("body_id", -1))
+	if not bool(target.get("ok", false)) or body_id == body_of(peer_id):
+		return target
+	return request_transfer(peer_id, body_id)
+
+## Where `cycle` would put the soul, without moving it: a guest asks the host
+## for exactly this body. The payload is `request_transfer`'s; a `body_id` equal
+## to the soul's own body means it stays (it holds the only one standing).
+func cycle_target(peer_id: int, direction: int = 1) -> Dictionary:
+	var current := body_of(peer_id)
+	var candidates := possessable_ids()
+	if candidates.is_empty():
+		if current != -1 and body_state(current) == Contracts.HealthState.ALIVE:
+			return {"ok": true, "message": "You are the only body standing.",
+				"body_id": current, "previous_body_id": current, "reason": REASON_NONE}
+		return {"ok": false, "message": "No living body is free to enter.",
+			"body_id": current, "previous_body_id": current, "reason": REASON_DEAD}
+	candidates.sort()
+	var target := candidates[0]
+	if direction >= 0:
+		for body_id in candidates:
+			if body_id > current:
+				target = body_id
+				break
+	else:
+		target = candidates[candidates.size() - 1]
+		for index in range(candidates.size() - 1, -1, -1):
+			if candidates[index] < current:
+				target = candidates[index]
+				break
+	if target == current:
+		return {"ok": true, "message": "You are the only body standing.",
+			"body_id": current, "previous_body_id": current, "reason": REASON_NONE}
+	return {"ok": true, "message": "", "body_id": target, "previous_body_id": current,
+		"reason": REASON_NONE}
+
+func clear() -> void:
+	_bodies.clear()
+	_peer_body.clear()
+	_reach.clear()
+
+func description() -> String:
+	var parts: PackedStringArray = []
+	for body_id in body_ids():
+		parts.append("%d:%s%s" % [body_id, body_name(body_id),
+			"@" + str(occupied_by(body_id)) if occupied_by(body_id) != 0 else ""])
+	return " | ".join(parts)
+
+func _label(body_id: int) -> String:
+	var label := body_name(body_id)
+	return label if not label.is_empty() else "body %d" % body_id

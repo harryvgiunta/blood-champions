@@ -1,0 +1,334 @@
+"""Build the game's audio assets from the raw recording library.
+
+The sources are the recordings the warband was scored and foleyed with; this
+script is the one place that says which part of which file became which sound.
+It is deterministic (fixed windows, fixed seeds, no detection at run time), so
+re-running it reproduces the exact tree the game ships.
+
+    python tools/slice_game_audio.py                 # write assets/audio
+    python tools/slice_game_audio.py --check         # verify the built tree
+    python tools/slice_game_audio.py --sources DIR   # other raw library root
+    python tools/slice_game_audio.py --fetch --only voices --sources DIR
+    # ^ download the licensed voice recordings, then cut only the spoken lines
+
+`--only sfx` / `--only voices` builds one half of the tree, which is what a
+machine without the whole raw music library needs: the spoken lines are cut from
+their own two recordings and nothing else is touched. `--fetch` downloads those
+recordings from their pinned URLs into the source root first.
+
+Every slice is trimmed to mono 48 kHz, peak-normalised to -1 dBFS with a short
+fade on both ends (a hard cut clicks), then encoded as Vorbis with `-bitexact`,
+so the same window always produces the same bytes. Mono is not a
+downgrade here: the engine pans a 3D one-shot itself, and a stereo stream on an
+`AudioStreamPlayer3D` cannot be placed in the world.
+
+The music is copied verbatim - both files are already mastered - and is looped
+by the runtime (`AudioManager`), not by the file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SOURCES = Path.home() / "Downloads"
+AUDIO_LAB = Path.home() / "game-audio-lab" / "outputs"
+
+RATE = 48000
+PEAK = 10.0 ** (-1.0 / 20.0)  # -1 dBFS
+FADE = 0.004  # seconds
+
+MUSIC = {
+    "menu_theme.ogg": AUDIO_LAB / "mastered" / "ashgate_theme_loop.ogg",
+    "warband_soundtrack.ogg": AUDIO_LAB / "warband_soundtrack" / "warband_soundtrack.ogg",
+}
+
+# Sources that are cut into several one-shots. `windows` are (start, end) in
+# seconds of the source, the order is the variant order the game plays.
+SLICED = {
+    # 1H swing. The recording is thirteen takes, one after another.
+    "short_whoosh": {
+        "source": "427979__kinoton__short-whoosh-13x.wav",
+        "windows": [
+            (0.22, 0.52), (1.27, 1.57), (2.27, 2.57), (3.42, 3.77),
+            (4.67, 4.97), (5.77, 6.02), (6.82, 7.12), (7.97, 8.32),
+            (9.17, 9.52), (10.22, 10.62), (11.42, 11.77), (12.42, 12.82),
+            (13.52, 13.87),
+        ],
+    },
+    # Dagger swing: the same thirteen takes cut to their leading third, because a
+    # dagger is not a sword swung by a smaller man - it is a flick, and the sound
+    # has to be over before a sword's would still be travelling.
+    "dagger_whoosh": {
+        "source": "427979__kinoton__short-whoosh-13x.wav",
+        "windows": [
+            (0.26, 0.40), (2.31, 2.45), (4.71, 4.85),
+            (6.86, 7.00), (9.21, 9.35), (11.46, 11.60),
+        ],
+    },
+    # 2H swing: one long bamboo whoosh, the arc a two-handed piece draws.
+    "long_whoosh": {
+        "source": "855844__sadiquecat__whoosh-long-bamboo-stick-os-st-13.wav",
+        "windows": [(0.02, 0.44)],
+    },
+    # Blunt impact: three hits with a fist, one per variant.
+    "blunt": {
+        "source": "460509__florianreichelt__hitting-in-a-face.mp3",
+        "windows": [(0.37, 0.74), (1.67, 2.04), (2.91, 3.13)],
+    },
+    # Landed blade: the eight clearest takes of the sixteen.
+    "slit": {
+        "source": "873151__artninja__sword_throat_slitting_sound_10032026.wav",
+        "windows": [
+            (24.61, 25.02), (19.07, 19.40), (33.69, 34.02), (8.39, 8.72),
+            (22.39, 22.68), (11.53, 11.82), (42.07, 42.38), (36.73, 37.08),
+        ],
+    },
+    # Steel on steel, split by what the ear needs: the short bright takes snap
+    # (a parry), the longer ringing ones carry weight (a held block).
+    "parry": {
+        "source": "568790__fenodyrie__sword-against-sword.wav",
+        "windows": [(2.30, 2.84), (3.68, 4.30), (52.40, 52.72), (20.38, 20.74)],
+    },
+    "clash": {
+        "source": "568790__fenodyrie__sword-against-sword.wav",
+        "windows": [(25.68, 26.50), (19.42, 20.28), (13.76, 14.60), (10.86, 11.80)],
+    },
+    # A blade let go of: the throw's leading whoosh and two later arcs.
+    "blade": {
+        "source": "334167__loudernoises__flying-blade.wav",
+        "windows": [(0.00, 0.52), (0.45, 1.10), (2.15, 2.65)],
+    },
+    # Boots on a forest road: ground that is half gravel, half grass. Twelve
+    # footfalls spread across the whole 31 s take, each cut from the plant.
+    "footstep": {
+        "source": "411206__straget__going-on-a-forest-road-gravel-and-grass.wav",
+        "windows": [
+            (0.01, 0.26), (2.09, 2.34), (4.56, 4.81), (6.83, 7.08),
+            (8.53, 8.78), (10.92, 11.17), (12.69, 12.94), (14.91, 15.16),
+            (23.02, 23.27), (25.01, 25.26), (27.15, 27.40), (29.69, 29.94),
+        ],
+    },
+    # A padlock and its chain: the working part of the recording (43-45 s) is
+    # four events - the key and the barrel, a rattle, a tick, a second rattle.
+    "cage_latch": {
+        "source": "330635__leonelmail__padlock-chain-lock-unlock.mp3",
+        "windows": [
+            (43.26, 43.60), (43.95, 44.44), (44.62, 45.06), (45.08, 45.50),
+        ],
+    },
+    # The bow releases: one arrow, whole.
+    "arrow": {
+        "source": "205563__everheat__arrow.wav",
+        "windows": [(0.00, 0.56)],
+    },
+}
+
+# Spoken lines. `VoiceLibrary` owns how often a body says one; this table is the
+# same contract as `SLICED` - a fixed window of a licensed recording - but the
+# output lands under `assets/audio/voice/<voice>/` because a voice is a folder of
+# takes, not a one-shot. Add a cue here and one row in `VoiceLibrary.VOICES`, and
+# the game speaks it.
+VOICE_SLICED = {
+    # The briar wolf's growl going into the bite. One sustained growl, cut into
+    # three windows that each start in a dip of the envelope so every take has an
+    # attack of its own; the runtime's pitch spread does the rest.
+    "wolf/growl": {
+        "source": "338674__newagesoup__wolf-growl.mp3",
+        "windows": [(0.12, 0.86), (0.52, 1.22), (1.22, 2.06)],
+    },
+    # The wolf's death: six separate vocalisations out of one take, from the
+    # short yelp that opens it to the long dying whine at 5.6 s. The runtime
+    # pitches them down (0.80-0.90), which is what turns a dog into a wolf.
+    "wolf/death": {
+        "source": "277195__coral-island-studios__dog-begging.mp3",
+        "windows": [
+            (0.66, 1.22), (1.92, 2.48), (3.18, 3.92),
+            (5.64, 6.58), (7.76, 8.52), (8.70, 9.48),
+        ],
+    },
+}
+
+# The recordings `VOICE_SLICED` cuts, by the name this script looks for. They are
+# the creators' own preview masters (CC BY 4.0 - see assets/audio/LICENSE.txt),
+# pinned by URL so `--fetch` reproduces them instead of depending on a browser
+# session. A download from the sound page itself needs an account; the preview is
+# the same recording at 48 kHz, which is what every slice below is cut from.
+VOICE_SOURCES = {
+    "338674__newagesoup__wolf-growl.mp3":
+        "https://cdn.freesound.org/previews/338/338674_4067257-hq.mp3",
+    "277195__coral-island-studios__dog-begging.mp3":
+        "https://cdn.freesound.org/previews/277/277195_5324256-hq.mp3",
+}
+
+# Output folder per group. The game loads `res://assets/audio/sfx/<group>/`.
+GROUPS = {
+    "short_whoosh": "swing",
+    "dagger_whoosh": "swing",
+    "long_whoosh": "swing",
+    "blunt": "impact",
+    "slit": "impact",
+    "parry": "defense",
+    "clash": "defense",
+    "blade": "thrown",
+    "arrow": "bow",
+    "footstep": "step",
+    "cage_latch": "cage",
+}
+
+
+def scaled(samples: np.ndarray) -> np.ndarray:
+    """Peak-normalise to `PEAK` and fade both ends. Silence stays silent."""
+    peak = float(np.abs(samples).max()) if samples.size else 0.0
+    if peak > 1e-6:
+        samples = samples * (PEAK / peak)
+    count = min(int(FADE * RATE), samples.size // 2)
+    if count > 1:
+        ramp = np.linspace(0.0, 1.0, count, dtype=np.float32)
+        samples[:count] *= ramp
+        samples[-count:] *= ramp[::-1]
+    return samples
+
+
+def encode(samples: np.ndarray, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        raw = Path(scratch) / "slice.wav"
+        sf.write(raw, samples, RATE, subtype="PCM_16")
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(raw),
+             "-c:a", "libvorbis", "-q:a", "5",
+             # Without these two the Ogg muxer stamps a random stream serial and
+             # an encoder tag, so the same window re-encodes to different bytes
+             # and every re-run dirties the tree.
+             "-fflags", "+bitexact", "-map_metadata", "-1", str(destination)],
+            check=True,
+        )
+
+
+def slice_source(source: Path, folder: Path, stem: str, windows,
+                 label: str) -> list[tuple[str, float, float]]:
+    """Cut `windows` out of one recording into consecutive takes in `folder`.
+
+    Each take is written as `<folder>/<stem>_NN.ogg`, numbered from one in window
+    order - the names `SfxLibrary` and `VoiceLibrary` expect.
+    """
+    if not source.exists():
+        raise SystemExit(f"missing source: {source}")
+    built: list[tuple[str, float, float]] = []
+    samples, rate = sf.read(source, always_2d=True, dtype="float32")
+    mono = samples.mean(axis=1)
+    for index, (start, end) in enumerate(windows, start=1):
+        window = mono[int(start * rate):int(end * rate)]
+        if window.size == 0:
+            raise SystemExit(f"{label}: empty window {start}-{end}")
+        resampled = window if rate == RATE else np.interp(
+            np.linspace(0.0, 1.0, int(window.size * RATE / rate), endpoint=False),
+            np.linspace(0.0, 1.0, window.size, endpoint=False),
+            window).astype(np.float32)
+        out = folder / f"{stem}_{index:02d}.ogg"
+        encode(scaled(resampled.astype(np.float32)), out)
+        built.append((str(out), resampled.size / RATE, PEAK))
+    return built
+
+
+def build(sources: Path, out: Path, only: str = "") -> list[tuple[str, float, float]]:
+    built: list[tuple[str, float, float]] = []
+    do_music = only == ""
+    do_sfx = only in ("", "sfx")
+    do_voices = only in ("", "voices")
+    if do_music:
+        music_dir = out / "music"
+        music_dir.mkdir(parents=True, exist_ok=True)
+        for name, source in MUSIC.items():
+            if not source.exists():
+                raise SystemExit(f"missing music source: {source}")
+            shutil.copy2(source, music_dir / name)
+            with sf.SoundFile(source) as handle:
+                built.append((str(music_dir / name), len(handle) / handle.samplerate, 0.0))
+
+    if do_sfx:
+        for group, recipe in SLICED.items():
+            built += slice_source(sources / recipe["source"], out / "sfx" / GROUPS[group],
+                                  group, recipe["windows"], group)
+
+    if do_voices:
+        for key, recipe in VOICE_SLICED.items():
+            voice, stem = key.split("/")
+            source = sources / recipe["source"]
+            if not source.exists():
+                raise SystemExit(f"missing voice source: {source} (try --fetch)")
+            built += slice_source(source, out / "voice" / voice, stem,
+                                  recipe["windows"], key)
+    return built
+
+
+def fetch(sources: Path) -> int:
+    """Download the voice recordings this script cuts, where they are missing."""
+    failed = 0
+    sources.mkdir(parents=True, exist_ok=True)
+    for name, url in VOICE_SOURCES.items():
+        destination = sources / name
+        if destination.exists():
+            print(f"have    {destination.name}")
+            continue
+        print(f"fetch   {url}")
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                destination.write_bytes(response.read())
+        except OSError as error:
+            print(f"FAILED  {name}: {error}")
+            failed += 1
+    return 1 if failed else 0
+
+
+def check(out: Path, only: str = "") -> int:
+    expected: list[Path] = []
+    if only in ("", "music"):
+        expected += [out / "music" / name for name in MUSIC]
+    if only in ("", "sfx"):
+        for group, recipe in SLICED.items():
+            expected += [out / "sfx" / GROUPS[group] / f"{group}_{index:02d}.ogg"
+                         for index in range(1, len(recipe["windows"]) + 1)]
+    if only in ("", "voices"):
+        for key, recipe in VOICE_SLICED.items():
+            voice, stem = key.split("/")
+            expected += [out / "voice" / voice / f"{stem}_{index:02d}.ogg"
+                         for index in range(1, len(recipe["windows"]) + 1)]
+    missing = [str(path) for path in expected if not path.exists()]
+    for path in missing:
+        print(f"MISSING {path}")
+    print(f"{len(expected) - len(missing)}/{len(expected)} audio assets present")
+    return 1 if missing else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sources", type=Path, default=DEFAULT_SOURCES)
+    parser.add_argument("--out", type=Path, default=ROOT / "assets" / "audio")
+    parser.add_argument("--only", choices=["music", "sfx", "voices"], default="",
+                        help="build and check one part of the tree")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--fetch", action="store_true",
+                        help="download the licensed voice recordings first")
+    args = parser.parse_args()
+    if args.fetch and fetch(args.sources):
+        return 1
+    if args.check:
+        return check(args.out, args.only)
+    for path, seconds, level in build(args.sources, args.out, args.only):
+        print(f"{path}  {seconds:6.2f}s  {level:.2f}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

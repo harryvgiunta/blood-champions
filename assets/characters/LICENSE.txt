@@ -1,0 +1,552 @@
+IRONWOOD CHARACTER ASSETS — LICENSE AND PROVENANCE
+
+All source model and animation content below is distributed by its creators under
+Creative Commons CC0 1.0 Universal (Public Domain Dedication):
+https://creativecommons.org/publicdomain/zero/1.0/
+https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+CC0 permits copying, modifying, distributing and using this content commercially
+without permission. Attribution is not required by CC0; provenance is retained
+here for traceability. No paid packs, paid export services or restricted files
+were used. Downloads used the creators' ordinary free Standard download flow.
+
+WHAT THE CC0 TERMS ABOVE COVER
+
+They are the licences of the upstream *sources*, and they keep applying to those
+sources. The assets built from them in this repository — the Ranger GLB and its
+armour, the Briar wolf, the five devils, the Cinder devil, the Unholy Forest
+mobs, the Makeshift and naked sets and the warband looks — are distributed under
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+(CC BY-NC-SA 4.0), section 3 of the LICENSE.md at the repository root. Copies of
+these files published up to commit a6a4d55 were distributed under CC0 1.0 and
+remain so in those copies; that dedication cannot be revoked. Every later change
+is licensed under LICENSE.md.
+
+CREATORS AND PRIMARY SOURCES
+
+Quaternius — Modular Character Outfits - Fantasy [Standard]
+https://quaternius.com/packs/modularcharacteroutfitsfantasy.html
+https://quaternius.itch.io/modular-character-outfits-fantasy
+Original archive: Modular Character Outfits - Fantasy[Standard].zip
+Original selected model:
+  Exports/glTF (Godot-Unreal)/Outfits/Male_Ranger.gltf
+  Male_Ranger.bin and referenced T_Ranger_* / T_Regular_Male_* textures
+The archive's License_Standard.txt explicitly specifies CC0 1.0 Universal.
+
+Quaternius — Universal Base Characters [Standard]
+https://quaternius.com/packs/universalbasecharacters.html
+https://quaternius.itch.io/universal-base-characters
+Original archive: Universal Base Characters[Standard].zip
+Original selected model:
+  Base Characters/Godot - UE/Superhero_Male_FullBody.gltf
+  Superhero_Male_FullBody.bin and referenced head/eye/brow textures
+Only the head, eyes and eyebrows are retained; anatomy covered by the Ranger
+outfit is removed. Head geometry is fitted to the Ranger's neck/head joint.
+The free pack's glTF refers to T_Hair_1_Normal_png.png and T_Eye_Normal_png.png;
+these resolve to the archive's T_Hair_1_Normal.png and T_Eye_Normal.png.
+
+Quaternius, with animation collaboration credited on the pack page to
+Gonzalo Furnier — Universal Animation Library [Standard], v3.0 (June 2026)
+https://quaternius.com/packs/universalanimationlibrary.html
+https://quaternius.itch.io/universal-animation-library
+Original archive: Universal Animation Library[Standard].zip
+Original selected animation source:
+  Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb
+Retained authored clips: Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop,
+Jump_Start, Jump_Loop, Jump_Land, Roll, Crouch_Idle_Loop, Crouch_Fwd_Loop;
+Sword_Idle -> Sword_Idle_OneHand.
+
+Quaternius — Universal Animation Library 2 [Standard], June 2026 update
+https://quaternius.com/packs/universalanimationlibrary2.html
+https://quaternius.itch.io/universal-animation-library-2
+Original archive: Universal Animation Library 2[Standard].zip
+Original selected animation source:
+  Universal Animation Library 2[Standard]/Unreal-Godot/UAL2_Standard.glb
+Sword_Heavy_Combo, final overhead finisher only, source seconds 2.25–4.333333
+(frames 135–260 after 60 fps import) -> Sword_Overhead_OneHand.
+This is a one-handed downward overhead cut with its authored load, low
+follow-through and recovery; earlier combo strikes are excluded.
+Timing cleanup within source frames 150–165 redistributes the same ordered
+authored poses by cumulative pelvis/spine/shoulder/elbow/wrist travel, sampled
+at 240 Hz, with smooth acceleration and deceleration. The source concentrated
+an elbow movement of 0.240 m into 9.47 ms around frame 152. This timing-only
+repair spreads the downstroke over the existing 0.25-second active interval;
+it does not alter joint poses, clip length, windup/recovery, or the two-hand clip.
+
+Authored held guards (no new external source)
+tools/prepare_character.py authors Sword_Block_Loop_OneHand and
+Sword_Block_Loop as character-only 120-sample loops. They are built from the
+existing licensed Sword_Idle_OneHand and Sword_Idle poses, retarget only the
+Ranger skeleton, and keep the sword as the runtime socketed weapon. The
+two-hand clip's support arm is solved onto the actual hilt. Blade directions,
+wrist/elbow targets, planted-foot solve and clearance validation are recorded
+in ironwood_ranger.json.
+
+Authored dagger thrust (no new external source)
+tools/prepare_character.py authors Dagger_Stab as a 31-sample, 0.5-second
+forward thrust built from the existing licensed Sword_Idle_OneHand pose. The
+right hand chambers beside the ribs and drives along the character's forward
+axis; the sword socket is rolled so the dagger blade leads the fist, and the
+existing authored right-hand finger grip is retained. Feet stay planted through
+a fixed-length leg solve. The clip animates only the Ranger skeleton; the dagger
+is the runtime socketed weapon. Timing, authored targets and contact window are
+recorded in ironwood_ranger.json.
+
+Gres — Humanoid SoulsLike Animations (October 4, 2026)
+https://opengameart.org/content/humanoid-soulslike-animations
+https://opengameart.org/users/gres
+Original source file:
+https://opengameart.org/sites/default/files/playerstraightswordanimations.blend
+Original file name: playerstraightswordanimations.blend
+Original rig: Human. Original animation frame rate: 60 fps.
+Retained authored clips:
+  Idle_SS_TH, frames 1–145 -> Sword_Idle
+  SS_TH_Charge02_Start, frames 1–23, followed by
+  SS_TH_Charge02_Heavy, frames 2–55 -> Sword_Overhead
+The selected motion is an actual two-handed overhead downward cut, not a
+horizontal slash or a one-handed attack relabeled as two-handed. The authored
+lift, rearward load, fast downstroke, low follow-through and recovery are kept.
+The source Longsword object's authored Child Of hand.R constraint supplies the
+weapon orientation. Its original +Z blade is converted to game-local -Z; the
+right-palm grip centre uses source sword mesh z=27.85 (object scale 0.01).
+The weapon mesh itself is not redistributed: gameplay equipment supplies it.
+
+LOCAL PREPARATION
+
+Outputs: ironwood_ranger.glb and ironwood_ranger.json (measured integration data).
+Reproducible preparation: tools/prepare_character.py and its
+tools/character_clearance.py helper (Blender 5.1+).
+Source downloads and preparation/inspection .blend files are stored under the
+ignored .runtime/character-source directory, not redistributed as giant packs.
+The shipped GLB contains only the clothed male model, selected authored motions,
+skin and required embedded textures (resized to a maximum of 1024 pixels).
+All animation uses one Ranger skeleton. Rest-axis rotation retargeting preserves
+source whole-body movement and the attacking arm's original elbow bend. The
+Gres source has different limb proportions. A two-bone support-palm cleanup
+holds the left palm on the source-derived hilt, correcting the difference
+between source mitten and Ranger finger/palm proportions. Minimal support-
+clavicle elevation supplies anatomical reach during the high load, without
+stretching bones. Fingers use the Quaternius Sword_Idle right-hand authored
+gripping pose, mirrored for the left hand, instead of an unmapped mitten.
+
+Clothed-rig clearance cleanup affects only the two-handed support arm in
+Sword_Idle and Sword_Overhead. The left elbow pole is moved outward while
+keeping the wrist on the hilt; low recovery additionally uses at most 20 degrees
+of support-clavicle depression and a smooth palm slide from 0.12 to 0.08 metres
+along the existing handle. The pose search uses actual deformed Male_Ranger_Body
+triangles, not an estimated torso capsule. A continuity-penalized path and
+short symmetric smoothing avoid frame-by-frame pole switching. Anatomical bone
+lengths, attacking right-arm/blade trajectory, torso/leg motion, source timing,
+and one-handed clips are preserved. No runtime sword IK is required.
+
+The exported GLB is reimported into Blender and inspected at 240 Hz: both
+forearms' centerlines and +/-30 mm offsets along BOTH perpendicular axes must
+clear the actual skinned shirt. Idle looping, guard-to-windup and recovery-to-
+guard interpolations are also inspected. The support palm must remain on the
+handle. Measured correction ranges and validation results are retained in
+ironwood_ranger.json. No programmatically invented attack pose sequence is used.
+
+Bow-specific authored draw/release clips were not included in the downloaded
+free Standard libraries; bow interaction is a gameplay skeletal overlay rather
+than a mislabeled asset clip.
+
+Cover_Lean_Left, Cover_Lean_Right and Cover_Lean_Top are original local additive
+cover poses authored reproducibly by tools/prepare_character.py, not renamed
+source attacks. All begin at the identical retargeted Idle_Loop frame zero.
+Smooth weight transfer keys pelvis counterbalance, three articulated spine
+joints and modest neck/head counterbalance; arm-local transforms remain neutral
+so attack/aim overlays retain their grip. Fixed-length two-bone leg solves keep
+the original ankles and foot orientations planted. These local additions are
+part of the shipped asset and are licensed with it under CC BY-NC-SA 4.0
+(LICENSE.md, section 3).
+
+Exported asset axes are +Y up and +Z forward. Anatomical left leans toward +X
+and right toward -X, each reaching 18 degrees chest tilt; top leans toward +Z
+at 14 degrees. The pelvis countertranslates 0.02 metres, counterrotates by
+3 degrees and lowers 0.012 metres for knee reach. The three spine joints reach
+50/80/100 percent of chest tilt; neck/head reduce chest tilt by 2/5 degrees.
+Each non-looping clip contains 16 full-hierarchy samples;
+its GLB input times are uniformly retimed to 0.24 seconds after the normal
+60 Hz bake (avoiding a rounded 14.4-frame endpoint). Existing combat values,
+source timings, clearance corrections and sockets are unaffected by retiming.
+
+Crouch clips use the same Quaternius rest-axis retargeting as other locomotion.
+JSON records their actual duration, mean/range of pelvis lowering relative to
+Idle_Loop frame zero, and ankle fore/aft excursion. Crouch_Fwd_Loop nominal
+speed and full-cycle stride estimate use median backwards ankle speed during
+ground contact within 25 mm of the lowest ankle, multiplied by cycle duration.
+The in-place source has no root-distance track; this is an explicitly measured
+contact-velocity estimate, not a claimed source root-motion distance.
+
+IRONWOOD NAKED BODY — SOURCE AND PROVENANCE
+
+The body the warband wears when it wears nothing is a real anatomical sculpt,
+not a modelled tube. It is the male base body from the same CC0 pack that
+supplies the Ranger's head:
+
+  Quaternius — Universal Base Characters [Standard]
+  https://quaternius.com/packs/universalbasecharacters.html
+  https://quaternius.itch.io/universal-base-characters
+  Original archive: Universal Base Characters[Standard].zip
+  Original selected model:
+    Base Characters/Godot - UE/Superhero_Male_FullBody.gltf
+    Superhero_Male_FullBody.bin and the T_Superhero_Male_* base-colour,
+    normal and roughness maps
+  Licence: License_Standard.txt, CC0 1.0 Universal
+
+The source mesh carries the same 65-bone rest skeleton as the Ranger, with bone
+names, rest transforms, skin weights and UVs. It is used as the naked set's
+skin: split by dominant bone into the four slot pieces
+(Armor_Naked_Chest/_Hands/_Legs/_Feet), bound to the Ranger armature, and
+exported with the source's own 2048 base-colour, normal and roughness maps
+through its own UV layout. The ring, wrist and ankle seams of the four pieces
+share the body's own smoothed normals, so they read as one continuous body.
+The source's head, eyes and brows are not used here: the Ranger head stays on
+screen outside every armour slot, so the naked body ends in a neck.
+
+Original modifications, all authored reproducibly in Blender:
+  - the source head is removed at z = 1.565 m and the neck is tapered to 0.87
+    of its radius so it enters the Ranger head's opening (measured against the
+    head's own lower shell; the cut ring clears it by ~9-18 mm);
+  - the ribcage is slimmed by up to 12% in depth and 3.5% in width with a
+    smooth height-weighted falloff centred at z = 1.30 m, which removes the
+    superhero barrel chest and restores human chest/waist proportion without
+    touching the arms, neck or waist;
+  - the shirt and shorts are cut from the body's own surface (the same faces),
+    relaxed, pushed outside the skin by 10-24 mm, given outward-only drape
+    folds, finished with extruded hem/cuff/waist bands and solidified to 3.5 mm
+    (shirt) and 4.0 mm (shorts);
+  - the cloth maps are rasterised per texel at bind-space positions: a linen
+    plain weave for the shirt (4.2 mm pitch) with a hem stitch, button placket
+    and ribbed crew collar, and a charcoal twill for the shorts (5.4 mm pitch)
+    with waistband, leg hems, side seam and fly, plus slubs, dye drift and
+    grime that collects at the hems;
+  - the skin keeps the source's painted pores, knuckle creases and nails; no
+    colour was invented for it.
+
+The set is 17,082 triangles, four pieces, three materials (Naked_Skin,
+Naked_Shirt, Naked_Shorts), nine embedded maps and the Ranger's 65 bones. The
+JSON records the measured neck taper, torso slim, garment extents and gaps.
+
+Reproduce with (after unpacking the pack into .runtime/character-source):
+  python tools/build_naked_armor.py
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
+IRONWOOD ARMOR — ASSET LICENSE AND PROVENANCE
+
+The swappable armor pieces are original procedural work authored for this
+repository. The mail, plate and Emberweave cloth sets, the leather gloves and
+the dark hose underlayer do not derive from any additional third-party source;
+the CC0 Quaternius Ranger outfit above supplies the leather hood, jerkin, belt,
+pauldron, bracers, trousers and boots that are grouped by slot at runtime.
+
+Authoring source: tools/character_armor.py (deterministic Blender Python),
+called by tools/prepare_character.py after the Ranger animations are baked.
+Authoring tool: Blender 5.1.2 (build 2026-05-19), scene unit metres, 60 fps.
+Runtime outputs (inside the Ranger GLB/JSON):
+  Armor_<Set>_<Slot> for set in Mail, Plate, Cloth and slot in Head, Chest,
+  Hands, Legs, Feet; Armor_Leather_Hands; Ranger_Base_Calf
+  armor.generated metadata in ironwood_ranger.json
+  embedded 512 x 512 sRGB albedo and normal textures generated in Blender
+
+The pieces are skinned to the Ranger's 65-bone rest skeleton with explicit
+weights, authored in armature space (+X character left, -Y forward, +Z up) and
+exported in the same GLB as the animated body. The base calf is always visible
+so short sabatons can be mixed with the short leather trousers without an empty
+shin. The leather outfit is the licensed Quaternius mesh above, split by node
+name; no pixels or vertices from a restricted source are used.
+
+Reproduce with:
+  blender --background --python-exit-code 1 --python tools/prepare_character.py -- \
+      .runtime/character-source assets/characters/ironwood_ranger.glb
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
+The armor is distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3): the
+Quaternius leather underneath stays CC0, the generated mail, plate, cloth and
+hose do not.
+
+IRONWOOD BRIAR WOLF — ASSET LICENSE AND PROVENANCE
+
+The wolf asset is original procedural work authored for this repository. It
+does not derive from the Quaternius/Gres Ranger sources above, and their CC0
+licences do not cover it. No third-party model, texture, motion capture or
+reference asset is included.
+
+Authoring source: tools/prepare_wolf.py (deterministic Blender Python).
+Authoring tool: Blender 5.1.2 (build 2026-05-19), scene unit metres, 60 fps.
+Runtime engine: Godot 4.7.2.
+Runtime outputs:
+  assets/characters/ironwood_wolf.glb
+  assets/characters/ironwood_wolf.json (measured integration metadata)
+  assets/characters/ironwood_wolf.glb.import (embedded image handling 2)
+
+The wolf GLB embeds one 1024 x 1024 sRGB albedo texture painted directly into
+the UV atlas from rest-space anatomy. It contains a continuous body/neck/head,
+separate lower jaw, ears, eyes, nose, teeth, claws and paw pads. The mesh has
+15,036 triangles, 37 skeleton bones and nine material surfaces. Exported bounds
+are approximately 0.537 x 1.176 x 2.218 metres with the paws at y=0; exported
+forward is -Z and up is +Y, matching gameplay without a wrapper rotation.
+
+Authored clips (60 Hz baked, in-place):
+  Wolf_Idle_Loop  2.40 s, loop
+  Wolf_Trot_Loop  0.60 s, loop, 1.15 m full-cycle stride, 0.45 stance duty
+  Wolf_Attack     1.50 s, non-loop, authored impact at 0.65 s
+  Wolf_Death      0.45 s, non-loop, final collapse pose held by the runtime
+
+The runtime presentation is scripts/wolf_visual.gd; the wolf branch of
+scripts/enemy.gd owns only AI/collision/damage and samples the attack from its
+existing 0.65 s windup and 0.85 s recovery timers. No clip event deals damage.
+
+The wolf is distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3).
+
+Reproduce with:
+  blender --background --python-exit-code 1 --python tools/prepare_wolf.py -- \
+      .runtime/character-source/wolf assets/characters/ironwood_wolf.glb
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
+A fresh Blender run reproduces the measured geometry, skeleton, clip timings
+and coat pattern; byte-identical output is not promised because Smart UV
+packing can vary. The hashes below identify the shipped artifacts.
+
+GLB SHA-256: 8124663196ee2fdd18f8a051c7140311b114d570fd2cc1080e764b56bbe135eb
+Metadata JSON SHA-256: 77bfb0b985cb56e63d3a10d70f7eebfdc2877eb92a517738939dc06bdc56cce7
+
+IRONWOOD DEVIL MOBS — SOURCE-BASED WORK AND PROVENANCE
+
+The five frontier devil mobs (Hellish goat man, Succubus, Devil spawn, Hell
+beast and Gargoyle) are original assemblies and modifications built on the
+CC0 Quaternius sources already documented above and the project's original CC0
+Ironwood wolf. No generated image, photogrammetry scan, paid pack or restricted
+file is included. The supplied design reference images informed palette and
+proportion only; they are not redistributed and are not build inputs.
+
+Sources:
+  Quaternius — Universal Base Characters (CC0):
+    Superhero_Female_FullBody, Superhero_Male_FullBody (body, face, eyes,
+    65-bone skeleton) and the long hair cards.
+  Quaternius — Modular Character Outfits Fantasy (CC0):
+    Female_Ranger and Male_Ranger (body, arms, hands, belts, legs, boots,
+    hood, pauldron), with their source skin/leather PBR maps.
+  Quaternius — Universal Animation Library 1 and 2 (CC0):
+    Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop, Crouch_Idle_Loop,
+    Crouch_Fwd_Loop, Sword_Overhead_OneHand, Sword_Overhead and Dagger_Stab
+    as locomotion/attack bases.
+  Ironwood wolf (original CC0, see the section above):
+    Hell beast body, 37-bone skeleton and authored idle/trot/bite/death.
+
+Original modifications in this repository:
+  - goat: human head removed; jet-black furred body with a bare black goat
+    skull, empty sockets, black ram horns, hooves and claws; no armor,
+    harness, rings or glowing eyes; compact black neck and feral hunch;
+  - succubus: large black satanic horns, clean half-open bat-wing membranes,
+    spade tail and claws; no waistband, belt or loincloth ring;
+  - gargoyle: naked basalt stone body, folded stone wings, feral hunch,
+    spinal/shoulder/forearm spikes, fangs, crown horns and oversized claws;
+    empty stone sockets with ember cores; 1.5x scale; no armor, cloth or belt;
+  - spawn enlarged head, small horns, fangs, needle claws, ragged wraps and
+    tail;
+  - beast cranial horns, spinal ridge, enlarged toe claws and charred/ember
+    coat treatment;
+  - tinted source skin/leather/hair/eye maps that retain the source pores,
+    grain, weave and iris structure; authored bone, horn, membrane, cloth,
+    stone and fur maps;
+  - extra head/jaw, wing and tail bones; attack/hit/death bakes, time warps
+    and grounded death drops;
+  - all gameplay integration (devil_mob.gd, devil_mob_visual.gd, spawns,
+    regression).
+
+Assets:
+  assets/characters/devils/ironwood_hell_goat.glb  + .json
+  assets/characters/devils/ironwood_succubus.glb   + .json
+  assets/characters/devils/ironwood_spawn.glb      + .json
+  assets/characters/devils/ironwood_beast.glb      + .json
+  assets/characters/devils/ironwood_gargoyle.glb   + .json
+
+Each GLB contains a joined skinned mesh with multiple PBR material surfaces,
+embedded source/authored PNG maps (skin, leather, hair, eye, horn, bone,
+membrane, cloth, stone, fur), extra bones where required, and six 60 Hz
+in-place clips: idle, walk, run, attack, hit and death. The adjacent JSON
+records the measured skeleton, bounds, clips, impact times, materials and head
+zone. Runtime presentation, AI and spawns live in scripts/devil_mob_visual.gd,
+scripts/devil_mob.gd and RangeWorld.devil_spawns.
+
+The assets are distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3). The
+CC0 source packs they rebuild from keep their own CC0 terms; these derived GLBs
+are not CC0 and may not be used commercially.
+
+Reproduce with:
+  python tools/build_devils.py all
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+  Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/devil_mobs_regression.gd
+
+A fresh build reproduces the measured geometry, rigs, clip timing and texture
+recipes; byte-identical output is not promised because Blender's Smart UV
+packing/export ordering can vary. Source archives stay in the ignored
+.runtime/character-source/ workspace; tinted maps, authored maps and captures
+stay in .runtime/devil-source/<mob>/.
+
+Final shipped hashes:
+  ironwood_beast.glb SHA-256: 9e707abb23377f8a8d02b24d9d3fbb999b27092dcb09eded7ce0687d11528eea
+  ironwood_beast.json SHA-256: 19347e730b20dec096415131533e4b0c1687c86be6497ff5cbbff40a0e6d1703
+  ironwood_gargoyle.glb SHA-256: a815d25425bc2849c7f6288f88dc9030257c4337b3f5ab3cc3375a1d6bb48d44
+  ironwood_gargoyle.json SHA-256: f7ed83207be9f7a6d4f57c40213ee4df3a59d307f2a9a651dc593e22c08ac8a9
+  ironwood_hell_goat.glb SHA-256: 6ecd520c1699203f3801bf32c1e61fd1798844cc2a6280c88317fb37dbc76b8f
+  ironwood_hell_goat.json SHA-256: 4a9fc3ef1e571eefcd803db21e839f2a939707b6cd6c5cef617af26ad191bbc8
+  ironwood_spawn.glb SHA-256: f9bbd3b1493c29cbced64762504dbe5a6360e4e3b8a81d2a0a5d35ff1d67a866
+  ironwood_spawn.json SHA-256: 53e216811dbb905abe6814b3a5860f51a4e9ca4a33cb233e95c6fa6066853ddf
+  ironwood_succubus.glb SHA-256: df7605ef10544cdc56bb6e6091a51b0518f1d8325e0b41e09282b7ca1dc44660
+  ironwood_succubus.json SHA-256: d81d9bb3bcdf6439bc025ebcfe90d034adb23620a6ecb199e500d2a2bf4afdf6
+
+IRONWOOD UNHOLY FOREST MOBS AND MAKESHIFT GEAR — ORIGINAL PROCEDURAL WORK
+
+The three Unholy Forest mobs (Hollow warden, Ossuary stalker, Gallowsroot) and
+the five-piece Makeshift starter set are original procedural work authored for
+this repository. They do not derive from any third-party model, texture or
+motion, and the Quaternius/Gres CC0 sources documented above are not build
+inputs for them. No generated image, photogrammetry scan, paid pack or
+restricted file is included. The supplied design-reference artwork informed
+silhouette, palette and proportion only; it is not redistributed and is not a
+build input.
+
+Authoring sources:
+  tools/prepare_forest_mobs.py       geometry, rigs, skinning, clips, export
+  tools/forest_surface.py            analytic PBR surface fields
+  tools/forest_styles.py             recipes, palettes, clip timings
+  tools/prepare_makeshift_armor.py   the five Makeshift armour pieces
+Authoring tool: Blender 5.1.2, scene unit metres, 60 fps, deterministic seeds.
+Runtime engine: Godot 4.7.2.
+
+Runtime outputs:
+  assets/characters/forest/ironwood_hollow_warden.glb   + .json + .glb.import
+  assets/characters/forest/ironwood_ossuary_stalker.glb + .json + .glb.import
+  assets/characters/forest/ironwood_gallowsroot.glb     + .json + .glb.import
+  assets/characters/armor/ironwood_makeshift.glb        + .json
+
+Design: the warden is a hooded thing of grave-cloth; the stalker and the
+Gallowsroot are people in costumes — a human body dressed in ragged sackcloth,
+hide and stitched-on bone or bark, with a carved mask and antlers lashed to a
+brow band.
+
+Every forest mesh is one joined skinned surface with one PBR material per
+surface (albedo + normal + roughness, plus emissive maps on the glowing
+surfaces), all embedded in the GLB. Exported forward is -Z, up is +Y, and the
+feet sit at y = 0. Measured assets:
+
+  Hollow warden    30,234 tris  43 bones  6 materials  19 images  height 3.76 m
+  Ossuary stalker  49,214 tris  43 bones  6 materials  18 images  height 2.47 m
+  Gallowsroot      46,538 tris  35 bones  8 materials  25 images  height 2.89 m
+
+The Makeshift set is bone over cured hide (17,732 tris, 65 bones, 3 materials,
+9 embedded images) and guards nothing by design: it changes what the ranger
+looks like, not what a blow costs.
+
+The three **watcher skins** are the same original creatures refitted onto the
+ranger's 65-bone skeleton by `tools/prepare_watcher_skins.py` (build:
+`tools/build_watcher_skins.py`), so the campaign's watchers can fight on the
+warband's authored clips. They add no third-party content: the vertices, UVs and
+material slots are the shipped forest meshes', they carry no images of their own
+(they borrow the creature GLBs' PBR atlases at runtime), and every weight,
+segment fit and clip is this repository's own. Runtime outputs:
+
+  assets/characters/watchers/ironwood_watcher_hollow_warden.glb   + .json + .glb.import
+  assets/characters/watchers/ironwood_watcher_ossuary_stalker.glb + .json + .glb.import
+  assets/characters/watchers/ironwood_watcher_gallowsroot.glb     + .json + .glb.import
+
+  Hollow warden skin    30,234 tris  65 bones  0 images  fit 1.1312  height 3.76 m
+  Ossuary stalker skin  49,214 tris  65 bones  0 images  fit 1.0260  height 2.48 m
+  Gallowsroot skin      46,538 tris  65 bones  0 images  fit 1.1444  height 2.90 m
+
+Authored clips (60 Hz baked, in-place, stationary root):
+  <Mob>_Idle / Walk / Run   loop; loop modes are applied by the runtime
+  <Mob>_Attack              one-shot, authored impact at the gameplay damage frame
+  <Mob>_Hit                 one-shot stagger pose
+  <Mob>_Death               one-shot collapse, held by the corpse controller
+
+These assets are distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3).
+
+Reproduce with:
+  python tools/build_forest.py all
+  python tools/build_makeshift_armor.py
+  python tools/build_watcher_skins.py all
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+  Godot_v4.7.2-stable_win64_console.exe --headless --path . \
+      --script res://tests/forest_mobs_regression.gd
+
+GLB SHA-256:
+  ironwood_hollow_warden.glb   4df807b8b3adaa8e7f728b65f15519c24f7353a639697fbc8bb88433b26fa74c
+  ironwood_hollow_warden.json  1185da9f5ea0d89ed57e61cc950bf202b90c3cae7ed995cacc846820dafb81f7
+  ironwood_ossuary_stalker.glb   f5a4ea5e2d5688b53d36b20f773bbfc6a321afe4842f1e73429f38cb2b924f36
+  ironwood_ossuary_stalker.json  60e8b265972f37b88d0ac766ef7b0c42c35967fcefe53fb826dbe87a34c1b7a0
+  ironwood_gallowsroot.glb   4a5e09949357204668029ab23adc69a43c4b4bfc3ba5fae81255a4633c5ca1e2
+  ironwood_gallowsroot.json  71e13f050779c7d2fa853e686ddc15af7337a4f019e76b35be675be007837b6a
+  ironwood_makeshift.glb   f1b798d4346833942958f84d62af8516d00006b5d3f407153c784a25e99ade6f
+  ironwood_makeshift.json  1d6f810e1ab8f5a4c391a44c719ccaeef28d4d504dcff374a56a3141ad381062
+
+IRONWOOD WARBAND LOOKS — SOURCE AND PROVENANCE
+
+The warband's eight faces, nine haircuts, four beards and its tintable skin,
+shirt and shorts surfaces are derived, reproducibly, from assets this repository
+already ships. Nothing is downloaded for them and nothing is modelled by hand:
+
+    python tools/prepare_warband_looks.py
+
+Inputs
+  assets/characters/ironwood_ranger.glb
+    head (Sphere.005_Retopology.004), brows (Face) and eyes (Face.001) meshes,
+    their skin weights and joint indices, the T_Superhero_Male_Normal and
+    T_Eye_* maps, and the T_Eye_Brown iris. The Ranger's own provenance above
+    applies: Quaternius Universal Base Characters, CC0 1.0 Universal.
+  assets/characters/armor/ironwood_naked_T_Superhero_Male_Dark.png
+  assets/characters/armor/ironwood_naked_Naked_Shirt_albedo.png
+  assets/characters/armor/ironwood_naked_Naked_Shorts_albedo.png
+    the naked set's skin, linen and twill atlases, from the same CC0 pack and
+    the same procedurally-rasterised cloth as the naked set above.
+
+Outputs and what was done to the inputs
+  assets/characters/warband/ironwood_faces.glb
+    eight variants, each an analytic warp of the union of the three head
+    meshes: jaw width, chin length and width, cheekbone spread, nose projection
+    and width, brow ridge, eye spacing, mouth width and lip volume. The warp is
+    windowed to the front of the face so the braincase, and therefore every
+    helmet and hood in the armour sets, keeps its authored dimensions. UVs,
+    joint indices and skin weights are the source's; the meshes bind to the live
+    Ranger skeleton at runtime by repointing their skin. No other geometry,
+    material or clip of the Ranger asset is touched.
+  assets/characters/warband/ironwood_hair.glb
+    original geometry authored by the tool: a short cut is a thin shell of the skull's own triangles,
+    wrapped flush on the head; the afro is the one lofted hair mass, from a crown
+    disc down to its own measured hairline and settled flush onto the skin, and a beard is a sheet over the jaw cut out by its own alpha
+    design - cheek line, arched moustache, open mouth, jawline bottom edge. All
+    of it is bound rigidly to the Ranger's `Head` joint.
+  assets/characters/warband/warband_skin_basecolor.png (2048)
+  assets/characters/warband/warband_skin_head_basecolor.png (1024)
+  assets/characters/warband/warband_shirt_basecolor.png
+  assets/characters/warband/warband_shorts_basecolor.png
+    "veiled" derivatives of the atlases above: each was converted to linear
+    light, divided by the mean of its brightest fifth (the flat lit surface),
+    partly desaturated so a pale character's blush does not survive every skin
+    tone, and re-encoded as sRGB. The artist's pores, knit, twill, grime and
+    folds survive; the hue does not, which is what lets one map serve eight skin
+    tones and eight dyed shirts through a single `albedo_color`.
+  assets/characters/warband/warband_hair_basecolor.png
+  assets/characters/warband/warband_beard_<style>.png
+    original maps generated analytically by the tool: a soft, painterly hair
+    albedo (no baked strands - at gameplay distance fine strands read as
+    scratches over the skull), and one RGBA mask per beard carrying its own
+    silhouette and mouth cut.
+  assets/characters/warband/warband_eye_<n>_basecolor.png
+    five recolours of the Ranger's authored brown iris; sclera, pupil and the
+    eye's own normal map are the source's.
+  assets/characters/warband/ironwood_warband_looks.json
+    the variant tables, the tone palettes (entry 0 of each cloth/skin palette is
+    the measured base colour of the shipped texture), the measured head
+    landmarks and the file budgets. `WarbandLooks` reads it at runtime, so the
+    tool output is the single source of truth for what a mercenary can wear.
+
+The inputs above are CC0 1.0 Universal material; these outputs — the faces, the
+hair and beard geometry, the veiled atlases and the eye recolours — are
+derivative works distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3). The
+CC0 inputs stay CC0, so the same derivatives can be rebuilt from them by anyone
+who obtains the packs; what this license governs is the files shipped here.
+Attribution to Quaternius remains courtesy, not obligation, and the pack's
+author is credited here anyway.

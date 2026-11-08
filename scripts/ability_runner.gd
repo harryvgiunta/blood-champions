@@ -1,0 +1,383 @@
+extends Node
+## Per-actor ability lifecycle: eligibility, stamina spend, cooldown, committed
+## travel, timed effect cues and the rig's ability animation.
+##
+## The runner never applies damage. A cue is a named beat in the definition
+## (`cues`); the scene that owns authority turns it into arrows, a blast or a
+## sector of damage. Item-granted definitions are resolved from the rig's
+## current hands, so equipping a different weapon changes the skill.
+
+signal activated(id: String, definition: Dictionary)
+signal cue(id: String, cue: String, index: int)
+signal finished(id: String)
+
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+
+var actor
+var rig
+var combat
+var base_speed := 5.5
+var active := false
+var active_id := ""
+var active_slot := -1
+var active_definition: Dictionary = {}
+var elapsed := 0.0
+var duration := 0.0
+var speed := 0.0
+var travel_seconds := 0.0
+var direction := Vector3.FORWARD
+## Bodies already struck during this activation. A travelling skill sweeps the
+## lane every tick and shares this set with its closing beat, so each body is
+## only ever hit once per activation.
+var active_victims: Dictionary = {}
+var cooldowns := PackedFloat32Array()
+var _cue_index := 0
+var _grant_ids: Array[String] = []
+
+
+func setup(owner_actor, owner_rig, owner_combat, walk_speed: float) -> void:
+	actor = owner_actor
+	rig = owner_rig
+	combat = owner_combat
+	base_speed = maxf(walk_speed, 0.1)
+	cooldowns.resize(AbilityRules.SLOT_COUNT)
+	cooldowns.fill(0.0)
+	_grant_ids.resize(AbilityRules.SLOT_COUNT)
+	_grant_ids.fill("")
+	_refresh_grants()
+
+
+func definition(slot: int) -> Dictionary:
+	return AbilityRules.definition_for(rig, slot)
+
+
+func blocker(slot: int = 0) -> String:
+	var definition := definition(slot)
+	if definition.is_empty():
+		return "That hand grants no skill."
+	return _blocker(definition, slot)
+
+
+func activate(slot: int = 0) -> Dictionary:
+	_refresh_grants()
+	var definition := definition(slot)
+	var reason := blocker(slot)
+	if not reason.is_empty():
+		return {"ok": false, "message": reason}
+	# A consumable is a key, not a skill: the body owns the channel (the clip,
+	# the wound, the heal) and the runner owns the key and its cooldown.
+	if definition.has("consume"):
+		return _activate_consumable(definition, slot)
+	# A blade skill or a committed dash needs an upright stance: cancel the
+	# crouch first and only spend the cost once the body can actually stand.
+	if AbilityRules.needs_standing(definition) and not _stand_before_melee():
+		return {"ok": false, "message": "Not enough headroom to stand for %s."
+			% str(definition.name).capitalize()}
+	var cost := float(definition.stamina_cost)
+	var facing := _facing(definition)
+	actor.stamina = maxf(0.0, float(actor.stamina) - cost)
+	if slot >= 0 and slot < cooldowns.size():
+		cooldowns[slot] = float(definition.cooldown) * AbilityRules.cooldown_scale(rig)
+	active = true
+	active_id = str(definition.id)
+	active_slot = slot
+	active_definition = definition
+	active_victims.clear()
+	elapsed = 0.0
+	duration = maxf(float(definition.duration), 0.01)
+	travel_seconds = clampf(float(definition.get("travel_seconds", definition.duration)), 0.0, duration)
+	speed = base_speed * maxf(float(definition.get("speed_scale", 0.0)), 0.0)
+	direction = facing
+	_cue_index = 0
+	# A timed body state (the energy shield) starts with the activation; the
+	# owner applies it so the reward and the bubble cannot disagree.
+	if actor != null and is_instance_valid(actor) and actor.has_method("start_ward"):
+		actor.start_ward(definition)
+	rig.begin_ability(definition, direction)
+	activated.emit(active_id, definition)
+	_emit_due_cues()
+	return {"ok": true, "definition": definition}
+
+
+## The bandage and the potion: the body starts its own channel and the key takes
+## the definition's cooldown. A refusal is the body's - a whole body, a stagger,
+## a body already binding a wound - and it costs neither stamina nor the key.
+func _activate_consumable(definition: Dictionary, slot: int) -> Dictionary:
+	var kind := str(definition.get("consume", ""))
+	if actor == null or not is_instance_valid(actor) or not actor.has_method("try_consume"):
+		return {"ok": false,
+			"message": "%s cannot be used here." % str(definition.name).capitalize()}
+	if not bool(actor.try_consume(kind)):
+		return {"ok": false, "message": _consume_refusal(definition)}
+	if slot >= 0 and slot < cooldowns.size():
+		cooldowns[slot] = float(definition.get("cooldown", 0.0))
+	return {"ok": true, "definition": definition}
+
+
+## Why the body would not take the piece: the one line the player can act on.
+func _consume_refusal(definition: Dictionary) -> String:
+	if float(actor.get("health")) >= float(actor.get("max_health")) - 0.001:
+		return "You are not wounded."
+	if str(actor.get("consume_kind")) != "":
+		return "Finish the %s first." % str(actor.get("consume_kind")).capitalize()
+	return "%s cannot be used right now." % str(definition.name).capitalize()
+
+
+## The line the skill is performed down. A travelling skill follows the live
+## crosshair, so the dash lands where the player is looking; everything else
+## keeps the heading the key was pressed from. The direction is locked for the
+## activation, so the committed step never curves with the mouse.
+func _facing(definition: Dictionary) -> Vector3:
+	var facing: Vector3 = -rig.global_basis.z
+	facing.y = 0.0
+	if AbilityRules.follows_aim(definition) and is_instance_valid(combat):
+		var offset: Vector3 = combat.aim_point - rig.global_position
+		offset.y = 0.0
+		if offset.length_squared() > 0.000001:
+			facing = offset
+	if facing.length_squared() < 0.000001:
+		return Vector3.FORWARD
+	return facing.normalized()
+
+
+## A skill that cannot be performed from a crouch stands the owner up first. The rig drops its own crouch blend in `begin_ability`;
+## the controller owns the capsule, the camera height and the crouch intent.
+func _stand_before_melee() -> bool:
+	if is_instance_valid(combat) and is_instance_valid(combat.cover):
+		return combat.cover.force_stand()
+	return true
+
+
+func _blocker(definition: Dictionary, slot: int) -> String:
+	var ability_name := str(definition.name).capitalize()
+	if active:
+		return "Already using %s." % ability_name
+	if actor.get("alive") == false:
+		return "You are down."
+	if is_instance_valid(combat) and not combat.grounded:
+		return "Land before using %s." % ability_name
+	if is_instance_valid(combat) and combat.stagger_time > 0.0:
+		return "Recover your footing before using %s." % ability_name
+	if is_instance_valid(combat) and combat.blocking:
+		return "Drop your guard before using %s." % ability_name
+	if is_instance_valid(combat) and is_instance_valid(combat.cover) and combat.cover.active:
+		return "Leave cover before using %s." % ability_name
+	if float(rig._roll_progress) >= 0.0 or float(rig.slide_progress) >= 0.0 \
+			or float(rig._step_progress) >= 0.0:
+		return "Finish the movement before using %s." % ability_name
+	if str(rig.phase) != "READY" or rig.is_consuming():
+		return "Finish the current action before using %s." % ability_name
+	if slot >= 0 and slot < cooldowns.size() and cooldowns[slot] > 0.0:
+		return "%s ready in %.1f s." % [ability_name, cooldowns[slot]]
+	if float(actor.stamina) < float(definition.stamina_cost):
+		return "Not enough stamina for %s." % ability_name
+	return ""
+
+
+func advance(delta: float) -> void:
+	for index in cooldowns.size():
+		cooldowns[index] = maxf(0.0, cooldowns[index] - delta)
+	_refresh_grants()
+	if not active:
+		return
+	if not is_instance_valid(rig) or not rig.is_ability() \
+			or (is_instance_valid(combat) and combat.stagger_time > 0.0) \
+			or actor.get("alive") == false:
+		_finish()
+		return
+	elapsed += delta
+	_emit_due_cues()
+	if elapsed >= duration:
+		if rig.is_ability():
+			rig.cancel_ability()
+		_finish()
+
+
+## A weapon swap cancels the trailing cooldown of the weapon being put away.
+## That keeps a testing session able to fire every skill back to back; the
+## cost prevents swap-spam from being a free damage loop. A skill the player
+## merely moved to another key keeps its timer: the cooldown belongs to the
+## skill, not to the key, so reordering the row is never a way to shed one.
+func _refresh_grants() -> void:
+	if not is_instance_valid(rig):
+		return
+	var grants := AbilityRules.granted(rig)
+	var moved := false
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		if str(grants[slot].get("id", "")) != _grant_ids[slot]:
+			moved = true
+			break
+	if not moved:
+		return
+	# Where each skill's timer stood on the key it was on, read before the row
+	# moves. A skill new to the row has none and starts ready.
+	var timers := {}
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		if not _grant_ids[slot].is_empty() and slot < cooldowns.size():
+			timers[_grant_ids[slot]] = cooldowns[slot]
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		var id := str(grants[slot].get("id", ""))
+		if id == _grant_ids[slot]:
+			continue
+		_grant_ids[slot] = id
+		if slot < cooldowns.size():
+			cooldowns[slot] = float(timers.get(id, 0.0))
+
+
+func _emit_due_cues() -> void:
+	var cues: Array = active_definition.get("cues", [])
+	while _cue_index < cues.size() and elapsed >= float(cues[_cue_index].get("at", 0.0)):
+		var beat: Dictionary = cues[_cue_index]
+		cue.emit(active_id, str(beat.get("cue", "")), _cue_index)
+		_cue_index += 1
+
+
+func cancel() -> void:
+	if not active:
+		return
+	if is_instance_valid(rig) and rig.is_ability():
+		rig.cancel_ability()
+	_finish()
+
+
+func reset() -> void:
+	active = false
+	active_id = ""
+	active_slot = -1
+	active_definition = {}
+	active_victims.clear()
+	elapsed = 0.0
+	duration = 0.0
+	speed = 0.0
+	travel_seconds = 0.0
+	_cue_index = 0
+	cooldowns.fill(0.0)
+	if is_instance_valid(rig) and rig.is_ability():
+		rig.cancel_ability()
+
+
+func velocity() -> Vector3:
+	return direction * speed if active and elapsed <= travel_seconds else Vector3.ZERO
+
+
+## Melee skills keep the owner's walking input; ranged casts, the unarmed
+## charge and the backstab blink plant the feet for the duration. Controllers
+## ask this instead of `active` before they drop the movement intent.
+func allows_movement() -> bool:
+	return active and bool(active_definition.get("move", false))
+
+
+## Every hotbar slot in one pass. The HUD asks once a frame instead of walking
+## the whole worn kit once per tile.
+func hud_states() -> Array:
+	var definitions := AbilityRules.granted(rig)
+	var out: Array = []
+	for slot in definitions.size():
+		var definition: Dictionary = definitions[slot]
+		out.append({} if definition.is_empty() else _hud_state(definition, slot))
+	return out
+
+
+func _hud_state(definition: Dictionary, slot: int) -> Dictionary:
+	var cost := float(definition.stamina_cost)
+	# A consumable has no runner activation of its own: the channel lives on the
+	# body, so the key reads active while that body is binding the same wound.
+	var running := active and active_slot == slot
+	if not running and definition.has("consume") and is_instance_valid(actor) \
+			and str(actor.get("consume_kind")) == str(definition.get("consume")):
+		running = true
+	return {
+		"id": str(definition.id),
+		"active": running,
+		"cooldown": cooldowns[slot] if slot < cooldowns.size() else 0.0,
+		"stamina_cost": cost,
+		"affordable": float(actor.stamina) >= cost if is_instance_valid(actor) else true,
+	}
+
+
+## Wire order of the replicated ability state; values only, no key strings.
+const SNAPSHOT_KEYS := ["active","slot","ability","time","duration","cooldowns","heading"]
+
+func pack_snapshot() -> Array:
+	# Same values snapshot() builds (the ability index is computed, not a
+	# property), so the packed array cannot drift from the dictionary.
+	var state := snapshot()
+	var packed: Array = []
+	packed.resize(SNAPSHOT_KEYS.size())
+	for index in SNAPSHOT_KEYS.size():
+		packed[index] = state.get(SNAPSHOT_KEYS[index])
+	return packed
+
+static func unpack_snapshot(packed: Array) -> Dictionary:
+	var state := {}
+	for index in mini(SNAPSHOT_KEYS.size(),packed.size()):
+		state[SNAPSHOT_KEYS[index]] = packed[index]
+	return state
+
+func snapshot() -> Dictionary:
+	var index := AbilityRules.index_of(active_id) if active else -1
+	return {
+		"active": active,
+		"slot": active_slot,
+		"ability": index,
+		"time": elapsed,
+		"duration": duration,
+		"cooldowns": Array(cooldowns),
+		# The committed heading is what lets a predicting peer integrate the
+		# same dash instead of being dragged along by corrections.
+		"heading": direction,
+	}
+
+
+func apply_snapshot(state: Variant) -> void:
+	if typeof(state) == TYPE_ARRAY:
+		state = unpack_snapshot(state)
+	active = bool(state.get("active", false))
+	active_slot = int(state.get("slot", -1))
+	active_id = ""
+	active_definition = {}
+	if active:
+		var index := int(state.get("ability", -1))
+		if index >= 0:
+			active_definition = AbilityRules.by_index(index)
+			active_id = str(active_definition.get("id", ""))
+	elapsed = float(state.get("time", 0.0))
+	duration = float(state.get("duration", 0.0))
+	if active and not active_definition.is_empty():
+		# Rebuild the travel window a replica never computed itself: the same
+		# speed, distance window and heading the authority is integrating.
+		travel_seconds = clampf(float(active_definition.get("travel_seconds", duration)), 0.0, duration)
+		speed = base_speed * maxf(float(active_definition.get("speed_scale", 0.0)), 0.0)
+		var heading: Variant = state.get("heading", null)
+		if typeof(heading) == TYPE_VECTOR3 and Vector3(heading).length_squared() > 0.000001:
+			var flat := Vector3(heading.x, 0.0, heading.z)
+			if flat.length_squared() > 0.000001:
+				direction = flat.normalized()
+	# A replica must not replay cues the host already fired before the first
+	# snapshot of this activation arrived.
+	_cue_index = 0
+	if active:
+		var cues: Array = active_definition.get("cues", [])
+		while _cue_index < cues.size() and elapsed >= float(cues[_cue_index].get("at", 0.0)):
+			_cue_index += 1
+	var values: Variant = state.get("cooldowns", [])
+	if values is Array:
+		for index in mini(cooldowns.size(), values.size()):
+			cooldowns[index] = float(values[index])
+
+
+func _finish() -> void:
+	if not active:
+		return
+	var ended := active_id
+	active = false
+	active_id = ""
+	active_slot = -1
+	active_definition = {}
+	active_victims.clear()
+	elapsed = 0.0
+	duration = 0.0
+	speed = 0.0
+	travel_seconds = 0.0
+	_cue_index = 0
+	finished.emit(ended)

@@ -1,0 +1,588 @@
+{
+  "asset": "ranger_armor.glb",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 65,
+  "forward": [
+    0,
+    0,
+    1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_height": 1.8690080093219876,
+  "palms": {
+    "left": [
+      0.004087315406650305,
+      0.05361263081431389,
+      -0.002925032051280141
+    ],
+    "right": [
+      -0.004087434615939856,
+      0.05361264944076538,
+      -0.002925018547102809
+    ]
+  },
+  "palm_measurement": "Midpoint of wrist and mean index/middle/ring/pinky proximal knuckles in bone-local coordinates",
+  "bow_anchor": {
+    "bone": "Head",
+    "position": [
+      -0.08079380542039871,
+      0.048218902200460434,
+      0.06087256968021393
+    ],
+    "measurement": "Right cheek surface near the jaw, offset 30 mm outward for palm clearance"
+  },
+  "sword_grip": {
+    "position": [
+      -0.014369714073836803,
+      0.052676260471343994,
+      0.002630072645843029
+    ],
+    "rotation": [
+      0.7074536681175232,
+      -0.7064352631568909,
+      -0.021308954805135727,
+      0.0021170289255678654
+    ]
+  },
+  "sword_axes": {
+    "blade": [
+      0,
+      0,
+      -1
+    ],
+    "handle": [
+      0,
+      0,
+      1
+    ],
+    "thickness": [
+      0,
+      1,
+      0
+    ]
+  },
+  "clips": {
+    "overhead": {
+      "name": "Sword_Overhead",
+      "duration": 1.2666666666666666,
+      "strike_start": 0.6833333333333333,
+      "strike_end": 0.9333333333333333
+    },
+    "overhead_one_hand": {
+      "name": "Sword_Overhead_OneHand",
+      "duration": 2.0833333333333335,
+      "strike_start": 0.25,
+      "strike_end": 0.5
+    },
+    "stab": {
+      "name": "Dagger_Stab",
+      "duration": 0.5,
+      "strike_start": 0.16666666666666666,
+      "strike_end": 0.2833333333333333
+    },
+    "block_one_hand": {
+      "name": "Sword_Block_Loop_OneHand",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "grip": "one_hand",
+      "frames": 120
+    },
+    "block_two_hand": {
+      "name": "Sword_Block_Loop",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "grip": "two_hand",
+      "frames": 120
+    },
+    "crouch_idle": {
+      "name": "Crouch_Idle_Loop",
+      "duration": 2.933333333333333,
+      "loop": true,
+      "pelvis_drop": 0.4039465266432466,
+      "pelvis_drop_range": [
+        0.3998904824256897,
+        0.40791958570480347
+      ],
+      "foot_fore_aft_excursion": {
+        "l": 0.0008886456489562988,
+        "r": 0.015314936637878418
+      },
+      "measurement": "Metres, mean/min/max pelvis drop relative to Idle_Loop frame 0; ankle +Z excursion is not full-cycle stride distance"
+    },
+    "crouch_forward": {
+      "name": "Crouch_Fwd_Loop",
+      "duration": 2,
+      "loop": true,
+      "pelvis_drop": 0.37792434943609,
+      "pelvis_drop_range": [
+        0.3522830605506897,
+        0.4128049910068512
+      ],
+      "foot_fore_aft_excursion": {
+        "l": 0.8206175863742828,
+        "r": 0.8062260001897812
+      },
+      "measurement": "Metres, mean/min/max pelvis drop relative to Idle_Loop frame 0; ankle +Z excursion is not full-cycle stride distance",
+      "nominal_speed": 0.7453060895204544,
+      "stride": 1.4906121790409088,
+      "stride_measurement": "Estimated full-cycle travel: median backwards ankle speed within 25 mm of lowest contact, multiplied by cycle duration"
+    },
+    "cover_left": {
+      "name": "Cover_Lean_Left",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        1,
+        0,
+        0
+      ],
+      "torso_degrees": 18.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
+    },
+    "cover_right": {
+      "name": "Cover_Lean_Right",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        -1,
+        0,
+        0
+      ],
+      "torso_degrees": 18.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
+    },
+    "cover_top": {
+      "name": "Cover_Lean_Top",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        0,
+        0,
+        1
+      ],
+      "torso_degrees": 14.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
+    },
+    "bandage": {
+      "name": "Bandage_Wrap",
+      "duration": 3,
+      "loop": false,
+      "use_seconds": 3.0,
+      "heal": 35.0,
+      "heal_seconds": 3.0
+    },
+    "potion": {
+      "name": "Potion_Drink",
+      "duration": 0.5,
+      "loop": false,
+      "use_seconds": 0.5,
+      "heal": 50.0
+    }
+  },
+  "animations": {
+    "Idle_Loop": 2.5,
+    "Walk_Loop": 1.3333333333333333,
+    "Jog_Fwd_Loop": 0.9333333333333333,
+    "Sprint_Loop": 0.6666666666666666,
+    "Jump_Start": 1.3333333333333333,
+    "Jump_Loop": 2.5,
+    "Jump_Land": 1.2666666666666666,
+    "Roll": 1.4666666666666666,
+    "Crouch_Idle_Loop": 2.933333333333333,
+    "Crouch_Fwd_Loop": 2,
+    "Cover_Lean_Left": 0.23999999463558197,
+    "Cover_Lean_Right": 0.23999999463558197,
+    "Cover_Lean_Top": 0.23999999463558197,
+    "Sword_Overhead_OneHand": 2.0833333333333335,
+    "Sword_Idle_OneHand": 1.6666666666666667,
+    "Sword_Idle": 2.4,
+    "Sword_Overhead": 1.2666666666666666,
+    "Dagger_Stab": 0.5,
+    "Sword_Block_Loop_OneHand": 1.9833333333333334,
+    "Sword_Block_Loop": 1.9833333333333334,
+    "Bow_Barrage": 1.15,
+    "Bow_Triple_Volley": 1.0,
+    "Bow_Piercing_Shot": 1.25,
+    "Sword_Double_Slash": 1.0,
+    "Sword_Lunge_Thrust": 0.95,
+    "Sword_Spin_Slash": 0.3166666667,
+    "Staff_Fireball_Cast": 1.2,
+    "Staff_Bone_Spear_Cast": 1.15,
+    "Shield_Bash": 0.8,
+    "Shield_Charge": 1.15,
+    "Shield_Ground_Slam": 1.1,
+    "Dagger_Backstab": 0.9,
+    "Sword_Three_Strike": 0.8
+  },
+  "authoring_fps": 60,
+  "gres_height_scale": 0.5092428046251969,
+  "armor": {
+    "source": "tools/character_armor.py",
+    "slots": [
+      "head",
+      "chest",
+      "hands",
+      "legs",
+      "feet"
+    ],
+    "sets": [
+      "leather",
+      "mail",
+      "plate",
+      "cloth"
+    ],
+    "extra": {
+      "leather": {
+        "hands": [
+          "Armor_Leather_Hands"
+        ]
+      }
+    },
+    "generated": {
+      "plate": {
+        "head": [
+          "Armor_Plate_Head"
+        ],
+        "chest": [
+          "Armor_Plate_Chest"
+        ],
+        "hands": [
+          "Armor_Plate_Hands"
+        ],
+        "legs": [
+          "Armor_Plate_Legs"
+        ],
+        "feet": [
+          "Armor_Plate_Feet"
+        ]
+      },
+      "mail": {
+        "head": [
+          "Armor_Mail_Head"
+        ],
+        "chest": [
+          "Armor_Mail_Chest"
+        ],
+        "hands": [
+          "Armor_Mail_Hands"
+        ],
+        "legs": [
+          "Armor_Mail_Legs"
+        ],
+        "feet": [
+          "Armor_Mail_Feet"
+        ]
+      },
+      "cloth": {
+        "head": [
+          "Armor_Cloth_Head"
+        ],
+        "chest": [
+          "Armor_Cloth_Chest"
+        ],
+        "hands": [
+          "Armor_Cloth_Hands"
+        ],
+        "legs": [
+          "Armor_Cloth_Legs"
+        ],
+        "feet": [
+          "Armor_Cloth_Feet"
+        ]
+      },
+      "leather": {
+        "hands": [
+          "Armor_Leather_Hands"
+        ]
+      }
+    }
+  },
+  "support_clearance": {
+    "Sword_Idle": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        30.0,
+        70.0
+      ],
+      "handle_slide": [
+        0.12,
+        0.12000000000000001
+      ],
+      "clavicle_depression_degrees": [
+        0.0,
+        0.0
+      ],
+      "clavicle_protraction_degrees": [
+        0.0,
+        0.0
+      ]
+    },
+    "Sword_Overhead": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        10.0,
+        79.44444444444444
+      ],
+      "handle_slide": [
+        0.08,
+        0.12000000000000001
+      ],
+      "clavicle_depression_degrees": [
+        -20.0,
+        0.0
+      ],
+      "clavicle_protraction_degrees": [
+        0.0,
+        0.0
+      ]
+    },
+    "Sword_Block_Loop": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        30.0,
+        35.0
+      ],
+      "handle_slide": [
+        0.11,
+        0.11
+      ],
+      "clavicle_depression_degrees": [
+        -10.0,
+        -10.0
+      ],
+      "clavicle_protraction_degrees": [
+        -20.0,
+        -20.0
+      ]
+    }
+  },
+  "cover_authoring": {
+    "reference": "Identical Idle_Loop frame 0 for all lean clips; additive world-space bone deltas",
+    "axes": "Asset Y-up/+Z-forward: left +X, right -X, top +Z; Blender (x,y,z) exports as (x,z,-y)",
+    "rotation_axes": "Left -Z, right +Z, top +X in asset space; pelvis -3 degrees, spine chain 50/80/100 percent of torso_degrees, neck -2 and head -5 degrees relative to chest",
+    "contact": "Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral",
+    "timing": "Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping"
+  },
+  "stab_authoring": {
+    "name": "Dagger_Stab",
+    "duration": 0.5,
+    "frames": 31,
+    "loop": false,
+    "phases": "chamber 0.00-0.15 s, forward drive 0.15-0.25 s, extension 0.25-0.31 s, recovery 0.31-0.50 s",
+    "contact": "Fixed-length planted feet; right hand socket rolled so the blade leads the fist; right-hand fingers use the authored sword grip",
+    "runtime": "The clip animates only the character skeleton; the dagger is a normal runtime socketed weapon"
+  },
+  "block_authoring": {
+    "one_hand": {
+      "name": "Sword_Block_Loop_OneHand",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "blade_direction": [
+        0.86,
+        -0.2,
+        0.47
+      ],
+      "wrist_target": [
+        -0.18,
+        -0.32,
+        1.24
+      ],
+      "elbow_hint": [
+        -0.46,
+        -0.02,
+        1.08
+      ],
+      "frames": 120
+    },
+    "two_hand": {
+      "name": "Sword_Block_Loop",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "blade_direction": [
+        0.94,
+        -0.12,
+        0.32
+      ],
+      "wrist_target": [
+        -0.06,
+        -0.31,
+        1.18
+      ],
+      "elbow_hint": [
+        -0.38,
+        -0.08,
+        1.05
+      ],
+      "frames": 120
+    },
+    "axes": "Armature-space targets; Blender +X = character left, -Y = forward, +Z = up",
+    "contact": "Fixed-length planted legs; pelvis breathes \u00b13 mm and spine \u00b10.7 degrees over 120 samples",
+    "support": "Two-hand guard keeps the left palm on the actual SwordSocket handle; one-hand guard leaves the offhand free",
+    "runtime": "The clips animate only the character skeleton; the sword is the normal runtime socketed weapon"
+  },
+  "support_clearance_validation": {
+    "sample_hz": 240,
+    "samples": 1911,
+    "forearm_radius": 0.03,
+    "radial_axes": 2,
+    "maximum_support_hilt_error": 0.0018235577093374286,
+    "validated_clips": [
+      "Sword_Idle",
+      "Sword_Overhead",
+      "Sword_Block_Loop",
+      "Sword_Block_Loop_OneHand"
+    ],
+    "guard_blade_lengths": {
+      "Sword_Block_Loop": 1.4,
+      "Sword_Block_Loop_OneHand": 1.05
+    },
+    "transitions": [
+      "idle loop",
+      "guard to windup",
+      "recovery to guard"
+    ]
+  },
+  "consumable_authoring": {
+    "authoring_fps": 60,
+    "bandage_frames": 180,
+    "bandage_description": "Left forearm raised across the sternum; right hand makes two wrapping loops around it.",
+    "potion_description": "Right hand raises a bottle to the mouth, hand and head tip for the drink, then lower."
+  },
+  "ability_authoring": {
+    "authoring_fps": 60,
+    "source": "tools/prepare_ability_animations.py",
+    "merge": "tools/glb_animation_merge.py copies only these clips into the shipped GLB",
+    "clips": {
+      "Bow_Barrage": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Bow_Triple_Volley": {
+        "duration": 1.0,
+        "frames": 61,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Bow_Piercing_Shot": {
+        "duration": 1.25,
+        "frames": 76,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Sword_Double_Slash": {
+        "duration": 1.0,
+        "frames": 61,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Sword_Lunge_Thrust": {
+        "duration": 0.95,
+        "frames": 58,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Sword_Spin_Slash": {
+        "duration": 0.3166666667,
+        "frames": 20,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Sword_Three_Strike": {
+        "duration": 0.8,
+        "frames": 49,
+        "weapon": "dual",
+        "two_handed": false,
+        "proxy": "sword"
+      },
+      "Dagger_Backstab": {
+        "duration": 0.9,
+        "frames": 55,
+        "weapon": "dagger",
+        "two_handed": false,
+        "proxy": "dagger"
+      },
+      "Staff_Fireball_Cast": {
+        "duration": 1.2,
+        "frames": 73,
+        "weapon": "staff",
+        "two_handed": true,
+        "proxy": "staff"
+      },
+      "Staff_Bone_Spear_Cast": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "staff",
+        "two_handed": true,
+        "proxy": "staff"
+      },
+      "Shield_Bash": {
+        "duration": 0.8,
+        "frames": 49,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      },
+      "Shield_Charge": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      },
+      "Shield_Ground_Slam": {
+        "duration": 1.1,
+        "frames": 67,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      }
+    },
+    "durations": {
+      "Bow_Barrage": 1.15,
+      "Bow_Triple_Volley": 1.0,
+      "Bow_Piercing_Shot": 1.25,
+      "Sword_Double_Slash": 1.0,
+      "Sword_Lunge_Thrust": 0.95,
+      "Sword_Spin_Slash": 0.3166666667,
+      "Sword_Three_Strike": 0.8,
+      "Dagger_Backstab": 0.9,
+      "Staff_Fireball_Cast": 1.2,
+      "Staff_Bone_Spear_Cast": 1.15,
+      "Shield_Bash": 0.8,
+      "Shield_Charge": 1.15,
+      "Shield_Ground_Slam": 1.1
+    },
+    "runtime_overrides": {
+      "bow": "Both bow arms and the bow aim are solved procedurally at runtime from the draw curve, and an archery stance is planted. The authored bow-arm poses are presentation only; the lower body, pelvis and spine rhythm stay authored.",
+      "sword": "The blade follows hand_r * sword_grip; a hand basis of aim * inverse(sword_grip) points the blade at the authored world direction. Greatsword and staff are two-handed: the support (left) hand is authored onto the grip and is not re-solved during abilities.",
+      "staff": "The staff is socketed on hand_r and runs along its local -Z from the grip; the support hand is authored onto the shaft 0.32 m along the handle.",
+      "shield": "The shield is carried on the left forearm automatically; the left arm is authored to raise, punch or slam the shield face.",
+      "spin_slash": "The runtime adds a full 360 degree model turn over Sword_Spin_Slash (blade trail starts at 0.20, damage at 0.50). The clip authors only a fast low wide pivot with the greatsword extended horizontally from 0.15 to 0.85 of the clip, compact feet on the floor and a small weight shift, never a full turn or a stride.",
+      "lunge_thrust": "The controller travels 1.78 m over the first 0.24 s. The lead-foot step, pelvis travel and weight transfer are authored inside 0.02-0.24 s, the level thrust lands at 0.42 and holds, then the clip recovers; both hands stay on the hilt.",
+      "dagger_backstab": "The actor is teleported behind the target at 0.20. Frames 0-0.20 are a gathering crouch and a compressed blink tucked low; 0.30-0.55 is the arrival plunge straight down-forward with the off hand guarding, impact at 0.50, recovery by 0.90. No forward dash is authored.",
+      "three_strike_sweeps": "Three wide sweeps with impacts at 0.20, 0.50 and 0.80 of the clip: the right blade across, the left blade back, then both blades driven in together. Both arms are authored (no hilt support grip); `three_strike` sets `offhand_authored` so the rig keeps the authored off arm on a dual pair instead of re-solving it to the carry pose.",
+      "blend": "Every clip starts and ends at the Idle_Loop frame-0 pose so the 0.12 s runtime blend does not pop. The root bone is never moved.",
+      "feet": "Legs are authored as ankle targets; the runtime re-solves knees to terrain. Ankles stay at their shipped 84-86 mm height and only leave it for deliberate step lifts.",
+      "barrage_beats": "Six draw-release pulses peaking at 0.22, 0.34, 0.46, 0.58, 0.70 and 0.82 s with visible weight pulses and small recoils.",
+      "volley_beats": "One draw releasing at 0.48 s.",
+      "piercing_beats": "A long heavy draw releasing at 0.72 s."
+    },
+    "qa_renders": ".runtime/ability_anim/<clip>_sheet.png (t=0, 25, 50, 75, 100 %), <clip>_side_sheet.png (right-side profile) and <clip>_strip.png for the reworked sword/dagger clips"
+  }
+}

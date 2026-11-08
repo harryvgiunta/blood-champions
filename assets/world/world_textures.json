@@ -1,0 +1,416 @@
+{
+ "generator": "tools/world_textures.py",
+ "seed": 20261023,
+ "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
+ "file_count": 45,
+ "total_bytes": 17289063,
+ "textures": [
+  {
+   "id": "sky_frontier",
+   "file": "sky_frontier.png",
+   "size": [
+    4096,
+    2048
+   ],
+   "channels": 3,
+   "tiling": "u",
+   "n_version": null,
+   "kind": "sky",
+   "description": "Photoreal midday equirectangular sky: Rayleigh blue zenith, real sun disc aligned to the key light, perspective cumulus deck with self-shadowing, thin cirrus, aerial horizon haze; seamless at u."
+  },
+  {
+   "id": "bark_oak",
+   "file": "bark_oak.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_oak_n.png",
+   "kind": "bark",
+   "description": "Warm grey-brown oak bark with deep vertical fissures and knots."
+  },
+  {
+   "id": "bark_pine",
+   "file": "bark_pine.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_pine_n.png",
+   "kind": "bark",
+   "description": "Reddish-brown pine bark in flaking plates with dark grooves."
+  },
+  {
+   "id": "bark_birch",
+   "file": "bark_birch.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_birch_n.png",
+   "kind": "bark",
+   "description": "Off-white birch bark, horizontal dark scars, sparse lenticels."
+  },
+  {
+   "id": "bark_dead",
+   "file": "bark_dead.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_dead_n.png",
+   "kind": "bark",
+   "description": "Pale weathered dead-wood bark, cracked grey splits."
+  },
+  {
+   "id": "leaves_broadleaf",
+   "file": "leaves_broadleaf.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 oak/broadleaf cluster cards (green), flat mid-tone, vein detail."
+  },
+  {
+   "id": "leaves_amber",
+   "file": "leaves_amber.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 autumn rowan cluster cards in gold and orange."
+  },
+  {
+   "id": "leaves_birch",
+   "file": "leaves_birch.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 silver-birch twig cards with small light-green leaves."
+  },
+  {
+   "id": "needles_pine",
+   "file": "needles_pine.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 pine needle fan sprigs on short branches."
+  },
+  {
+   "id": "grass_meadow",
+   "file": "grass_meadow.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "2x2 soft grass tufts: 70-130 curved, tapering blades fanned from a rooted cluster, base-dark to tip-light, some straw blades and seed heads; pale and desaturated (tint friendly)."
+  },
+  {
+   "id": "flowers",
+   "file": "flowers.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "4x2 wildflower cards: daisy, buttercup, poppy, cornflower, campion, yarrow, marigold, violet."
+  },
+  {
+   "id": "fern",
+   "file": "fern.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "2x2 fern fronds with serrated pinnae."
+  },
+  {
+   "id": "terrain_grass",
+   "file": "terrain_grass.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_grass_n.png",
+   "kind": "terrain",
+   "description": "Dense lawn/forest grass seen from above (4 m tile): layered blades over dark gaps, light tips, dry straw patches, clover. RGB albedo, A = linear height (blade tips high)."
+  },
+  {
+   "id": "terrain_litter",
+   "file": "terrain_litter.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_litter_n.png",
+   "kind": "terrain",
+   "description": "Forest-floor litter (3.2 m tile): dark humus, fallen broadleaf leaves with midribs, pine needles, twigs, moss cushions. RGB albedo, A = linear height (leaves/twigs high, humus low)."
+  },
+  {
+   "id": "terrain_dirt",
+   "file": "terrain_dirt.png",
+   "size": [
+    1024,
+    1024
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_dirt_n.png",
+   "kind": "terrain",
+   "description": "Packed trail dirt (5 m tile): embedded gravel, hairline cracks, twigs and dry/damp patches. RGB albedo, A = linear height (domed stones high, cracks sunken); 512 normal map.",
+   "n_size": [
+    512,
+    512
+   ]
+  },
+  {
+   "id": "terrain_rock",
+   "file": "terrain_rock.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_rock_n.png",
+   "kind": "terrain",
+   "description": "Scree and fractured rock (4 m tile): angular plates and chips in grit-filled joints, moss. RGB albedo, A = linear height (plates high, joints low)."
+  },
+  {
+   "id": "terrain_noise",
+   "file": "terrain_noise.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "LINEAR DATA, not colour: four independent tileable fBm channels stretched to 0..1, mean 0.5. R broad (3 cells), G medium (6), B fine ridged/clumpy (17), A medium-broad (4)."
+  },
+  {
+   "id": "terrain_macro",
+   "file": "terrain_macro.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "Low-frequency grey-green mottling for macro terrain variation."
+  },
+  {
+   "id": "rock",
+   "file": "rock.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "rock_n.png",
+   "kind": "prop",
+   "description": "Seamless jointed rock face with moss and lichen: carved stonework, dungeon walls and prop blocks. Scattered boulders use 'granite'."
+  },
+  {
+   "id": "wood_planks",
+   "file": "wood_planks.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Warm horizontal timber planks with staggered butt joints."
+  },
+  {
+   "id": "timber",
+   "file": "timber.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Dark aged structural timber with cracks and iron pegs."
+  },
+  {
+   "id": "plaster",
+   "file": "plaster.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Warm lime plaster with patchy tone, hairline cracks and grit."
+  },
+  {
+   "id": "roof_shingles",
+   "file": "roof_shingles.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Weathered wooden roof shingles in staggered rows with moss."
+  },
+  {
+   "id": "stone_blocks",
+   "file": "stone_blocks.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Ashlar stone block coursing with mortar joints and pits."
+  },
+  {
+   "id": "thatch",
+   "file": "thatch.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "thatch_n.png",
+   "kind": "building",
+   "description": "Dry reed thatch in tied courses with straw strands and cord bindings."
+  },
+  {
+   "id": "hide",
+   "file": "hide.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "hide_n.png",
+   "kind": "building",
+   "description": "Stretched hair-side hide, mottled brown with sinew-stitched seams."
+  },
+  {
+   "id": "bone",
+   "file": "bone.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bone_n.png",
+   "kind": "prop",
+   "description": "Weathered animal bone: ivory field, hairline crazing and grime."
+  },
+  {
+   "id": "wattle",
+   "file": "wattle.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "wattle_n.png",
+   "kind": "building",
+   "description": "Woven withy panel: upright rods laced through horizontal binders."
+  },
+  {
+   "id": "granite",
+   "file": "granite.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "granite_n.png",
+   "kind": "stone",
+   "description": "Natural grey granite for scattered boulders: quartz and feldspar speckle over tonal mottling, weathered veins, moss in the cracks. No coursing - carved stone uses the 'rock' surface."
+  },
+  {
+   "id": "flame",
+   "file": "flame.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "effect",
+   "description": "2x2 flame tongue cards: orange body, yellow mid, hot core, soft tips."
+  },
+  {
+   "id": "water_normal",
+   "file": "water_normal.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "effect",
+   "description": "Tileable animated ripple normal map (OpenGL +Y up)."
+  }
+ ]
+}

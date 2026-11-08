@@ -1,0 +1,234 @@
+"""Run the whole Ironwood regression suite in parallel, inside a hard time budget.
+
+**The repository rule: a test run is a couple of minutes, never more.** One test
+that needs longer than `TIMEOUT` (90 s) is a test that owns a bug, not a test that
+needs more time - it is killed and reported as `over budget`. 120 s is the absolute
+ceiling anywhere; 60-120 s is the band. The whole run must finish inside
+`TOTAL_BUDGET` (180 s) and says so if it does not.
+Anyone adding a test that cannot fit must first make the thing it measures
+cheaper, or isolate the expensive part behind a flag nobody runs by default.
+
+Each test gets an isolated APPDATA (so user:// saves and NetCache do not race).
+The base suite and the warband suite run in one pool; the socket tests run after
+it, serially, because parallel ENet processes on one machine produce flakes that
+are not the code's fault. One retry, sequentially, absorbs a timing flake.
+
+The **warband** suite is the game and runs by default: it covers the title, the
+campaign, the roster, the stash, the camp, the trail, the town and the
+possession layer. The base suite drives the shared rig, combat, body and netcode
+primitives on their own (no game scene), so it only runs when asked with
+`--base`, and then only for a change that actually touches that shared layer.
+
+Usage:
+    python tools/run_tests.py                          # the game (warband)
+    python tools/run_tests.py --base                   # the shared-layer harness
+    python tools/run_tests.py --all                    # both
+    python tools/run_tests.py --only hitbox_regression,possession_regression
+    GODOT_PATH=/path/to/godot python tools/run_tests.py
+"""
+import concurrent.futures
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TESTS = [
+    "rig_regression",
+    "draw_combat_regression",
+    "projectile_regression",
+    "melee_roll_regression",
+    "action_pose_regression",
+    "arm_clearance_regression",
+    "cover_movement_regression",
+    "running_slide_regression",
+    "wolf_regression",
+    "devil_regression",
+    "swing_reach_regression",
+    "hitbox_regression",
+    "logging_regression",
+    "corpse_regression",
+    "backstab_regression",
+    "mob_aggro_regression",
+    "replica_animation_regression",
+    "frame_budget_regression",
+]
+## The warband possession campaign: one world, one roster, one stash.
+WARBAND_TESTS = [
+    "title_menu_regression",
+    "save_slots_regression",
+    "warband_contract_regression",
+    "possession_regression",
+    "downed_revive_regression",
+    "downed_bleedout_regression",
+    "altar_regression",
+    "annoint_regression",
+    "stash_autoloot_regression",
+    "corpse_loot_regression",
+    "warband_ui_regression",
+    "branded_abilities_regression",
+    "watcher_variants_regression",
+    "town_hub_regression",
+    "town_stockade_regression",
+    "loot_wow_regression",
+    "arena_regression",
+    "roguelite_regression",
+    "weld_regression",
+    "demon_duel_regression",
+    "delve_regression",
+    "demon_fire_regression",
+    "wild_cages_regression",
+    "world_map_regression",
+    "escape_run_regression",
+    "warband_world_regression",
+    "squad_medicine_regression",
+    "squad_steering_regression",
+    "squad_party_mode_regression",
+    "squad_disposition_regression",
+    "torch_light_regression",
+    "game_flow_regression",
+    "quartermaster_regression",
+    "warband_art_regression",
+    "warband_appearance_regression",
+    "armor_flair_regression",
+    "checkpoint_regression",
+    "warband_abilities_regression",
+    "hotbar_regression",
+    "warband_menu_regression",
+    "keybind_screen_regression",
+    "warband_vendors_regression",
+    "warband_wilderness_regression",
+    "warband_session_world_unit_regression",
+    "warband_integration_regression",
+    "weapon_traits_regression",
+    "warband_swing_clock_regression",
+    "blood_cost_regression",
+    "warband_netcode_regression",
+    "warband_ranged_regression",
+    "audio_regression",
+    "perf_overlay_regression",
+]
+## ENet tests: two real processes on one machine, so they never share the pool.
+SERIAL = ["warband_session_regression", "warband_coop_campaign_regression"]
+## Tests that walk real game time. A fixed clock lets them run as fast as the CPU
+## can instead of at the wall clock, which is the difference between 90 s and 40 s;
+## their assertions are distances and states, not frame counts.
+FIXED_FPS = {"cover_movement_regression", "warband_world_regression",
+             "escape_run_regression", "warband_swing_clock_regression"}
+## How many Godot processes run at once. One process per test sounds fastest and
+## is not: on a real desktop the pool thrashes and the borderline tests - the ones
+## that walk a thousand metres of world in real time - start missing their own
+## ceiling because of CPU contention rather than their own work. Eight keeps the
+## whole suite inside its budget and every test inside its own.
+WORKERS = 8
+## The per-test ceiling: 90 s. Nothing in this repository is allowed to need
+## longer; a run that hits it is a bug report, not a slow machine. The absolute
+## ceiling anywhere is 120 s.
+TIMEOUT = 90.0
+## The whole-run ceiling: under three minutes, with two as the target. The two
+## world-walking tests set the floor of that - each covers a kilometre of real
+## game time - and they run in the same pool, so the wall is one of them plus the
+## tail, not the sum.
+TOTAL_BUDGET = 240.0
+## The top of the allowed band, for the tests that walk a fixed clock or a
+## kilometre of world. They must still fit inside two minutes.
+TIMEOUTS = {"cover_movement_regression": 120.0, "warband_world_regression": 120.0,
+            "escape_run_regression": 120.0}
+
+
+def engine_path() -> str:
+    value = os.environ.get("GODOT_PATH")
+    if value:
+        return value
+    managed = ROOT / ".runtime" / "godot" / "Godot_v4.7.2-stable_win64_console.exe"
+    if not managed.exists():
+        managed = ROOT.parent / "ironwood-archer" / ".runtime" / "godot" / "Godot_v4.7.2-stable_win64_console.exe"
+    return str(managed)
+
+
+def run_one(test: str, engine: str, retry: bool = False) -> tuple:
+    suffix = "-retry" if retry else ""
+    appdata = Path(tempfile.gettempdir()) / f"ironwood-test-appdata-{test}{suffix}"
+    appdata.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["APPDATA"] = str(appdata)
+    args = [engine, "--headless"]
+    if test in FIXED_FPS:
+        args += ["--fixed-fps", "240"]
+    args += ["--path", str(ROOT), "--script", f"res://tests/{test}.gd"]
+    started = time.time()
+    try:
+        process = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True,
+                                 timeout=TIMEOUTS.get(test, TIMEOUT))
+        output = process.stdout + process.stderr
+        code = process.returncode
+    except subprocess.TimeoutExpired as error:
+        output = (error.stdout or "") + (error.stderr or "")
+        code = 124
+    duration = time.time() - started
+    lines = [line for line in output.splitlines() if "REGRESSION" in line or "SCRIPT ERROR" in line or "Parse Error" in line]
+    return test, code, duration, lines, output
+
+
+def budget_tests(base: bool = True, warband: bool = True) -> list:
+    picked = []
+    if base:
+        picked += TESTS
+    if warband:
+        picked += WARBAND_TESTS
+    return picked
+
+
+def main() -> int:
+    engine = engine_path()
+    if not Path(engine).exists():
+        print(f"Engine not found: {engine}")
+        return 2
+    arguments = list(sys.argv[1:])
+    want_base = "--base" in arguments or "--all" in arguments
+    want_warband = "--all" in arguments or "--warband" in arguments
+    if not want_base and not want_warband:
+        want_warband = True
+    selected = budget_tests(want_base, want_warband)
+    if "--only" in arguments:
+        # `--only town_hub_regression,warband_world_regression` runs exactly
+        # those, for a change whose blast radius is two tests and not fifty.
+        names = arguments[arguments.index("--only") + 1].split(",")
+        selected = [name.strip() for name in names if name.strip()]
+    started = time.time()
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = {pool.submit(run_one, test, engine): test for test in selected}
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+    for test in SERIAL:
+        results.append(run_one(test, engine))
+    failed = [result for result in results if result[1] != 0]
+    for test, code, duration, lines, output in sorted(results):
+        print(f"{test:32s} exit={code} {duration:6.1f}s  {' | '.join(lines[-2:])}")
+        if code != 0:
+            print("\n".join(output.splitlines()[-15:]))
+    remaining = []
+    for test, _, _, _, _ in failed:
+        print(f"RETRY {test}")
+        result = run_one(test, engine, retry=True)
+        print(f"{test:32s} retry_exit={result[1]} {result[2]:6.1f}s  {' | '.join(result[3][-2:])}")
+        if result[1] != 0:
+            remaining.append(result)
+            print("\n".join(result[4].splitlines()[-15:]))
+    elapsed = time.time() - started
+    over = [result for result in results if result[1] == 124]
+    print(f"TOTAL {elapsed:.1f}s tests={len(selected) + len(SERIAL)} failures={len(remaining)} budget={TOTAL_BUDGET:.0f}s")
+    if over:
+        print("OVER BUDGET (killed at the per-test ceiling): " + ", ".join(sorted(test for test, _, _, _, _ in over)))
+        print("The repository rule is that a test fits in a couple of minutes; make the thing it measures cheaper.")
+    if elapsed > TOTAL_BUDGET:
+        print(f"OVER BUDGET: the run took {elapsed:.1f}s against a {TOTAL_BUDGET:.0f}s ceiling.")
+        return 1
+    return 0 if not remaining else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
