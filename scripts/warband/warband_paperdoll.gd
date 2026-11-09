@@ -612,18 +612,6 @@ func _ensure_built() -> void:
 	_reequip_button.pressed.connect(_reequip_selected)
 	centre.add_child(_reequip_button)
 
-	# The altar's craft, wherever the body stands. A warband out in the wood has
-	# the vials it looted; making it walk back to town for a weld was the only
-	# thing the ritual asked that the fight did not.
-	_bench_button = Button.new()
-	_bench_button.name = "AnointButton"
-	_bench_button.text = "ANOINT THE STEEL"
-	_bench_button.focus_mode = Control.FOCUS_NONE
-	_bench_button.custom_minimum_size = Vector2(0, 30)
-	_bench_button.tooltip_text = "Work the weapon in this body's hands: every weld its steel can take, one row each, paid out of the warband's cruor and ichor. No altar needed."
-	_bench_button.pressed.connect(func() -> void: open_bench())
-	centre.add_child(_bench_button)
-
 	# The ten keys, in the order this body fires them. The HUD draws the same
 	# row during a fight; this is the only place the order can be changed, and
 	# the change is saved with the body and carried onto its rig at the next
@@ -717,9 +705,6 @@ func _ensure_built() -> void:
 	# push the hotbar and the stash off the bottom of the vellum. Two lines are
 	# what the instruction needs, so two lines are what the page keeps for it.
 	_status.max_lines_visible = 2
-	# The bench is the last child of the shell: it has to draw over the page it
-	# lays its plate on, and it is hidden until a press asks for it.
-	_build_bench(shell)
 
 func _make_slot_row(parent: Node, slot: int) -> Dictionary:
 	var button := ItemHover.Row.new()
@@ -1470,7 +1455,8 @@ func _paint_mode() -> void:
 	_set_button.visible = not _corpse_active
 	_reequip_button.visible = not _corpse_active
 	_reequip_all_button.visible = not _corpse_active
-	_bench_button.visible = not _corpse_active
+	if _bench_button != null:
+		_bench_button.visible = not _corpse_active
 	_hotbar_box.visible = not _corpse_active
 	_stash_hint.visible = not _corpse_active
 	_stash_box.visible = not _corpse_active

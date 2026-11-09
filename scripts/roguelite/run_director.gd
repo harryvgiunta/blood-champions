@@ -1,24 +1,24 @@
 class_name RunDirector
 extends Node
-## The run director: one arena campaign from the Start Run Portal to the last
-## portal, and the host-authoritative owner of everything inside it.
+## The run director: one endless run of levels from the Start Run Portal to the
+## wipe that ends it, and the host-authoritative owner of everything inside it.
 ##
-## What it owns: the stage seed, the island being fought on, the wave budget and
-## its queue, the mobs it spawns (their names, factions, elites and bosses), the
-## crystals and keys a run pays, the reward chests and pedestals, the Greed Totem,
-## the shop island, the biome portals and their votes, and the downed/revive
-## contract of co-op.
+## What it owns: the run seed, the island being fought on, the level counter and
+## its budget, the mobs it spawns (their names, factions, elites and bosses), the
+## crystals a run pays, the unlock keys a boss drops, the reward chests and
+## pedestals, the Greed Totem, the shop level and its rack, the portal on, and
+## the downed/revive contract of co-op.
 ##
 ## What it does not own: damage (the shared `Combat` and the mob classes), health
-## (the bodies), movement (the possession controller) or the mod engine (each
+## (the bodies), movement (the possession controller) or the upgrade engine (each
 ## player's `RoguelitePlayer`). It asks those systems and reports what happened.
 ##
 ## Co-op shape. The host runs the whole loop. Guests receive three kinds of
-## reliable event - `state` (which island and wave), `prop` (which chest or
+## reliable event - `state` (which level and island), `prop` (which chest, rack or
 ## portal exists, with its serial), and `mob` (a spawned hostile, named so the
 ## session's snapshots find it) - plus unreliable `fx` flashes. Their inputs
-## arrive as requests: start, use a prop, choose a draft, buy a ware, vote a
-## portal, swap hands. No guest ever spawns a wave, rolls a chest or applies a
+## arrive as requests: start, use a prop, choose a draft, buy a ware, rebind a
+## hand, swap hands. No guest ever spawns a wave, rolls a chest or applies a
 ## proc.
 
 signal state_changed
@@ -42,20 +42,28 @@ const DevilScript = preload("res://scripts/devil_mob.gd")
 const CloneScript = preload("res://scripts/ranger_clone.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 
-const MAX_STAGES := 6
-const WAVES_PER_STAGE := 3
+## A run is levels, endless. Every level is a wave; every tenth level is a boss;
+## the level before a boss is a shop. An island is the ten-level block its biome
+## is dressed in, so the wood, the cave and the pit cycle for as long as the band
+## keeps standing.
+const LEVELS_PER_ISLAND := 10
+const BOSS_EVERY := 10
+## The shop level stands at 9, 19, 29 ... - always the level before the boss.
+const SHOP_LEVEL := BOSS_EVERY - 1
 ## The live cap and the spawn cadence: a wave is a queue that feeds the island,
 ## not a hundred bodies dropped on one frame.
 const LIVE_CAP_BASE := 12
 const LIVE_CAP_PER_PLAYER := 4
 const SPAWN_INTERVAL := 0.42
-const WAVE_GAP := 2.2
 const FIRST_WAVE_DELAY := 1.6
 const INTERACT_REACH := 3.4
 const RETARGET_INTERVAL := 0.9
-## Bases by island: the budget a stage's wave spends before the party multiplier.
-const STAGE_BUDGET := [10.0, 15.0, 21.0, 28.0, 36.0, 45.0]
-const WAVE_GROWTH := 1.28
+## The budget a level spends before the co-op multiplier. It grows with the island
+## and with the level inside it, so the tenth level of the tenth island is a wall
+## and the second body in the party does not fight the first body's wave.
+const LEVEL_BUDGET := 10.0
+const ISLAND_GROWTH := 1.26
+const WAVE_GROWTH := 1.13
 
 ## The three factions and what every biome fields. `cost` is the budget a body
 ## spends; `kind` is which class builds it.
@@ -92,17 +100,23 @@ var stage = null
 var players: Dictionary = {}      # peer_id -> RoguelitePlayer
 var run_active := false
 var run_seed := 0
+## The island a level stands on, 0-based. It is `(level - 1) / LEVELS_PER_ISLAND`.
 var stage_index := 0
 var biome_id := "wilderness"
+## The level inside its island, 1..10. The global level is
+## `stage_index * LEVELS_PER_ISLAND + wave`.
 var wave := 0
-var waves_this_stage := WAVES_PER_STAGE
+var level := 0
 var wave_active := false
-var stage_cleared := false
-var boss_wave := false
+## The level has been fought out and its rewards stand on the dirt.
+var level_cleared := false
+var boss_level := false
+## The safe level before a boss: no mobs, the shop and the rack, and one portal
+## to the boss.
+var shop_level := false
 var crystals := 0
 var total_kills := 0
 var keys_earned := 0
-var votes: Dictionary = {}        # peer_id -> biome id
 var draft_offers: Dictionary = {} # serial -> Array[String]
 var shop_wares: Dictionary = {}   # serial -> Array[Dictionary]
 
@@ -119,7 +133,6 @@ var _opened: Dictionary = {}
 var _users: Dictionary = {}
 var _queue: Array[Dictionary] = []
 var _spawn_clock := 0.0
-var _wave_clock := 0.0
 var _retarget_clock := 0.0
 var _serial := 0
 var _mob_serial := 0
@@ -179,8 +192,8 @@ func party_size() -> int:
 
 
 ## BEGIN. Host only: starts a fresh seed, dresses the party in the loadout they
-## chose in town, stands the first island under their feet and queues its first
-## wave. A guest's press is a request to the host.
+## chose in town, stands level one under their feet and sends its wave. A guest's
+## press is a request to the host.
 func start_run() -> Dictionary:
 	if run_active:
 		return {"ok": false, "message": "A run is already live."}
@@ -189,20 +202,22 @@ func start_run() -> Dictionary:
 		send_request(request)
 		return {"ok": true, "message": "The host is opening a run."}
 	if world == null or world.get("controller") == null:
-		return {"ok": false, "message": "The arena needs a campaign around it."}
+		return {"ok": false, "message": "The run needs the world around it."}
 	var built := _collect_party()
 	if built.is_empty():
-		return {"ok": false, "message": "No body to put in the arena."}
+		return {"ok": false, "message": "No body to put in the run."}
 	run_seed = randi() & 0x7fffffff
 	_rng.seed = run_seed
 	run_active = true
 	stage_index = 0
-	stage_cleared = false
-	wave = 0
+	wave = 1
+	level = 1
+	level_cleared = false
+	shop_level = false
+	boss_level = false
 	crystals = 0
 	total_kills = 0
 	keys_earned = 0
-	votes.clear()
 	draft_offers.clear()
 	shop_wares.clear()
 	# A run's prop serials start at one again: a stale `_opened` from the last run
@@ -211,10 +226,10 @@ func start_run() -> Dictionary:
 	_killed.clear()
 	_serial = 0
 	_mob_serial = 0
-	_begin_stage(_first_biome(), built)
+	_begin_island(_first_biome(), built)
+	_begin_level()
 	_broadcast_state()
-	var line := "THE RUN OPENS  ·  %s  ·  island 1 of %d" % [
-		StageScript.biome(biome_id).name, MAX_STAGES]
+	var line := "THE RUN OPENS  ·  %s  ·  LEVEL 1" % StageScript.biome(biome_id).name
 	_status(line)
 	return {"ok": true, "message": line}
 
@@ -225,22 +240,91 @@ func _first_biome() -> String:
 	return "wilderness"
 
 
-func _begin_stage(new_biome: String, field: Array = []) -> void:
+## Stand a new island under the party: the biome changes, the bodies move in and
+## a fresh runtime takes the rack's pair. The level itself is begun separately,
+## so a shop level and a boss level use the same ground.
+func _begin_island(new_biome: String, field: Array = []) -> void:
 	biome_id = new_biome
-	wave = 0
 	wave_active = false
-	stage_cleared = false
+	level_cleared = false
+	shop_level = false
+	boss_level = false
 	queue_clear()
 	_clear_stage_props()
 	_free_mobs()
-	votes.clear()
 	_build_stage()
 	_move_party_in(field if not field.is_empty() else _collect_party())
 	_spawn_runners()
-	waves_this_stage = WAVES_PER_STAGE + (1 if stage_index >= 3 else 0)
-	_wave_clock = FIRST_WAVE_DELAY
-	stage_cleared = false
 	state_changed.emit()
+
+
+## Begin the level the run's counters currently name. A combat level queues its
+## wave; the shop level queues nothing and stands the stalls; the boss level
+## queues the boss and its escort.
+func _begin_level() -> void:
+	level = stage_index * LEVELS_PER_ISLAND + wave
+	shop_level = wave == SHOP_LEVEL
+	boss_level = wave == BOSS_EVERY
+	level_cleared = false
+	wave_active = false
+	queue_clear()
+	_clear_stage_props()
+	_free_mobs()
+	if shop_level:
+		_spawn_shop_level()
+		_status("LEVEL %d  ·  SHOP LEVEL  ·  the boss waits beyond the portal" % level, 5.0)
+		_broadcast_state()
+		return
+	wave_active = true
+	var budget := wave_budget()
+	if boss_level:
+		_queue.append(BOSSES.get(StageScript.biome(biome_id).faction, BOSSES["watchers"]))
+		budget -= 10.0
+	# Elites from the second level of an island on: a heavier body every other
+	# wave, and the boss level's escort always carries one.
+	if wave >= 2 and not boss_level:
+		var elite_spec := _pick_spec(true)
+		if not elite_spec.is_empty():
+			_queue.append(elite_spec)
+			budget -= float(elite_spec.cost)
+	while budget > 0.0:
+		var spec := _pick_spec(false)
+		if spec.is_empty():
+			break
+		_queue.append(spec)
+		budget -= maxf(0.5, float(spec.cost))
+	_spawn_clock = FIRST_WAVE_DELAY
+	var line := "LEVEL %d  ·  %d bodies inbound" % [level, _queue.size()]
+	if boss_level:
+		line = "LEVEL %d  ·  BOSS  ·  %s STIRS" % [level, str(StageScript.biome(biome_id).name)]
+	_status(line)
+	_broadcast_state()
+
+
+## The shop level: the town's business standing on the level's own ground. No
+## mobs, no clock - the portal to the boss is the only way on, and a player can
+## stand here as long as they like.
+func _spawn_shop_level() -> void:
+	var wares := _shop_wares()
+	var shop_payload := {"wares": wares}
+	var shop = _spawn_prop("shop", stage.rim_point(0, 4), shop_payload)
+	if shop != null:
+		shop_wares[int(shop.get_meta("serial"))] = wares
+		_broadcast_prop(shop, "shop", shop_payload)
+	var rack = _spawn_prop("rack", stage.rim_point(1, 4), {})
+	if rack != null:
+		_broadcast_prop(rack, "rack", {})
+	# Every shop level offers one more upgrade: the safe level is also the breath
+	# before the wall.
+	var offers := _draft_for_any()
+	var pedestal = _spawn_prop("pedestal", stage.rim_point(2, 5), {"offers": offers})
+	if pedestal != null:
+		_broadcast_prop(pedestal, "pedestal", {"offers": offers})
+	var payload := {"next_level": level + 1, "kind": "boss",
+		"name": "THE BOSS  ·  LEVEL %d" % (level + 1)}
+	var portal = _spawn_prop("portal", stage.rim_point(3, 5), payload)
+	if portal != null:
+		_broadcast_prop(portal, "portal", payload)
 
 
 func _build_stage() -> void:
@@ -469,6 +553,32 @@ func swap_hands(body) -> void:
 	_broadcast({"t": "hands", "peer": run.peer_id, "slot": next})
 
 
+## The rack bound a new piece to a body in a live run (a shop level, where the
+## town's business stands on the island). Re-profile the hands and put the piece
+## in them; a guest's request reaches the host through `rebind`.
+func rebind_hand(peer_id: int, slot: String, weapon_id: String) -> void:
+	if slot != "ranged" and slot != "melee":
+		return
+	if not Weapons.has(weapon_id) or Weapons.slot_of(weapon_id) != slot:
+		return
+	if _client:
+		send_request({"t": "rebind", "slot": slot, "weapon": weapon_id})
+	var run = players.get(peer_id)
+	if run == null or not is_instance_valid(run):
+		return
+	if slot == "ranged":
+		run.ranged_id = weapon_id
+	else:
+		run.melee_id = weapon_id
+	run._set_profiles()
+	_apply_hands(run, slot)
+	_throw_charges[peer_id] = int(Weapons.resolve(run.melee_id).get("throw_charges", 0))
+	_throw_clock[peer_id] = 0.0
+	run.apply_stats()
+	if not _client:
+		_broadcast({"t": "rebind", "peer": peer_id, "slot": slot, "weapon": weapon_id})
+
+
 # --- the frame -------------------------------------------------------------
 
 func tick(delta: float) -> void:
@@ -478,14 +588,11 @@ func tick(delta: float) -> void:
 	if _client:
 		state_changed.emit()
 		return
-	if stage_cleared:
+	if level_cleared or shop_level:
 		_tick_down_check(delta)
 		state_changed.emit()
 		return
 	if not wave_active:
-		_wave_clock -= delta
-		if _wave_clock <= 0.0:
-			_begin_wave()
 		state_changed.emit()
 		return
 	_spawn_clock -= delta
@@ -532,43 +639,13 @@ func _tick_down_check(_delta: float) -> void:
 		_finish_run(false)
 
 
-# --- waves -----------------------------------------------------------------
+# --- levels ----------------------------------------------------------------
 
-func _begin_wave() -> void:
-	wave += 1
-	wave_active = true
-	boss_wave = wave == waves_this_stage and stage_index in [2, 5]
-	_queue.clear()
-	var budget := wave_budget()
-	if boss_wave:
-		_queue.append(BOSSES.get(StageScript.biome(biome_id).faction, BOSSES["watchers"]))
-		budget -= 10.0
-	# Elites from the second wave on: a heavier body every other wave, and the
-	# last wave of a stage always carries one.
-	if wave >= 2 and not boss_wave:
-		var elite_spec := _pick_spec(true)
-		if not elite_spec.is_empty():
-			_queue.append(elite_spec)
-			budget -= float(elite_spec.cost)
-	while budget > 0.0:
-		var spec := _pick_spec(false)
-		if spec.is_empty():
-			break
-		_queue.append(spec)
-		budget -= maxf(0.5, float(spec.cost))
-	_wave_clock = 0.0
-	_spawn_clock = 0.0
-	var line := "WAVE %d / %d  ·  %d bodies inbound" % [wave, waves_this_stage, _queue.size()]
-	if boss_wave:
-		line = "FINAL WAVE  ·  %s STIRS" % str(StageScript.biome(biome_id).name)
-	_status(line)
-	_broadcast_state()
-
-
-## The wave's spend. Co-op scales it by +50% for every player past the first,
-## which is the contract the brief names: two bodies do not fight the same wave.
+## The level's spend. The island's base grows every ten levels, the level inside
+## it grows every wave, and co-op scales the whole thing by +50% for every player
+## past the first: two bodies do not fight the same wave.
 func wave_budget() -> float:
-	var base: float = float(STAGE_BUDGET[clampi(stage_index, 0, STAGE_BUDGET.size() - 1)])
+	var base := LEVEL_BUDGET * pow(ISLAND_GROWTH, float(maxi(0, stage_index)))
 	var growth := pow(WAVE_GROWTH, float(maxi(0, wave - 1)))
 	var party := 1.0 + 0.5 * float(maxi(0, party_size() - 1))
 	return base * growth * party
@@ -675,17 +752,13 @@ func _nearest_body(at: Vector3):
 func _clear_wave() -> void:
 	wave_active = false
 	_queue.clear()
-	if wave < waves_this_stage:
-		_wave_clock = WAVE_GAP
-		_status("WAVE %d CLEARED  ·  the island breathes" % wave, 2.5)
-		return
-	_clear_stage()
+	_clear_level()
 
 
 # --- mob spawning ----------------------------------------------------------
 
 func _spawn_spec(spec: Dictionary, at: Vector3) -> void:
-	var life := 1.0 + 0.14 * float(stage_index) + 0.05 * float(wave)
+	var life := 1.0 + 0.13 * float(stage_index) + 0.055 * float(wave)
 	var rate := 1.0 + 0.05 * float(stage_index) + 0.02 * float(wave)
 	if bool(spec.get("elite", false)):
 		life *= 1.9
@@ -923,11 +996,11 @@ func _on_enemy_defeated(enemy, reward: int) -> void:
 		mult = (killer as Object).currency_multiplier()
 	var gain := int(ceil(maxf(1.0, float(reward)) * 2.5 * mult))
 	_award_crystals(gain)
-	# Elites and bosses pay keys; the stage clear pays the rest.
-	if bool(spec.get("elite", false)):
-		_award_keys(1, "an elite falls")
-	elif bool(spec.get("boss", false)):
-		_award_keys(3, "the boss falls")
+	# The boss is the only thing in the game that pays unlock keys. Every tenth
+	# level, one more weapon can be earned; an elite pays crystals and nothing
+	# else.
+	if bool(spec.get("boss", false)):
+		_award_keys(3 + int(stage_index / 2), "level %d boss falls" % level)
 	if bool(spec.get("elite", false)) or bool(spec.get("boss", false)):
 		ProcFx.flare(stage, (enemy as Node3D).global_position + Vector3.UP, Color(1.0, 0.7, 0.3), 1.2)
 	state_changed.emit()
@@ -982,8 +1055,10 @@ func _spawn_prop(kind: String, at: Vector3, payload: Dictionary) -> Node3D:
 			node = Props.greed_totem(stage, at, payload)
 		"shop":
 			node = Props.shop(stage, at, payload.get("wares", []), payload)
+		"rack":
+			node = Props.rack(stage, at, payload)
 		"portal":
-			node = Props.portal(stage, at, str(payload.get("biome", "wilderness")),
+			node = Props.portal(stage, at, str(payload.get("biome", biome_id)),
 				str(payload.get("name", "PORTAL")), payload)
 	if node == null:
 		return null
@@ -1011,8 +1086,11 @@ func _clear_stage_props() -> void:
 	_users.clear()
 
 
-func _clear_stage() -> void:
-	stage_cleared = true
+## The level is beaten. Every reward stands on the ground and the one portal out
+## waits for the chest to be opened: a fight pays crystals, a level pays an
+## upgrade choice, and the portal carries the party to the next level.
+func _clear_level() -> void:
+	level_cleared = true
 	wave_active = false
 	queue_clear()
 	for peer in players:
@@ -1020,13 +1098,13 @@ func _clear_stage() -> void:
 		if run == null or not is_instance_valid(run):
 			continue
 		run.stage_clear()
-	var key_pay := 2 + int(stage_index / 2)
-	_award_keys(key_pay, "island %d cleared" % (stage_index + 1))
-	_award_crystals(30 + 12 * stage_index)
-	# The reward chest, and the extra mini-chest Buried Cache rolls for.
+	_award_crystals(12 + 6 * stage_index + 2 * wave)
+	# The reward chest, and the extra mini-chest Buried Cache rolls for. A boss
+	# leaves its own hoard, on the same one-chest contract.
+	var tier := "elite" if boss_level else "chest"
 	var chest_at: Vector3 = stage.rim_point(0, 4)
-	var chest = _spawn_prop("chest", chest_at, {"tier": "chest", "stage": stage_index})
-	_broadcast_prop(chest, "chest", {"tier": "chest", "stage": stage_index})
+	var chest = _spawn_prop("chest", chest_at, {"tier": tier, "level": level})
+	_broadcast_prop(chest, "chest", {"tier": tier, "level": level})
 	var extra_chance := 0.0
 	for peer in players:
 		var run = players[peer]
@@ -1035,30 +1113,53 @@ func _clear_stage() -> void:
 	if extra_chance > 0.0 and _rng.randf() < extra_chance:
 		var mini = _spawn_prop("chest", stage.rim_point(1, 4), {"tier": "mini"})
 		_broadcast_prop(mini, "chest", {"tier": "mini"})
-	# The choice: three mods on a pedestal. This is the draft loop.
+	# The choice: three upgrades on a pedestal. This is the run's only growth.
 	var offers := _draft_for_any()
 	var pedestal = _spawn_prop("pedestal", stage.rim_point(2, 5), {"offers": offers})
 	_broadcast_prop(pedestal, "pedestal", {"offers": offers})
-	# The Greed Totem stands on every island, one bargain per run per island.
-	var greed := _spawn_prop("greed", stage.rim_point(3, 5), {})
-	if greed != null:
-		_broadcast_prop(greed, "greed", {})
-	# Every second island, a shop: the crystals have somewhere to go.
-	if stage_index in [1, 3]:
-		var wares := _shop_wares()
-		var shop_serial_payload := {"wares": wares}
-		var shop = _spawn_prop("shop", stage.rim_point(4, 5), shop_serial_payload)
-		shop_wares[int(shop.get_meta("serial"))] = wares
-		_broadcast_prop(shop, "shop", shop_serial_payload)
-	# Two portals out, until the chest has been opened.
-	var choices := _next_biomes()
-	for index in choices.size():
-		var payload := {"biome": choices[index],
-			"name": str(StageScript.biome(choices[index]).name)}
-		var portal = _spawn_prop("portal", stage.rim_point(5 + index, 6), payload)
-		_broadcast_prop(portal, "portal", payload)
-	_status("ISLAND CLEARED  ·  open the chest  ·  the portals wait", 5.0)
+	# The Greed Totem stands on every third level: not on the shop level, where
+	# the shop is the point, and not beside a boss.
+	if not boss_level and wave % 3 != 0:
+		var greed := _spawn_prop("greed", stage.rim_point(3, 5), {})
+		if greed != null:
+			_broadcast_prop(greed, "greed", {})
+	# One portal on: the next level, which may be a boss.
+	var next := level + 1
+	var next_biome := _biome_for_level(next)
+	var next_kind := _kind_for_level(next)
+	var payload := {"next_level": next, "kind": next_kind, "biome": next_biome,
+		"name": _portal_label(next, next_kind)}
+	var portal = _spawn_prop("portal", stage.rim_point(5, 6), payload)
+	_broadcast_prop(portal, "portal", payload)
+	_status("LEVEL %d CLEARED  ·  open the chest  ·  the portal waits" % level, 5.0)
 	_broadcast_state()
+
+
+## The biome a level's island is dressed in: the three cycle forever, so the
+## tenth island is the wood again.
+func _biome_for_level(level_number: int) -> String:
+	var island := maxi(0, (level_number - 1) / LEVELS_PER_ISLAND)
+	var cycle := ["wilderness", "caves", "arena"]
+	return str(cycle[island % cycle.size()])
+
+
+## What kind of level stands at `level_number`: a shop before every boss, a boss
+## every tenth, and a fight in between.
+func _kind_for_level(level_number: int) -> String:
+	var mark := level_number % BOSS_EVERY
+	if mark == 0:
+		return "boss"
+	if mark == SHOP_LEVEL:
+		return "shop"
+	return "combat"
+
+
+func _portal_label(level_number: int, kind: String) -> String:
+	if kind == "boss":
+		return "LEVEL %d  ·  THE BOSS" % level_number
+	if kind == "shop":
+		return "LEVEL %d  ·  THE SHOP" % level_number
+	return "LEVEL %d" % level_number
 
 
 func _draft_for_any() -> Array[String]:
@@ -1080,23 +1181,11 @@ func _shop_wares() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var ids := Mods.draft(_rng, 3, false, [])
 	for id in ids:
-		var price := int(round(28.0 + 14.0 * float(stage_index)
+		var price := int(round(28.0 + 6.0 * float(level)
 			+ (18.0 if Mods.rarity_of(id) != Mods.RARITY_COMMON else 0.0)))
 		out.append({"id": id, "name": Mods.name_of(id), "price": price,
 			"rarity": Mods.rarity_of(id)})
 	return out
-
-
-func _next_biomes() -> Array[String]:
-	var all := ["wilderness", "caves", "arena"]
-	all.erase(biome_id)
-	if all.is_empty():
-		all = ["arena"]
-	# Two distinct choices, in a stable order for the seed.
-	all.sort()
-	while all.size() < 2:
-		all.append(all[0])
-	return [all[0], all[1]]
 
 
 # --- interaction -----------------------------------------------------------
@@ -1141,6 +1230,12 @@ func interact(actor) -> bool:
 			if shop_hud != null and shop_hud.has_method("open_shop"):
 				shop_hud.open_shop(serial, payload.get("wares", []))
 				return true
+		elif kind == "rack":
+			var town_node = world.get("town") if world != null else null
+			var panel = town_node.get("forge_panel") if town_node != null else null
+			if panel != null and panel.has_method("open"):
+				panel.open("rack")
+				return true
 		send_request({"t": "use", "serial": serial})
 		# A chest opens for everyone at once in the wire's own time; locally the
 		# prop stays until the host's `prop_gone` arrives.
@@ -1155,8 +1250,13 @@ func interact(actor) -> bool:
 			_open_greed(serial, actor)
 		"shop":
 			_open_shop(serial, actor)
+		"rack":
+			var town_node = world.get("town") if world != null else null
+			var panel = town_node.get("forge_panel") if town_node != null else null
+			if panel != null and panel.has_method("open"):
+				panel.open("rack")
 		"portal":
-			_vote_portal(serial, actor, local_peer())
+			_take_portal(serial, actor)
 		_:
 			return false
 	return true
@@ -1167,8 +1267,10 @@ func prompt_line(actor) -> String:
 		return ""
 	var prop := nearest_prop((actor as Node3D).global_position)
 	if prop == null:
-		if stage_cleared:
-			return "ISLAND CLEARED  ·  find the chest and the portals"
+		if shop_level:
+			return "SHOP LEVEL  ·  spend, kit up, then take the portal"
+		if level_cleared:
+			return "LEVEL %d CLEARED  ·  the portal waits" % level
 		return ""
 	match Props.prop_kind(prop):
 		"chest":
@@ -1176,23 +1278,18 @@ func prompt_line(actor) -> String:
 				return ""
 			return "G  -  OPEN THE CHEST"
 		"pedestal":
-			return "G  -  CHOOSE A MOD"
+			return "G  -  CHOOSE AN UPGRADE"
 		"greed":
 			return "G  -  BARGAIN WITH THE GREED TOTEM"
 		"shop":
 			return "G  -  SPEND %d CRYSTALS" % crystals
+		"rack":
+			return "G  -  THE WEAPON RACK"
 		"portal":
-			if not _opened.has("chest"):
+			if not shop_level and not _opened.has("chest"):
 				return "THE PORTAL IS SEALED  ·  open the chest first"
 			var payload := Props.payload_of(prop)
-			var line := "G  -  TAKE THE PORTAL TO %s" % str(payload.get("name", "THE NEXT ISLAND"))
-			if not votes.is_empty():
-				var marks: PackedStringArray = []
-				for peer in votes:
-					marks.append("%s:%s" % [_peer_label(int(peer)),
-						str(votes[peer]).to_upper()])
-				line += "   ·   VOTES %s" % " ".join(marks)
-			return line
+			return "G  -  TAKE THE PORTAL TO %s" % str(payload.get("name", "THE NEXT LEVEL"))
 	return ""
 
 
@@ -1410,39 +1507,25 @@ func buy(serial: int, index: int, peer_id: int) -> Dictionary:
 	return result
 
 
-func _vote_portal(_serial: int, _actor, peer_id: int) -> void:
-	var prop: Node3D = _props_by_serial.get(_serial)
+## The one portal out of a cleared level or a shop level. The host presses it -
+## the host owns the level and the party follows; a guest's press is a request
+## and is refused here rather than teleporting the table.
+func _take_portal(serial: int, actor) -> void:
+	var prop: Node3D = _props_by_serial.get(serial)
 	if prop == null:
 		return
-	if not _opened.has("chest"):
+	var run = player_for(actor)
+	if run == null:
+		return
+	if int(run.peer_id) != local_peer():
+		_status("The host takes the portal.", 2.0)
+		return
+	if not shop_level and not _opened.has("chest"):
 		_status("The portal does not open until the chest is opened.", 3.0)
 		return
-	var payload := Props.payload_of(prop)
-	var target := str(payload.get("biome", ""))
-	if target.is_empty():
+	if not level_cleared and not shop_level:
 		return
-	votes[peer_id] = target
-	_broadcast({"t": "vote", "peer": peer_id, "biome": target})
-	_status("%s votes %s" % [
-		_peer_label(peer_id), str(StageScript.biome(target).name)], 2.0)
-	# The host's own press is the decision, not a vote: the host owns the
-	# transition and can take the party through without waiting on a guest who
-	# never walks to a portal.
-	if peer_id == local_peer():
-		advance_to(target)
-		return
-	# When every soul has voted the same way, the party has chosen: the host
-	# takes the portal without a second press.
-	var needed := party_size()
-	if votes.size() >= needed:
-		var first := str(votes.values()[0])
-		var same := true
-		for value in votes.values():
-			if str(value) != first:
-				same = false
-				break
-		if same:
-			advance_to(first)
+	advance_level()
 
 
 func _peer_label(peer_id: int) -> String:
@@ -1459,47 +1542,55 @@ func _merc_for_peer(peer_id: int) -> int:
 	return int(world.controller.merc_for_peer(peer_id))
 
 
-## Take the portal. Host only; a guest's portal press is a vote.
-func advance_to(new_biome: String) -> void:
-	if not run_active or _client or not stage_cleared:
+## Take the next level. Host only. A new island is stood up when the level
+## crosses a ten-level boundary; otherwise the same island keeps its ground and
+## the next level begins on it.
+func advance_level() -> void:
+	if not run_active or _client:
 		return
-	if not _valid_biome(new_biome):
+	if not (level_cleared or shop_level):
 		return
-	stage_index += 1
-	if stage_index >= MAX_STAGES:
-		_finish_run(true)
-		return
-	_begin_stage(new_biome)
+	var next := level + 1
+	var next_island := int((next - 1) / LEVELS_PER_ISLAND)
+	wave = int((next - 1) % LEVELS_PER_ISLAND) + 1
+	if next_island != stage_index:
+		stage_index = next_island
+		_begin_island(_biome_for_level(next))
+	_begin_level()
 	_broadcast_state()
-	_status("%s  ·  island %d of %d" % [
-		str(StageScript.biome(new_biome).name), stage_index + 1, MAX_STAGES], 4.0)
-
-
-static func _valid_biome(name: String) -> bool:
-	return name in ["wilderness", "caves", "arena"]
+	var kind := _kind_for_level(next)
+	if kind == "shop":
+		_status("LEVEL %d  ·  SHOP LEVEL  ·  kit up before the boss" % next, 4.0)
+	elif kind == "boss":
+		_status("LEVEL %d  ·  BOSS" % next, 4.0)
+	else:
+		_status("LEVEL %d  ·  %s" % [next, str(StageScript.biome(biome_id).name)], 4.0)
 
 
 # --- ending ----------------------------------------------------------------
 
-func _finish_run(won: bool) -> void:
+## The run ends when the band does. There is no final level: the record is the
+## level the last body fell on, and the boss key it earned stays banked.
+func _finish_run(_won: bool = false) -> void:
 	if not run_active:
 		return
-	var cleared := mini(stage_index + 1, MAX_STAGES)
-	var bonus := (6 + stage_index * 2) if won else maxi(1, stage_index / 2)
-	_award_keys(bonus, "the run closes")
+	var reached := level
 	var meta = get_node_or_null("/root/Roguelite")
 	if meta != null and meta.has_method("note_run"):
-		meta.note_run(cleared, total_kills)
-	_broadcast({"t": "end", "won": won, "stage": cleared})
+		meta.note_run(reached, total_kills)
+	_broadcast({"t": "end", "won": false, "level": reached})
 	_close_run()
-	_status(("THE RUN IS WON  ·  %d keys  ·  back to Hearthstead" % bonus) if won
-		else ("THE ISLAND TAKES THE BAND  ·  %d keys banked" % bonus), 6.0)
+	_status("THE BAND FALLS AT LEVEL %d  ·  back to Hearthstead" % reached, 6.0)
 
 
 func _close_run() -> void:
 	run_active = false
 	wave_active = false
-	stage_cleared = false
+	level_cleared = false
+	shop_level = false
+	boss_level = false
+	level = 0
+	wave = 0
 	queue_clear()
 	_clear_stage_props()
 	_free_mobs()
@@ -1532,12 +1623,10 @@ func _close_run() -> void:
 		if merc > 0 and world != null and world.get("controller") != null:
 			world.controller.refresh_gear(merc)
 		if world != null and world.has_method("_wire_projectiles"):
-			# The campaign's quiver gate goes back on the body with its own kit.
 			world._wire_projectiles(body)
 	_saved.clear()
 	_throw_clock.clear()
 	_throw_charges.clear()
-	votes.clear()
 	_killed.clear()
 	var hud = world.get("roguelite_hud") if world != null else null
 	if hud != null and hud.has_method("close_all"):
@@ -1877,9 +1966,12 @@ func _broadcast(event: Dictionary) -> void:
 
 
 func _broadcast_state() -> void:
-	_broadcast({"t": "state", "seed": run_seed, "stage": stage_index,
-		"biome": biome_id, "wave": wave, "waves": waves_this_stage,
-		"active": wave_active, "cleared": stage_cleared, "boss": boss_wave,
+	_broadcast({"t": "state", "seed": run_seed, "island": stage_index + 1,
+		"stage": stage_index + 1, "level": level, "wave": wave,
+		"levels_per_island": LEVELS_PER_ISLAND, "biome": biome_id,
+		"active": wave_active, "cleared": level_cleared,
+		"boss_level": boss_level, "boss": boss_level, "shop_level": shop_level,
+		"kind": _kind_for_level(level),
 		"crystals": crystals, "living": _live_mobs(), "kills": total_kills})
 
 
@@ -1940,13 +2032,11 @@ func handle_request(peer_id: int, request: Dictionary) -> void:
 			choose_draft(peer_id, int(request.get("serial", 0)), int(request.get("index", 0)))
 		"buy":
 			buy(int(request.get("serial", 0)), int(request.get("index", 0)), peer_id)
-		"vote":
-			var serial := int(request.get("serial", 0))
-			var prop: Node3D = _props_by_serial.get(serial)
-			var target := str(request.get("biome", ""))
-			if prop != null and not target.is_empty():
-				votes[peer_id] = target
-				_broadcast({"t": "vote", "peer": peer_id, "biome": target})
+		"rebind":
+			var slot := str(request.get("slot", ""))
+			var weapon := str(request.get("weapon", ""))
+			if Weapons.has(weapon) and Weapons.slot_of(weapon) == slot:
+				rebind_hand(peer_id, slot, weapon)
 
 
 func _use_serial(serial: int, actor, peer_id: int = 1) -> void:
@@ -1962,8 +2052,13 @@ func _use_serial(serial: int, actor, peer_id: int = 1) -> void:
 			_open_greed(serial, actor)
 		"shop":
 			_open_shop(serial, actor)
+		"rack":
+			var town_node = world.get("town") if world != null else null
+			var panel = town_node.get("forge_panel") if town_node != null else null
+			if panel != null and panel.has_method("open"):
+				panel.open("rack")
 		"portal":
-			_vote_portal(serial, actor, peer_id)
+			_take_portal(serial, actor)
 
 
 ## Guest: a reliable event from the host.
@@ -1984,10 +2079,6 @@ func apply_event(event: Dictionary) -> void:
 			var meta = get_node_or_null("/root/Roguelite")
 			if meta != null:
 				meta.award_keys(int(event.get("amount", 0)), str(event.get("reason", "")))
-		"pool":
-			var ledger = get_node_or_null("/root/Roguelite")
-			if ledger != null and ledger.has_method("share_pool"):
-				ledger.share_pool(event.get("ids", []))
 		"mob":
 			if _client:
 				_spawn_replica(event)
@@ -1995,10 +2086,20 @@ func apply_event(event: Dictionary) -> void:
 			var run = players.get(int(event.get("peer", 0)))
 			if run != null and is_instance_valid(run):
 				_apply_hands(run, str(event.get("slot", "ranged")))
+		"rebind":
+			var rebinding = players.get(int(event.get("peer", 0)))
+			var rebind_slot := str(event.get("slot", ""))
+			var rebind_weapon := str(event.get("weapon", ""))
+			if rebinding != null and is_instance_valid(rebinding) \
+					and Weapons.has(rebind_weapon):
+				if rebind_slot == "ranged":
+					rebinding.ranged_id = rebind_weapon
+				elif rebind_slot == "melee":
+					rebinding.melee_id = rebind_weapon
+				rebinding._set_profiles()
+				_apply_hands(rebinding, rebind_slot)
 		"fx":
 			_apply_fx(event)
-		"vote":
-			votes[int(event.get("peer", 0))] = str(event.get("biome", ""))
 		"revived":
 			var run = players.get(int(event.get("peer", 0)))
 			if run != null and is_instance_valid(run):
@@ -2020,7 +2121,7 @@ func apply_event(event: Dictionary) -> void:
 			if _client:
 				var meta = get_node_or_null("/root/Roguelite")
 				if meta != null and meta.has_method("note_run"):
-					meta.note_run(int(event.get("stage", 0)), total_kills)
+					meta.note_run(int(event.get("level", 0)), total_kills)
 				_close_run()
 				_status("THE RUN IS OVER  ·  back to Hearthstead", 5.0)
 
@@ -2028,27 +2129,24 @@ func apply_event(event: Dictionary) -> void:
 func _apply_state(event: Dictionary) -> void:
 	var was_running := run_active
 	run_seed = int(event.get("seed", run_seed))
-	var new_stage := int(event.get("stage", 0))
+	var new_stage := maxi(0, int(event.get("island", int(event.get("stage", 1)))) - 1)
+	var new_level := int(event.get("level", level))
 	var new_biome := str(event.get("biome", biome_id))
+	if not was_running or new_level != level:
+		_clear_stage_props()
 	if not was_running or new_stage != stage_index or not is_instance_valid(stage):
 		stage_index = new_stage
 		run_active = true
-		wave = int(event.get("wave", 0))
-		waves_this_stage = int(event.get("waves", WAVES_PER_STAGE))
-		wave_active = bool(event.get("active", false))
-		stage_cleared = bool(event.get("cleared", false))
-		boss_wave = bool(event.get("boss", false))
 		if new_biome != biome_id or not is_instance_valid(stage):
 			biome_id = new_biome
 			_build_stage()
 			_spawn_runner_replicas()
-		_clear_stage_props()
-	else:
-		wave = int(event.get("wave", wave))
-		wave_active = bool(event.get("active", wave_active))
-		stage_cleared = bool(event.get("cleared", stage_cleared))
-		boss_wave = bool(event.get("boss", boss_wave))
-		waves_this_stage = int(event.get("waves", waves_this_stage))
+	level = new_level
+	wave = int(event.get("wave", wave))
+	wave_active = bool(event.get("active", false))
+	level_cleared = bool(event.get("cleared", false))
+	shop_level = bool(event.get("shop_level", false))
+	boss_level = bool(event.get("boss_level", false))
 	crystals = int(event.get("crystals", crystals))
 	total_kills = int(event.get("kills", total_kills))
 	if _client and run_active and _loadout_sent_seed != run_seed:
@@ -2184,19 +2282,23 @@ func state() -> Dictionary:
 		"biome": biome_id,
 		"biome_name": str(StageScript.biome(biome_id).name),
 		"stage": stage_index + 1,
-		"stages": MAX_STAGES,
+		"island": stage_index + 1,
+		"level": level,
 		"wave": wave,
-		"waves": waves_this_stage,
+		"level_in_island": wave,
+		"levels_per_island": LEVELS_PER_ISLAND,
 		"wave_active": wave_active,
-		"cleared": stage_cleared,
-		"boss": boss_wave,
+		"cleared": level_cleared,
+		"boss": boss_level,
+		"boss_level": boss_level,
+		"shop_level": shop_level,
+		"kind": _kind_for_level(level),
 		"crystals": crystals,
 		"keys": keys_earned,
 		"kills": total_kills,
 		"living": _live_mobs(),
 		"party": players.size(),
 		"queue": _queue.size(),
-		"boss_wave": boss_wave,
 		"local_peer": local_peer(),
 	}
 

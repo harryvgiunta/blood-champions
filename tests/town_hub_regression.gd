@@ -1,11 +1,11 @@
 extends SceneTree
 ## The town end of the one world, on real bodies: the square builds at the far end
-## of the trail, the five services resolve from a point, the recruiter hires and
+## of the trail, every service resolves from a point, the recruiter hires and
 ## refuses at the cap, the paperdoll moves gear between one mercenary and the
-## collective pool, and the square is the campaign's one settlement.
+## collective pool, and the square is the game's one settlement.
 ##
-## The town is not a scene of its own in the campaign; it is loaded here by asking
-## the world to put the warband down at its town end, which is exactly what a
+## The town is not a scene of its own; it is loaded here by asking the world to
+## put the warband down at its town end, which is exactly what a
 ## resumed save does.
 
 const State = preload("res://scripts/player_state.gd")
@@ -59,7 +59,6 @@ func run() -> void:
 
 	check_square()
 	await check_stash()
-	await check_altar()
 	await check_recruiter()
 
 	if game != null and is_instance_valid(game):
@@ -101,15 +100,15 @@ func check_square() -> void:
 	check(is_instance_valid(game.stash_chest), "the stash chest stands in the square")
 	check(is_instance_valid(game.recruiter_desk), "the recruiter desk stands in the square")
 	check(is_instance_valid(game.signpost), "the signpost stands in the square")
-	check(game.altar != null and game.altar.has_method("in_reach") and game.altar.has_method("interact"),
-		"the sacrificial altar is the shared object")
+	check(game.service_point("altar") == Vector3.ZERO, "the annoint altar is not in this game")
 	check(game.fire_light is OmniLight3D and game.fire_light.light_energy > 0.0,
 		"the campfire casts light")
 	check(game.flame is MeshInstance3D and game.flame.mesh != null, "the campfire has a flame mesh")
 
-	# Point resolution: the four rings name one service each, and the fire names
+	# Point resolution: every ring names one service each, and the fire names
 	# none of them.
-	for service in ["stash", "altar", "recruiter", "quartermaster"]:
+	for service in ["stash", "recruiter", "quartermaster",
+			"roguelite_rack", "roguelite_portal"]:
 		var point: Vector3 = game.service_point(service)
 		var named: String = game.service_at(point)
 		check(named == service, "the %s ring resolves to itself (got '%s')" % [service, named])
@@ -172,37 +171,6 @@ func check_stash() -> void:
 	if not worn_main.is_empty():
 		check(warband.stash.pooled_count(worn_main) == worn_pool + 1,
 			"the displaced main hand returns to the pool")
-
-# --- altar -----------------------------------------------------------------
-
-func check_altar() -> void:
-	var point: Vector3 = game.service_point("altar")
-	game.controller.active_body(1).global_position = point + Vector3(1.6, 0.1, 1.0)
-	await create_timer(0.25).timeout
-	check(game.interact_at(1, point) == "altar", "G at the block names the altar")
-	check(game.altar.is_open(), "the altar answers G in town")
-	var menu: Object = game.altar.menu()
-	check(menu != null, "the altar owns its ritual menu")
-	if menu != null:
-		check(menu.distill_rows().size() == 5, "all five cruor tiers are listed")
-		# The steel a player carries to the altar is the steel in the body he is
-		# inside: the panel reads that body off the soul map and leads its rack
-		# with that body's own copies, not with the band's dearest piece.
-		var controlled: int = game.controller.merc_for_peer(1)
-		check(int(menu.controlled_merc) == controlled,
-			"the altar opens on the body the soul is in (%d, expected %d)"
-			% [int(menu.controlled_merc), controlled])
-		var rows: Array = menu.anoint_rows()
-		var mine_rows := 0
-		for row in rows:
-			if bool(row["mine"]):
-				mine_rows += 1
-		check(mine_rows > 0, "the possessed body wears something the altar can mark")
-		if mine_rows > 0 and not rows.is_empty():
-			check(bool(rows[0]["mine"]),
-				"the rack leads with the controlled body's own gear")
-	if game.altar.is_open():
-		game.altar.close()
 
 # --- recruiter -------------------------------------------------------------
 

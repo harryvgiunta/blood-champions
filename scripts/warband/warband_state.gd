@@ -344,15 +344,12 @@ func apply_gear_request(request: Dictionary) -> Dictionary:
 
 # --- the quiver ------------------------------------------------------------
 
-## Ammunition is one pool for the whole band, exactly like the shared stash it
-## lives in: every shaft a bow looses comes out of it, every bunch a keeper sells
-## goes into it, and every archer's corpse gives a few back. A bow with nothing
-## in the quiver cannot be drawn, which is the whole of the rule. Below, the
-## quiver is the delve inventory: a party shoots what it packed and what it takes.
+## Arrows are unlimited in Blood Champions. The shaft item still exists - an
+## archer's corpse carries a few and the delve's inventory can hold what was
+## looted - but no bow reads a count, no keeper sells a bunch, and a piece in the
+## quiver is never the reason a string stays down. These accessors remain for the
+## loot and delve books that still move the item.
 const ARROW_ITEM := "arrow"
-## What a fresh campaign opens with. A body that has to buy its first shaft
-## before it may use a bow it just looted would read the bow as broken.
-const STARTING_ARROWS := 24
 
 func arrows() -> int:
 	return field_stash().pooled_count(ARROW_ITEM)
@@ -380,13 +377,6 @@ func add_arrows(count: int = 1) -> int:
 	field_stash().add(ARROW_ITEM, added)
 	_notify()
 	return added
-
-## A campaign's opening bunch. Seeding never mints: a warband that already counts
-## shafts - a resumed save, a keeper's purchase - keeps exactly what it had.
-func seed_quiver(count: int = STARTING_ARROWS) -> int:
-	if arrows() > 0:
-		return 0
-	return add_arrows(count)
 
 # --- the field's pool ---------------------------------------------------------
 
@@ -497,28 +487,23 @@ func reap_dead() -> Array[Dictionary]:
 func _on_merc_died(_merc_id: int) -> void:
 	reap_dead()
 
-## The band a new campaign opens with: one body, one club. He is naked apart from
-## the naked base set the paperdoll draws for an empty slot - the rest of a
-## campaign's kit is won, not issued, and every piece he ends the run with came off
-## a body he put down (`arm_one_piece`) or out of a cage.
+## The band a new game opens with: one body carrying the two starter weapons.
+## He is naked apart from the naked base set the paperdoll draws for an empty slot;
+## the rest of the armory is unlocked on the rack with keys a boss drops.
 const STARTING_BAND := [
 	{"name": "Aldous"},
 ]
-## The one piece a campaign issues: a knotted club, in the main hand, in the
-## shared stash before it is worn. A body that opens the run with bare hands can
-## neither cut a latch (`soldier_cages.holds_blade`) nor take the first corpse's
-## kit, and the wood's first fight is a runt precisely so that this club wins it.
-const STARTING_ARMS := "club_makeshift"
-## The one weld a campaign issues with it: the heavy blow the wood's first fight
-## is won with (`AnnointCatalog` `k_heavy_swing`). It rides the copy, not the
-## catalog row, so the runts' clubs in the hollow are still plain wood.
-const STARTING_ANNOINT := "k_heavy_swing"
+## The pair every player begins with, one per weapon set: the twig bow in set 1
+## and the makeshift hatchet in set 2. Both are free in the rack's registry, and
+## both ride onto the island exactly as they are bound here.
+const STARTING_RANGED := "bow_twig"
+const STARTING_MELEE := "hatchet_makeshift"
 
-## Seed a campaign's one starting body, naked but for the club. An existing warband
-## is never touched: a resume, a lend or a second boot of the same save must not
-## multiply the band. The club walks the one path every other piece walks - into
-## the shared stash and then onto the body through `equip_merc` - so the pool stays
-## the only armorer and the purse is never charged for it.
+## Seed a new game's one starting body with the starter pair. An existing warband
+## is never touched: a resume or a second boot of the same save must not multiply
+## the band. Both pieces walk the one path every other piece walks - into the
+## shared stash and then onto the body through `equip_merc` - so the pool stays the
+## only armorer and the purse is never charged for them.
 func seed_starting_band() -> int:
 	if not roster.is_empty():
 		return roster.count()
@@ -529,21 +514,23 @@ func seed_starting_band() -> int:
 	return roster.count()
 
 
-## Put the campaign's one club in a fresh body's hand, annointed. Silent: the
-## seeding owns the single notify, and a piece that came out of the pool - or a
-## weld its own band was born with - is not a purchase.
-##
-## The weld is laid on the copy the body actually claimed (`annoint_copy` mints or
-## takes the serial inside `equip_merc`), so the relic is the steel in his hand and
-## not every club in the warband.
+## Put the starter pair in the body's two weapon sets: the bow in set 1, the
+## hatchet in set 2, with set 1 left in the hands. Silent: the seeding owns the
+## single notify, and a piece that came out of the pool is not a purchase.
 func _issue_starting_arms(merc_id: int) -> void:
 	if merc_id <= 0 or not roster.is_alive(merc_id):
 		return
-	field_stash().add(STARTING_ARMS, 1)
-	equip_merc(merc_id, "main", STARTING_ARMS, false, false)
-	if str(roster.equipped_of(merc_id).get("main", "")) != STARTING_ARMS:
+	field_stash().add(STARTING_RANGED, 1)
+	equip_merc(merc_id, "main", STARTING_RANGED, false, false)
+	if str(roster.equipped_of(merc_id).get("main", "")) != STARTING_RANGED:
 		return
-	annoints.add(STARTING_ARMS, annoint_copy(merc_id, "main"), STARTING_ANNOINT)
+	# Set 2 is the melee hand: swap onto it, put the axe there, and come back to
+	# the bow so the body walks out of the fire holding the ranged piece.
+	roster.swap_weapon_set(merc_id)
+	field_stash().add(STARTING_MELEE, 1)
+	equip_merc(merc_id, "main", STARTING_MELEE, false, false)
+	if str(roster.equipped_of(merc_id).get("main", "")) == STARTING_MELEE:
+		roster.swap_weapon_set(merc_id)
 
 
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:

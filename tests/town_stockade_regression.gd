@@ -447,22 +447,25 @@ func check_talk() -> void:
 
 func check_services() -> void:
 	# Every service the loop owns still resolves from its own point.
-	for service in ["stash", "altar", "recruiter", "quartermaster",
-			"vendor_orla", "vendor_brann", "vendor_vey"]:
+	for service in ["stash", "recruiter", "quartermaster",
+			"vendor_orla", "vendor_brann", "vendor_vey",
+			"roguelite_rack", "roguelite_portal"]:
 		var point: Vector3 = town.service_point(service)
 		check(point != Vector3.ZERO, "%s has a point in the settlement" % service)
 		check(town.service_at(point) == service,
 			"the %s ring resolves to itself (got '%s')" % [service, town.service_at(point)])
 	check(town.service_at(town.global_position) == "", "the fire is still not a service")
 
-	# The altar is where the ichor is worked: G opens its rite, and an open altar
-	# is an open panel.
-	var altar: Vector3 = town.service_point("altar")
-	check(town.interact_at(1, altar) == "altar", "G at the altar names it")
-	check(town.altar.is_open(), "the altar's panel opens")
-	check(town.panels_open(), "an open altar counts as an open panel")
+	# The rack is where a weapon is opened and bound: G opens its page, and an
+	# open board is an open panel. The altar is out of this game.
+	check(town.service_point("altar") == Vector3.ZERO, "the altar is not a service")
+	var rack: Vector3 = town.service_point("roguelite_rack")
+	check(town.interact_at(1, rack) == "roguelite_rack", "G at the rack names it")
+	check(town.forge_panel.is_open() and town.forge_panel.mode == "rack",
+		"the rack's page opens")
+	check(town.panels_open(), "an open rack counts as an open panel")
 	town.close_panels()
-	check(not town.altar.is_open(), "the altar closes with the rest")
+	check(not town.forge_panel.is_open(), "the rack closes with the rest")
 
 	# The vendors are still three stalls with a keeper each.
 	for index in TownScript.VENDOR_SERVICES.size():

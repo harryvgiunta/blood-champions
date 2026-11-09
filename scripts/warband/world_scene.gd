@@ -1,8 +1,8 @@
 extends Node3D
-## GHOST OF THE WARBAND: the campaign, as one continuous world.
+## BLOOD CHAMPIONS: the town and the run, in one continuous world.
 ##
-## Hearthstead is where a run starts: the walled square with its counters, its
-## altar, the recruiter's board and the two gates that lead out of it. Walking is
+## Hearthstead is where a game starts: the walled square with its counters, the
+## recruiter's board, the Weapon Rack and the Start Run Portal. Walking is
 ## the only way anywhere - there is no scene door to press - and the two
 ## directions are the two things to do: **the road**, 1,374 m of wood with a
 ## cage, cultists and warcamps on it, ending at the deep wood where the
@@ -1167,9 +1167,8 @@ func _muster_point(merc_id: int, index: int) -> Vector3:
 ## somebody's prediction: it draws and releases on screen, and only the simulation
 ## that owns it spawns the missile that can hurt anyone.
 ##
-## The quiver gate is installed here too, so a body that changes its bow for a
-## blade needs no second thought: `Combat.can_draw()` asks the party's one quiver
-## every time the string comes up.
+## Every body's bowstring and throwing hand. Arrows are unlimited in Blood
+## Champions: there is no quiver and no gate, so a bow is never refused.
 func _wire_projectiles(actor) -> void:
 	if actor == null or not is_instance_valid(actor):
 		return
@@ -1180,31 +1179,12 @@ func _wire_projectiles(actor) -> void:
 		combat.shot.connect(_on_body_shot.bind(actor))
 	if not combat.thrown.is_connected(_on_body_thrown):
 		combat.thrown.connect(_on_body_thrown.bind(actor))
-	combat.ammo_gate = _quiver_has_arrow
+	combat.ammo_gate = Callable()
 
 
-## The one rule behind every bow in the warband: a shaft in the quiver or nothing
-## on the string.
-func _quiver_has_arrow() -> bool:
-	return warband == null or warband.has_arrows()
-
-
-## Spend one shaft from the party quiver and mirror the spend to every peer, the
-## way a kill's gold is mirrored: the quiver is one ledger, and a guest that could
-## not see the spend would shoot free. Answers false when the quiver is empty, so
-## the caller can refuse the missile rather than fly an arrow nobody paid for.
+## Kept for every caller that asked whether a shaft could leave the quiver. There
+## is no quiver to spend in this game, so the answer is always yes.
 func spend_arrow() -> bool:
-	# A run has no quiver to spend: arrows are the arena's, not the campaign's,
-	# and an ability volley must not empty a purse the run never opened.
-	if roguelite != null and roguelite.is_running():
-		return true
-	if warband == null:
-		return true
-	if warband.take_arrows(1) <= 0:
-		return false
-	var link := get_node_or_null("/root/GameFlow/WarbandLink")
-	if link != null and link.has_method("report_ammo_spent"):
-		link.report_ammo_spent(1)
 	return true
 
 
@@ -1569,16 +1549,6 @@ func _wire_possession() -> void:
 	controller.possession_changed.connect(_on_possession_changed)
 	controller.transfer_refused.connect(_on_transfer_refused)
 	controller.possession_released.connect(_on_possession_released)
-	controller.draw_refused.connect(_on_draw_refused)
-
-
-## The quiver is empty and the string stayed down. Said once per press, and the
-## line points at the two places a shaft comes from. The peer id is the presser's,
-## and only the local soul's presses reach here.
-func _on_draw_refused(_peer_id: int) -> void:
-	if hud == null:
-		return
-	hud.set_status("Out of arrows: buy a bunch from a keeper, or take them off an archer.", 2.5)
 
 
 func _on_possession_changed(peer_id: int, merc_id: int) -> void:
@@ -2661,10 +2631,15 @@ func _update_prompt() -> void:
 		var line := str(roguelite.prompt_line(actor))
 		if line.is_empty():
 			var run_state: Dictionary = roguelite.state()
-			line = "%s  ·  WAVE %d / %d  ·  %d HOSTILES  ·  TAB swaps hands" % [
-				str(run_state.get("biome_name", "")),
-				int(run_state.get("wave", 0)), int(run_state.get("waves", 3)),
-				int(run_state.get("living", 0))]
+			line = "%s  ·  LEVEL %d  ·  ISLAND %d  ·  %d HOSTILES  ·  TAB swaps hands" % [
+				str(run_state.get("biome_name", "")), int(run_state.get("level", 0)),
+				int(run_state.get("island", 1)), int(run_state.get("living", 0))]
+			if bool(run_state.get("shop_level", false)):
+				line = "%s  ·  LEVEL %d  ·  SHOP BEFORE THE BOSS" % [
+					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
+			elif bool(run_state.get("cleared", false)):
+				line = "%s  ·  LEVEL %d CLEARED  ·  THE PORTAL WAITS" % [
+					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
 		_write_prompt(line)
 		return
 	# A cage in reach outranks every other line: it is the one thing standing at
@@ -2801,12 +2776,9 @@ func _on_menu_quit_requested() -> void:
 # --- the town's readout ----------------------------------------------------
 #
 # The world *is* the scene the town's services stand in, so the services are
-# answered from here: the altar, the counters and the stash are the town area's
-# own objects, forwarded rather than duplicated.
+# answered from here: the counters and the stash are the town area's own
+# objects, forwarded rather than duplicated.
 
-var altar:
-	get:
-		return town.altar if town != null else null
 var quartermaster:
 	get:
 		return town.quartermaster if town != null else null

@@ -298,7 +298,7 @@ func _arm_track(track: String, fade: float) -> void:
 ## the menu theme is stopped outright - no crossfade carrying the title music
 ## onto the first act - and the campaign track starts at zero, its own beginning
 ## rather than wherever a bed happened to be.
-func start_campaign_music() -> void:
+func start_run_music() -> void:
 	# The title is still the current scene for the rest of the frame (and until
 	# the next scene loads). Remember which scene asked, so `_sync_scene_music`
 	# cannot answer it with the menu theme and undo the restart.

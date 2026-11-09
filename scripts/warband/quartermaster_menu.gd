@@ -20,14 +20,13 @@ const MUTED := LedgerThemeScript.INK_MUTED
 const BLOOD := LedgerThemeScript.BLOOD
 
 ## Base stock: the makeshift tier a prisoner actually carries, the naked set a
-## body starts in, then one legal piece for every kind of hand (and the shafts its
-## bows spend) plus the cheapest armour and rings, so a fresh warband can be armed
-## without a single lucky drop.
+## body starts in, then one legal piece for every kind of hand plus the cheapest
+## armour and rings, so a fresh warband can be armed without a single lucky drop.
 const STOCK := [
 	"dagger_ironwood", "club_makeshift", "axe_makeshift", "bow_twig", "branch_heavy", "shield_wood",
 	"armor_naked_head", "armor_naked_chest", "armor_naked_hands",
 	"armor_naked_legs", "armor_naked_feet",
-	"sword_short", "dagger_iron", "bow_short", "arrow", "shield_buckler",
+	"sword_short", "dagger_iron", "bow_short", "shield_buckler",
 	"armor_leather_head", "armor_leather_chest", "armor_mail_chest",
 	"ring_copper", "ring_health", "focus_tome", "torch_hand",
 ]

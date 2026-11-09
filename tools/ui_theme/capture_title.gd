@@ -1,8 +1,7 @@
 extends SceneTree
-## Runs the title scene and writes the four doors, then each co-op form over them.
-const OUT := "res://media/concept/game_title.png"
-const HOST_OUT := "res://media/concept/game_title_host.png"
-const JOIN_OUT := "res://media/concept/game_title_join.png"
+## Runs the title scene and writes its two doors, then the join form over them.
+const OUT := "res://.runtime/capture_title.png"
+const JOIN_OUT := "res://.runtime/capture_title_join.png"
 
 func _initialize() -> void:
 	var scene: Node = load("res://title.tscn").instantiate()
@@ -11,9 +10,6 @@ func _initialize() -> void:
 
 func _run(title: Node) -> void:
 	await _capture(OUT, "TITLE_CAPTURE_OK", 30)
-	title.call("_open_host")
-	await _capture(HOST_OUT, "TITLE_HOST_OK", 8)
-	title.call("_close_host")
 	title.call("_open_join")
 	await _capture(JOIN_OUT, "TITLE_JOIN_OK", 8)
 	quit()

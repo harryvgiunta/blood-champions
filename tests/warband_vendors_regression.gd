@@ -97,7 +97,7 @@ func run() -> void:
 	# Every counter is a service with its own seat, standing inside the market.
 	var points: Dictionary = {
 		"stash": game.service_point("stash"),
-		"altar": game.service_point("altar"),
+		"roguelite_rack": game.service_point("roguelite_rack"),
 		"recruiter": game.service_point("recruiter"),
 		"quartermaster": game.service_point("quartermaster"),
 		"gate": game.service_point("gate"),
@@ -192,33 +192,13 @@ func run() -> void:
 	check(not bool(game.vendor_menu.sell("bow_short").get("ok", true)),
 		"selling a copy the pool does not hold is refused")
 
-	# Ammunition is the one row sold by the bunch: the board prices the whole
-	# bunch, one click puts a quiver's worth of shafts in the shared pool, and a
-	# shaft sells back for the keeper's share - the loop a dry bow depends on.
-	var bundle: int = state.item_bundle("arrow")
-	check(bundle > 1, "arrow ammunition is sold in bunches (%d)" % bundle)
-	check(warband.arrows() == 0, "the test starts with a dry quiver")
-	var arrow_row: Dictionary = _row_for(game.vendor_menu.stock_rows(), "arrow")
-	check(not arrow_row.is_empty(), "the store stocks arrows")
-	check(int(arrow_row.get("price", 0)) == int(State.ITEMS["arrow"]["price"]) * bundle,
-		"the shelf prices the whole bunch (%d)" % int(arrow_row.get("price", 0)))
-	check(int(arrow_row.get("bundle", 0)) == bundle, "and says how many it hands over")
-	var credits_for_arrows := int(state.credits)
-	var arrow_bought: Dictionary = game.vendor_menu.buy("arrow")
-	check(bool(arrow_bought.get("ok", false)), "a bunch of arrows is bought")
-	check(warband.arrows() == bundle, "the bunch lands in the quiver (%d)" % warband.arrows())
-	check(int(state.credits) == credits_for_arrows - int(arrow_row["price"]),
-		"the bunch costs one shelf price (%d)" % state.credits)
-	check(warband.has_arrows(), "and the quiver answers a bow again")
-	check(game.vendor_menu.status_text().contains("Arrow"), "the keeper says what was bought")
-	var arrow_pool: Dictionary = _row_for(game.vendor_menu.stash_rows(), "arrow")
-	check(int(arrow_pool.get("count", 0)) == bundle, "the stash board counts the bunch")
-	var shaft_sale: Dictionary = game.vendor_menu.sell("arrow")
-	check(bool(shaft_sale.get("ok", false)), "a keeper buys shafts back")
-	check(int(shaft_sale.get("price", 0)) == int(floor(float(State.ITEMS["arrow"]["price"]) * 0.6)),
-		"one shaft sells for the keeper's share (%d)" % int(shaft_sale.get("price", 0)))
-	check(warband.arrows() == bundle - 1, "and one shaft leaves the quiver")
-	warband.take_arrows(warband.arrows())
+	# Arrows are unlimited, so no keeper sells shafts any more: there is no
+	# quiver to stock and no bunch to buy.
+	for seat in range(State.VENDORS.size()):
+		game.vendor_menu.configure(warband, seat)
+		check(_row_for(game.vendor_menu.stock_rows(), "arrow").is_empty(),
+			"keeper seat %d stocks no arrows" % seat)
+	game.vendor_menu.configure(warband, 0)
 
 	# A short purse refuses before the stash is touched.
 	state.credits = 5

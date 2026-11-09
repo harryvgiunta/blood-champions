@@ -203,6 +203,34 @@ static func shop(parent: Node3D, at: Vector3, wares: Array, payload: Dictionary 
 	return root
 
 
+# --- rack ------------------------------------------------------------------
+
+## The shop level's Weapon Rack: the same board the town keeps, so a party can
+## spend the boss key it just earned and take the new piece straight into the
+## next fight.
+static func rack(parent: Node3D, at: Vector3, payload: Dictionary = {}) -> Node3D:
+	var root := Node3D.new()
+	root.name = "WeaponRack"
+	parent.add_child(root)
+	root.global_position = at
+	var wood := Geo.material(Color(0.28, 0.20, 0.13), 0.0, 0.88)
+	var steel := Geo.material(Color(0.70, 0.74, 0.75), 0.7, 0.3)
+	var iron := Geo.material(Color(0.20, 0.20, 0.21), 0.6, 0.42)
+	for side in [-1.0, 1.0]:
+		Geo.box(root, Vector3(0.18, 2.0, 0.18), Vector3(float(side) * 1.25, 1.0, 0.0), wood)
+	Geo.box(root, Vector3(2.9, 0.18, 0.24), Vector3(0.0, 1.85, 0.0), wood)
+	Geo.box(root, Vector3(2.9, 0.14, 0.24), Vector3(0.0, 0.9, 0.0), wood)
+	for index in 3:
+		var x := (float(index) - 1.0) * 0.78
+		Geo.cylinder(root, 0.035, 0.035, 1.45, Vector3(x, 1.4, 0.12), wood, 6)
+		var blade := Geo.box(root, Vector3(0.11, 0.5, 0.03),
+			Vector3(x, 2.18, 0.12), steel if index != 1 else iron)
+		blade.rotation.z = 0.12 if index == 0 else (-0.1 if index == 2 else 0.0)
+	_label(root, "WEAPON RACK", Vector3(0.0, 2.95, 0.0), Color(0.92, 0.86, 0.68), 38)
+	tag_prop(root, "rack", payload)
+	return root
+
+
 # --- portal ----------------------------------------------------------------
 
 ## A biome portal: a standing ring of stone around a lit sheet of the next

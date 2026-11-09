@@ -1,8 +1,8 @@
 extends SceneTree
-## Boots the real warband world, stands the party on the first arena island and
-## writes two frames: the Town Hub with its three new fixtures, and the island
-## under a live wave. Art-direction verification only - this script changes
-## nothing and the files it writes are gitignored.
+## Boots the real world, stands the party on the first island and writes its
+## frames: the Town Hub with the rack and the portal, the rack's page, and the
+## island under a live wave. Art-direction verification only - this script
+## changes nothing and the files it writes are gitignored.
 ##
 ##   .runtime/godot/Godot_v4.7.2-stable_win64_console.exe --path . \
 ##       --script res://tools/ui_theme/capture_rogue.gd --resolution 1440x900
@@ -55,9 +55,18 @@ func _run(scene: Node) -> void:
 			for _frame in 60:
 				await process_frame
 			_capture("res://.runtime/capture_rogue_%s.png" % str(biomes[index]))
+		# The shop level: no wave, the stall, the rack and the portal to the boss.
+		run.wave = 9
+		run.level = 8
+		run.level_cleared = true
+		run._begin_level()
+		for _frame in 60:
+			await process_frame
+		_capture("res://.runtime/capture_rogue_shop.png")
 		# The island's furniture and the draft window: clear the last island,
 		# walk the body to the pedestal and open the board it offers.
-		run._clear_stage()
+		run.level_cleared = true
+		run._clear_level()
 		for _frame in 30:
 			await process_frame
 		var pedestal = null

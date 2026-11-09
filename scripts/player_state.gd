@@ -56,14 +56,13 @@ const ITEMS := {
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"A green sapling and a length of cord",
 		"detail":"5 damage at full draw / 0.7 s draw / it will put an arrow in the wood"},
-	# Ammunition. A shaft is a carried piece, never a worn one: the shared stash
-	# counts them, one leaves the quiver for every arrow a bow looses, a trail
-	# archer's corpse is worth bending over for, and a keeper sells them by the
-	# bunch (`bundle` at the generic price, so a sale still pays per shaft).
+	# A shaft is a carried piece, never a worn one. Arrows are unlimited, so no
+	# bow reads this count and no keeper sells a bunch; the item remains for the
+	# loot and delve books that can still pick a corpse's quiver clean.
 	"arrow": {"name":"Arrow", "short":"Arrow", "kind":"arrow", "index":0, "price":2,
 		"category":"ammo", "slot":"", "bundle":10, "material":"Shaft",
 		"summary":"An ash shaft, an iron head and goose fletching",
-		"detail":"One shaft per loosed arrow / sold by the bunch of ten"},
+		"detail":"A shaft off a fallen archer / bows no longer need one"},
 	"club_makeshift": {"name":"Club", "short":"Club", "kind":"sword", "index":3, "price":4,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A knotted length of heartwood with the root still on it",
@@ -418,14 +417,14 @@ static func migrate_item_id(item_id: String) -> String:
 
 const VENDORS := [
 	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
-		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone","arrow",
+		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
 		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
 		"axe_makeshift","hatchet_makeshift","throwing_axe","dagger_throwing","javelin_iron",
 		"sword_short","sword_arming","sword_great","dagger_iron",
 		"xbow_heavy","xbow_auto",
-		"shield_buckler","shield_kite","shield_tower","shield_wood","arrow",
+		"shield_buckler","shield_kite","shield_tower","shield_wood",
 	]},
 	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
 		"armor_naked_head","armor_naked_chest","armor_naked_hands","armor_naked_legs","armor_naked_feet",

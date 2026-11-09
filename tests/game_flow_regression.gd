@@ -1,13 +1,12 @@
 extends SceneTree
-## GHOST OF THE WARBAND: the four doors on the title, through the real `GameFlow`
-## and the real world scene.
+## BLOOD CHAMPIONS: the two doors on the title, through the real `GameFlow` and
+## the real world scene.
 ##
-## New Campaign opens the world in Hearthstead with a fresh warband and a fresh
-## purse; Resume Campaign opens it where the save's bookmark stands; a campaign
-## that was left through the menu is on disk and resumes; and leaving the world
-## never strands the flow. The world's own content is proven by its own
-## regression - this one proves the loop is wired and that the warband, the
-## roster and the purse survive every hand-off.
+## PLAY opens the one world in Hearthstead, seeds the starter pair on the first
+## press and hosts it; the next PLAY resumes the same world on its save; the
+## warband, roster and purse survive every hand-off; and leaving the world never
+## strands the flow. The world's own content is proven by its own regression -
+## this one proves the loop is wired.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
@@ -48,28 +47,33 @@ func run() -> void:
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
 
-	# --- NEW CAMPAIGN: Hearthstead, a fresh warband and a fresh purse ---------
+	# --- PLAY: Hearthstead, a fresh warband and a fresh purse -----------------
 	check(int(state.credits) > 0, "the purse starts with the new-game credits")
 	warband.hire("Old Hand")
 	warband.add_mercenary("Survivor")
 	var stale: int = warband.roster.count()
-	check(stale == 2, "a warband stands before the new campaign starts (%d)" % stale)
+	check(stale == 2, "a warband stands before PLAY opens the world (%d)" % stale)
 
 	flow.active = true
-	flow.start_campaign()
+	var port := _free_udp_port()
+	flow.play(port, "Host")
 	var world = await _wait_scene(WORLD, 12.0)
-	check(world != null, "NEW CAMPAIGN opens the world")
+	check(world != null, "PLAY opens the world")
 	if world == null:
 		_finish()
 		return
-	check(flow.world_start == "town", "at Hearthstead, which is where a run starts")
-	# A fresh band is one body and the one club the campaign issues: nothing else
-	# is handed over at the door, and every piece it ends the run in is taken off
-	# a kill.
+	check(flow.world_start == "town", "at Hearthstead, which is where a game starts")
+	# A fresh band is one body with the starter pair: the bow in set 1 and the
+	# hatchet in set 2, and every other weapon is opened at the rack.
 	check(world.bodies.size() == warband.STARTING_BAND.size(),
 		"the square fields the starting band (%d bodies)" % world.bodies.size())
 	check(warband.roster.count() == warband.STARTING_BAND.size(),
 		"and the warband owns them (%d)" % warband.roster.count())
+	var first: int = warband.roster.ids()[0]
+	check(str(warband.roster.equipped_of(first).get("main", "")) == warband.STARTING_RANGED,
+		"the starter bow is in set 1")
+	check(str(warband.roster.weapon_set_pair(first, 1).get("main", "")) == warband.STARTING_MELEE,
+		"and the hatchet is in set 2")
 	check(flow.transitions == 1, "one transition so far")
 	check(int(state.credits) > 0, "the purse is the new-game purse, not a previous run's")
 
@@ -79,26 +83,27 @@ func run() -> void:
 	reloaded.from_dict(warband.to_dict().get("roster", {}))
 	check(reloaded.count() == live, "the saved roster matches the live one")
 
-	# --- a checkpoint is what RESUME reads ----------------------------------
+	# --- the world is on disk ------------------------------------------------
 	var body = world.bodies[0]
 	warband.save_checkpoint("trail", "trail", body.global_position, "TRAIL")
 	check(warband.has_checkpoint(), "the world writes a bookmark")
 	warband.save_state()
-	check(FileAccess.file_exists(WARBAND_SAVE), "the campaign is on disk")
+	check(FileAccess.file_exists(WARBAND_SAVE), "the world is on disk")
 
-	# --- a campaign from the list: back to the bookmark ----------------------
-	# The warband on disk is what a relaunch reads: reset, load, then resume.
+	# --- PLAY again resumes the same world ----------------------------------
+	# The warband on disk is what a relaunch reads: reset, load, then PLAY.
+	# PLAY always stands the party in Hearthstead - the town is the lobby.
 	warband.reset_state()
 	check(not warband.has_checkpoint(), "a reset forgets the bookmark")
 	warband.load_state()
-	flow.enter_warband()
+	flow.play(port, "Host")
 	var resumed = await _wait_scene(WORLD, 12.0)
-	check(resumed != null, "enter_warband opens the world")
+	check(resumed != null, "a second PLAY opens the world")
 	if resumed == null:
 		_finish()
 		return
-	check(flow.world_start == "checkpoint", "at the bookmark, not the square (%s)" % flow.world_start)
-	check(warband.has_checkpoint(), "and the bookmark is still the one the save holds")
+	check(flow.world_start == "town", "in Hearthstead, not on the bookmark (%s)" % flow.world_start)
+	check(warband.has_checkpoint(), "and the bookmark is still on the save")
 	check(flow.transitions == 2, "each door is one transition (%d)" % flow.transitions)
 
 	# --- EXIT TO TITLE leaves the flow usable -------------------------------
@@ -107,7 +112,16 @@ func run() -> void:
 
 	_finish()
 
+func _free_udp_port() -> int:
+	var socket := PacketPeerUDP.new()
+	check(socket.bind(0) == OK, "the test finds a free UDP port")
+	var free_port := socket.get_local_port()
+	socket.close()
+	return free_port
+
+
 func _finish() -> void:
+	flow.leave_warband()
 	flow.active = false
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)

@@ -233,7 +233,7 @@ func _check_tracks() -> void:
 	# A campaign start takes the score back to zero and names the soundtrack,
 	# with no device: the manager's intent is testable headless.
 	audio.play_music("menu")
-	audio.start_campaign_music()
+	audio.start_run_music()
 	check(audio.music_track == "warband", "a campaign start did not ask for the soundtrack")
 
 	# Headless: the manager still names the track it wants, with no device.

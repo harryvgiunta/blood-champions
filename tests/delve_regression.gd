@@ -20,7 +20,7 @@ extends SceneTree
 ##   * only the bodies inside `BODY_HIDE_DISTANCE` of the eye are drawn, and a
 ##     hidden body is still a body: it keeps its brain, its clock and its place;
 ##   * below, the party is the only thing a soul or a paperdoll can reach, the
-##     quiver is the inventory, and everything taken - by a right click, the window
+##     inventory is the pool, and everything taken - by a right click, the window
 ##     or a squadmate - lands in the inventory and never in the stash; a right
 ##     click takes a whole body and the steel beside it and dresses nobody;
 ##   * a den sleeps until a body is in its room, then joins the hostile list whole,
@@ -282,9 +282,9 @@ func check_mouth_and_pack() -> void:
 	check(area.at_mouth(soul), "a body by the pit is at the mouth")
 	check(area.prompt_line(soul) == AreaScript.MOUTH_PROMPT,
 		"the crosshair names the way down (%s)" % area.prompt_line(soul))
-	# The supplies a party is never asked to pack by hand.
+	# The supplies a party is never asked to pack by hand. Arrows are unlimited
+	# in this game, so the one supply is the bandage.
 	warband.stash.add("bandage_linen", 4)
-	var quiver: int = warband.stash.pooled_count("arrow")
 	var dressings: int = warband.stash.pooled_count("bandage_linen")
 	game._try_interact()
 	check(area.prep.is_open(), "G at the mouth opens the delve panel")
@@ -313,39 +313,37 @@ func check_mouth_and_pack() -> void:
 		"every standing body is offered (%d of %d on the field)"
 		% [offered.size(), warband.roster.field_ids().size()])
 	check(area.prep.selected().size() == offered.size(), "and every one starts chosen")
-	check(quiver > 0 and dressings > 0, "the town keeps a quiver and dressings (%d / %d)" % [
-		quiver, dressings])
-	check(warband.delve.inventory.pooled_count("arrow") == quiver
-			and warband.stash.pooled_count("arrow") == 0,
-		"the quiver is packed the moment the page opens (%d)" % quiver)
+	check(dressings > 0, "the town keeps dressings (%d)" % dressings)
 	check(warband.delve.inventory.pooled_count("bandage_linen") == dressings
 			and warband.stash.pooled_count("bandage_linen") == 0,
-		"and so are the bandages (%d)" % dressings)
+		"the dressings are packed the moment the page opens (%d)" % dressings)
+	check(warband.delve.inventory.pooled_count("arrow") == 0,
+		"and no quiver is packed: arrows are unlimited")
 	# A click sends one copy; the prompt a shift-click opens sends as many as it is
 	# told, and never fewer than one.
-	area.prep.unpack("arrow")
-	check(warband.stash.pooled_count("arrow") == 1
-			and warband.delve.inventory.pooled_count("arrow") == quiver - 1,
-		"one click sends a single shaft back to the stash (%d)" % quiver)
-	area.prep.open_count("arrow", true)
+	area.prep.unpack("bandage_linen")
+	check(warband.stash.pooled_count("bandage_linen") == 1
+			and warband.delve.inventory.pooled_count("bandage_linen") == dressings - 1,
+		"one click sends a single dressing back to the stash (%d)" % dressings)
+	area.prep.open_count("bandage_linen", true)
 	area.prep.submit_count(0)
-	check(warband.stash.pooled_count("arrow") == 0
-			and warband.delve.inventory.pooled_count("arrow") == quiver,
+	check(warband.stash.pooled_count("bandage_linen") == 0
+			and warband.delve.inventory.pooled_count("bandage_linen") == dressings,
 		"a typed zero still moves one copy, no more and no less")
 	check(not area.prep.count_open(), "and the prompt shuts once it has moved")
-	var ask := mini(6, quiver)
-	area.prep.click("arrow", false, true)
-	check(area.prep.count_open() and area.prep.prompt_item() == "arrow",
+	var ask := mini(6, dressings)
+	area.prep.click("bandage_linen", false, true)
+	check(area.prep.count_open() and area.prep.prompt_item() == "bandage_linen",
 		"a shift-click opens the how-many prompt on that row")
 	area.prep.submit_count(ask)
-	check(warband.stash.pooled_count("arrow") == ask
-			and warband.delve.inventory.pooled_count("arrow") == quiver - ask,
-		"the typed %d shafts come back to the stash" % ask)
-	area.prep.open_count("arrow", true)
+	check(warband.stash.pooled_count("bandage_linen") == ask
+			and warband.delve.inventory.pooled_count("bandage_linen") == dressings - ask,
+		"the typed %d dressings come back to the stash" % ask)
+	area.prep.open_count("bandage_linen", true)
 	area.prep.submit_count(-1)
-	check(warband.stash.pooled_count("arrow") == 0
-			and warband.delve.inventory.pooled_count("arrow") == quiver,
-		"and ALL packs every spare shaft down again (%d)" % quiver)
+	check(warband.stash.pooled_count("bandage_linen") == 0
+			and warband.delve.inventory.pooled_count("bandage_linen") == dressings,
+		"and ALL packs every spare dressing down again (%d)" % dressings)
 	# The rows themselves, driven the way a player drives them: a real left click
 	# on a stash row sends one copy, a shift-click asks how many instead. The top
 	# row is used because the list scrolls and a piece further down is out of view.
@@ -423,8 +421,8 @@ func check_descent() -> void:
 	var refused: Dictionary = game.controller.direct(1, _stayer)
 	check(not bool(refused.get("ok", true)), "a soul below cannot take the body left home")
 	check(not game._is_free_ally(_stayer), "and the squad leaves that body standing")
-	check(warband.arrows() == warband.delve.inventory.pooled_count("arrow") and warband.arrows() > 0,
-		"below, the quiver is the delve inventory (%d)" % warband.arrows())
+	check(warband.delve.inventory.pooled_count("arrow") == 0,
+		"below, no quiver is packed: arrows are unlimited")
 	var equip: Dictionary = warband.equip_merc(_stayer, "main", "sword_arming")
 	check(not bool(equip.get("ok", true)), "a body in the town cannot be dressed from below")
 	var file := FileAccess.open(WARBAND_SAVE, FileAccess.READ)
@@ -1204,8 +1202,8 @@ func check_den_and_loot() -> void:
 	game.paperdoll.open(int(game.controller.merc_for_peer(1)))
 	var shows_inventory := false
 	for row in game.paperdoll.stash_rows:
-		if str(row.get("item_id", "")) == "arrow" \
-				and int(row.get("pooled", 0)) == warband.delve.inventory.pooled_count("arrow"):
+		if str(row.get("item_id", "")) == "bandage_linen" \
+				and int(row.get("pooled", 0)) == warband.delve.inventory.pooled_count("bandage_linen"):
 			shows_inventory = true
 	check(shows_inventory, "below, the paperdoll dresses from the delve inventory")
 	check(not game.paperdoll.picker_buttons.has(_stayer), "and offers only the party")
@@ -1367,8 +1365,6 @@ func check_fall() -> void:
 		var body = game.controller.body_of(merc_id)
 		if body != null and bool(body.get("alive")) and not bool(body.get("downed")) and party.size() < 2:
 			party.append(merc_id)
-	var packed_before: int = warband.stash.pooled_count("arrow")
-	warband.pack_for_delve("arrow", 5)
 	var worn: int = 0
 	for merc_id in party:
 		worn += warband.roster.worn_entries(merc_id).size()
@@ -1420,7 +1416,6 @@ func check_fall() -> void:
 		if warband.roster.has(merc_id) and not warband.roster.worn_entries(merc_id).is_empty():
 			stripped = false
 	check(stripped, "everything the party wore is the Hollow's")
-	check(warband.stash.pooled_count("arrow") == packed_before - 5, "and so is what it packed")
 	for merc_id in party:
 		var body = game.controller.body_of(merc_id)
 		check(body != null and bool(body.get("alive")) and not bool(body.get("downed")) \

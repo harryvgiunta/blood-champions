@@ -17,9 +17,8 @@ extends SceneTree
 ##      frontier's 0.70 m, eased), and the reticle ray still resolves its own aim
 ##      point afterwards.
 ##   5. **Thrown steel.** T held and released spawns a real thrown blade.
-##   6. **A quiver, not a decoration.** Every loosed arrow takes a shaft out of
-##      the party's shared quiver, an empty quiver keeps the string down (and says
-##      so on the HUD), and a bought bunch puts the bow back in the body's hands.
+##   6. **The endless quiver.** Arrows are unlimited: a shot spends no shaft, an
+##      empty quiver does not keep the string down, and the HUD carries no count.
 ##   7. **Archers carry arrows.** A trail archer's corpse is a resupply: the bow
 ##      it fired and the shafts it was drawing from are on the body.
 ##
@@ -237,10 +236,8 @@ func check_bow() -> void:
 		% (point - (target as Node3D).global_position).length())
 
 	var quiver_before: int = warband.arrows()
-	check(quiver_before > 0,
-		"the band opens with shafts in the shared quiver (%d)" % quiver_before)
-	check(game.hud.purse_line().contains("%d arrows" % quiver_before),
-		"the strip counts the quiver beside the purse (%s)" % game.hud.purse_line())
+	check(not game.hud.purse_line().contains("arrows"),
+		"the strip carries no quiver count: arrows are unlimited (%s)" % game.hud.purse_line())
 
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
@@ -262,8 +259,8 @@ func check_bow() -> void:
 	check(game.projectiles.size() == before + 1,
 		"a released string puts an arrow in the world (%d -> %d)"
 		% [before, game.projectiles.size()])
-	check(warband.arrows() == quiver_before - 1,
-		"and one shaft leaves the quiver for it (%d -> %d)"
+	check(warband.arrows() == quiver_before,
+		"and the shot spends no shaft (%d -> %d)"
 		% [quiver_before, warband.arrows()])
 	var arrow = null
 	if game.projectiles.size() > before:
@@ -400,7 +397,6 @@ func check_squad_ranged() -> void:
 	check(bool(worn.get("ok", false)),
 		"an ally can be armed with a recurve (%s)" % str(worn.get("message", "")))
 	controller.refresh_gear(ally_id)
-	warband.add_arrows(40)
 	await settle(6)
 	check(str(ally.rig.weapon) == "bow",
 		"and the rig is holding it (%s)" % str(ally.rig.weapon))
@@ -453,8 +449,8 @@ func check_squad_ranged() -> void:
 	check(loosed != null,
 		"and it is a real arrow in the world (%d -> %d)"
 		% [shots_before.size(), shaft_count])
-	check(warband.arrows() < arrows_before,
-		"a shaft left the shared quiver for it (%d -> %d)"
+	check(warband.arrows() == arrows_before,
+		"and the ally's shot spends no shaft (%d -> %d)"
 		% [arrows_before, warband.arrows()])
 	check(closest > 20.0,
 		"without walking in to it (closest %.1f m of %.0f)" % [closest, SQUAD_RANGE])
@@ -505,19 +501,18 @@ func check_throw() -> void:
 			"and it is the dagger that left the hand (%s)" % str(thrown.get("weapon")))
 
 
-# --- 6. the empty quiver ---------------------------------------------------
+# --- 6. the endless quiver --------------------------------------------------
 
-## A bow with nothing behind it is a stick. The quiver is spent down to nothing,
-## a press is refused out loud instead of silently, and a keeper's bunch - the
-## same write the vendor board makes - puts the string back up.
+## Arrows are unlimited. A bow is never refused for want of a shaft: the quiver
+## is not read, a shot spends nothing, and the HUD has no arrow count to run out.
 func check_quiver() -> void:
 	await settle(SETTLE_FRAMES)
 	check(str(body.rig.weapon) == "bow",
 		"the body still holds the bow for the quiver run (%s)" % str(body.rig.weapon))
 
-	var spent: int = warband.take_arrows(warband.arrows())
-	check(spent > 0 and not warband.has_arrows(),
-		"the quiver can be emptied (%d shafts spent, %d left)" % [spent, warband.arrows()])
+	# Empty whatever quiver the save happens to carry; the bow must not care.
+	warband.take_arrows(warband.arrows())
+	check(not warband.has_arrows(), "the shared quiver is empty")
 
 	var refusals := [0]
 	controller.draw_refused.connect(func(_peer: int) -> void: refusals[0] += 1)
@@ -528,38 +523,26 @@ func check_quiver() -> void:
 	release.button_index = MOUSE_BUTTON_LEFT
 	release.pressed = false
 	await settle(4)
-	var dry_before: int = game.projectiles.size()
+	var before: int = game.projectiles.size()
 	controller._mouse_press(press)
 	await physics_frame
-	check(bool(body.combat.quiver_empty()), "an empty quiver is the body's own state")
-	check(str(body.rig.phase) not in ["DRAWING", "HOLDING"],
-		"a dry bow does not draw (%s)" % str(body.rig.phase))
-	check(game.projectiles.size() == dry_before, "and no arrow leaves the world")
-	check(refusals[0] == 1, "the press says why (%d line(s))" % int(refusals[0]))
-	check(game.hud.status_line().contains("Out of arrows"),
-		"and the HUD says where to get more (%s)" % game.hud.status_line())
-	controller._mouse_release(release)
-	await physics_frame
-	check(game.projectiles.size() == dry_before, "releasing a string that never drew looses nothing")
-
-	# A bunch off a keeper's shelf: the same `add_arrows` the vendor board calls.
-	warband.add_arrows(10)
-	await settle(SETTLE_FRAMES)
-	check(not bool(body.combat.quiver_empty()), "a bought bunch fills the quiver (%d)" % warband.arrows())
-	var loaded_before: int = warband.arrows()
-	controller._mouse_press(press)
-	await settle(4)
+	check(not bool(body.combat.quiver_empty()),
+		"an empty quiver is not the body's state any more")
 	check(str(body.rig.phase) in ["DRAWING", "HOLDING"],
-		"and the string comes up again (%s)" % str(body.rig.phase))
+		"the string comes up with no shaft in any quiver (%s)" % str(body.rig.phase))
 	controller._mouse_release(release)
 	await settle(4)
-	check(warband.arrows() == loaded_before - 1,
-		"the second shot spends its own shaft (%d -> %d)" % [loaded_before, warband.arrows()])
+	check(game.projectiles.size() == before + 1,
+		"and the arrow leaves (%d -> %d)" % [before, game.projectiles.size()])
+	check(refusals[0] == 0, "nothing refuses a shot (%d line(s))" % int(refusals[0]))
+	check(warband.arrows() == 0, "and the shot spends no shaft")
+	check(not game.hud.purse_line().contains("arrows"),
+		"the strip carries no quiver count (%s)" % game.hud.purse_line())
 	# The nock-and-recover clock (0.95 s) has to run out before the next section
 	# asks the hands for anything else: this test's neighbour throws a blade, and
 	# a bow still recovering refuses the throw.
 	await create_timer(1.2).timeout
-	print("RANGED_QUIVER spent=%d loaded=%d" % [spent, warband.arrows()])
+	print("RANGED_QUIVER unlimited=1 arrows=%d" % warband.arrows())
 
 
 # --- 7. what an archer leaves behind ---------------------------------------

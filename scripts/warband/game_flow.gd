@@ -1,21 +1,21 @@
 extends Node
-## Autoload `GameFlow`: the door between the warband's scenes.
+## Autoload `GameFlow`: the door between the game's scenes.
 ##
-## The campaign is one world: Hearthstead, the road through the wood and the deep
-## wood it ends at all stand in one scene, and walking is the only way between
-## them. This node is the only thing that changes scene - the title's doors open
-## the world, a checkpoint reload reopens it, and a guest whose session ended goes
+## Blood Champions is one world: Hearthstead, the road through the wood and the
+## deep wood it ends at all stand in one scene, and walking is the only way
+## between them. This node is the only thing that changes scene - PLAY opens the
+## world, a checkpoint reload reopens it, and a guest whose session ended goes
 ## back to the title - so a test can drive a whole scene without being teleported
 ## out of it.
 ##
 ## `active` stays false until the flow is entered from the title menu, which is
 ## what keeps a regression harness's world from reloading a checkpoint under it.
 ##
-## The title's four doors land here: NEW CAMPAIGN (`start_campaign`), CAMPAIGNS
-## (`enter_warband`, the campaign a row opens), HOST GAME (`host_campaign`, a new
-## game or a campaign's checkpoint) and JOIN GAME (`join_campaign`).
+## The title's two doors land here: PLAY (`play`, the one world, resumed and
+## hosted) and JOIN GAME (`join_campaign`). The older HOST GAME/CHECKPOINT doors
+## remain as the session's own verbs for the tests and a guest hand-off.
 
-## The campaign is one world: Hearthstead, the road through the wood and the deep
+## The world is one scene: Hearthstead, the road through the wood and the deep
 ## wood it ends at all stand in this one scene, and walking is the only way
 ## between them.
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
@@ -229,6 +229,25 @@ func _post_notice(text: String) -> void:
 # with it; JOIN GAME connects first, is sent the host's whole warband, and only
 # then opens the world on it - the guest plays from the host's roster, stash and
 # purse, and its own save is never read or written while the session lasts.
+
+## PLAY: the game's only door. One world on this machine, opened as a host so
+## friends can join it, resumed from its save when there is one and seeded with
+## the first band when there is not. The party always stands in Hearthstead: the
+## town is the lobby, the rack and the portal.
+func play(port: int, player_name: String) -> void:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null:
+		return
+	_end_warband_link("a new game")
+	active = true
+	_request_warband({"mode": "host", "address": "127.0.0.1", "port": port,
+		"name": player_name, "scene": WORLD_SCENE})
+	if warband.load_state() and warband.roster.count() > 0:
+		world_start = "town"
+	else:
+		_fresh_campaign(warband)
+	goto(WORLD_SCENE)
+
 
 ## HOST GAME. `start` is `HOST_NEW` (a fresh naked body at Hearthstead) or
 ## `HOST_CHECKPOINT` (the saved warband on its bookmark, or the town end when it

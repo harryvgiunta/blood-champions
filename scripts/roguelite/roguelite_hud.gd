@@ -1,7 +1,7 @@
 class_name RogueliteHud
 extends CanvasLayer
-## The arena's own plate: island, wave and party on the top line, the run's mod
-## stack down the right, the draft and the shop as the only modal windows.
+## The run's own plate: level, island and party on the top line, the run's
+## upgrade stack down the right, the draft and the shop as the only modal windows.
 ##
 ## It reads the director's `state()` and the local player's engine every frame
 ## rather than being pushed events, because a HUD that misses one signal is a HUD
@@ -87,7 +87,7 @@ func _build() -> void:
 	_mod_box.add_theme_constant_override("separation", 2)
 	_root.add_child(_mod_box)
 	_mod_title = Label.new()
-	_mod_title.text = "MODS"
+	_mod_title.text = "UPGRADES"
 	_mod_title.add_theme_color_override("font_color", MUTED)
 	_mod_title.add_theme_font_size_override("font_size", 16)
 	_mod_box.add_child(_mod_title)
@@ -179,16 +179,21 @@ func _refresh() -> void:
 	if not running:
 		return
 	var state: Dictionary = director.state()
+	var level := int(state.get("level", 0))
+	var island := int(state.get("island", 1))
 	_island_label.text = str(state.get("biome_name", ""))
-	_wave_label.text = "ISLAND %d / %d   ·   WAVE %d / %d" % [
-		int(state.get("stage", 1)), int(state.get("stages", 6)),
-		int(state.get("wave", 0)), int(state.get("waves", 3))]
+	var tag := ""
+	if bool(state.get("shop_level", false)):
+		tag = "   ·   SHOP BEFORE THE BOSS"
+	elif bool(state.get("boss_level", false)):
+		tag = "   ·   BOSS"
+	_wave_label.text = "LEVEL %d   ·   ISLAND %d%s" % [level, island, tag]
 	_party_label.text = "ALIVE %d  ·  HOSTILES %d" % [
 		int(state.get("party", 1)) - _downed_count(), int(state.get("living", 0))]
 	_purse_label.text = "%d CRYSTALS   ·   %d KEYS" % [
-		int(state.get("crystals", 0)), int(state.get("keys", 0))]
-	if bool(state.get("boss_wave", false)) and bool(state.get("wave_active", false)):
-		_boss_label.text = "BOSS WAVE"
+		int(state.get("crystals", 0)), _banked_keys()]
+	if bool(state.get("boss_level", false)):
+		_boss_label.text = "BOSS LEVEL"
 		_boss_label.visible = true
 	else:
 		_boss_label.text = ""
@@ -199,10 +204,17 @@ func _refresh() -> void:
 			_last_mods = line
 			_write_mods(local)
 		if local.is_downed() and bool(state.get("wave_active", false)):
-			_downed_label.text = "DOWNED  ·  SPECTATING  ·  the living clear the island to raise you"
+			_downed_label.text = "DOWNED  ·  SPECTATING  ·  the living clear the level to raise you"
 			_downed_label.visible = true
 		else:
 			_downed_label.visible = false
+
+
+## The player's banked unlock keys. They are the ledger's, not the run's: a boss
+## banks them the moment it falls, and they are still there after the wipe.
+func _banked_keys() -> int:
+	var meta = get_node_or_null("/root/Roguelite")
+	return int(meta.keys) if meta != null else 0
 
 
 func _downed_count() -> int:
@@ -259,7 +271,7 @@ func _write_mods(run) -> void:
 		count += 1
 	if count == 0:
 		var empty := Label.new()
-		empty.text = "no mods yet"
+		empty.text = "no upgrades yet"
 		empty.add_theme_color_override("font_color", MUTED)
 		empty.add_theme_font_size_override("font_size", 15)
 		_mod_box.add_child(empty)
@@ -270,7 +282,7 @@ func _write_mods(run) -> void:
 func open_draft(serial: int, offers: Array) -> void:
 	_clear_overlay()
 	_overlay_serial = serial
-	_overlay_title.text = "CHOOSE A MOD"
+	_overlay_title.text = "CHOOSE AN UPGRADE"
 	for index in offers.size():
 		var mod_id := str(offers[index])
 		var row: Dictionary = Mods.get_mod(mod_id)
@@ -285,7 +297,7 @@ func open_draft(serial: int, offers: Array) -> void:
 		button.pressed.connect(_on_draft_pressed.bind(index))
 		_overlay_body.add_child(button)
 		_draft_buttons.append(button)
-	_overlay_hint.text = "The pedestal offers one. Choose with the mouse or Escape to step away."
+	_overlay_hint.text = "The pedestal offers one upgrade for this run. Choose with the mouse or Escape to step away."
 	_overlay.visible = true
 
 
@@ -302,7 +314,7 @@ func _on_draft_pressed(index: int) -> void:
 func open_shop(serial: int, wares: Array) -> void:
 	_clear_overlay()
 	_overlay_serial = serial
-	_overlay_title.text = "THE SHOP ISLAND  ·  %d CRYSTALS" % int(
+	_overlay_title.text = "THE SHOP  ·  %d CRYSTALS" % int(
 		director.state().get("crystals", 0) if director != null else 0)
 	for index in wares.size():
 		var ware: Dictionary = wares[index]
@@ -320,7 +332,7 @@ func open_shop(serial: int, wares: Array) -> void:
 		button.pressed.connect(_on_shop_pressed.bind(index))
 		_overlay_body.add_child(button)
 		_shop_buttons.append(button)
-	_overlay_hint.text = "The party's crystals buy the wares. Escape steps away."
+	_overlay_hint.text = "The party's crystals buy the wares; the rack beside the stall takes the boss keys. Escape steps away."
 	_overlay.visible = true
 
 

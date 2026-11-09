@@ -40,7 +40,9 @@ const PANEL_SIZE := Vector2(1180, 700)
 const PARTY_WIDTH := 296.0
 ## The supplies no party forgets: every free copy is packed on open. Matched on
 ## the catalog's `kind`, so a second dressing on the shelf needs no change here.
-const SUPPLY_KINDS := ["arrow", "bandage"]
+## Arrows are unlimited since the quiver went away; a bandage is the one supply
+## that still has a count.
+const SUPPLY_KINDS := ["bandage"]
 
 const ROW_HEIGHT := 34
 const PARTY_ROW_HEIGHT := 40

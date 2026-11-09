@@ -50,7 +50,7 @@ try {
         Move-Item -LiteralPath $downloadedEngine -Destination $engine -Force
         Move-Item -LiteralPath $downloadedConsole -Destination $console -Force
         Write-Host "Ready: $reported"
-        Write-Host 'Run Arena.cmd for multiplayer or Play.cmd for the frontier.'
+        Write-Host 'Run Play.cmd to spawn into Hearthstead and start a run.'
     }
     finally {
         Remove-Item -LiteralPath $staging -Recurse -Force

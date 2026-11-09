@@ -1,11 +1,11 @@
 config_version=5
 
 [application]
-config/name="IRONWOOD | The Frontier"
-config/version="0.4.0"
+config/name="Blood Champions"
+config/version="0.1.0"
 run/main_scene="res://title.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-config/description="Ghost of the Warband: a possession campaign for one soul and its mercenaries, solo or hosted for friends."
+config/description="Blood Champions: spawn into the town, kit up at the rack, and run endless levels. A boss every tenth level pays the keys that open the armory."
 
 [autoload]
 Log="*res://scripts/log.gd"

@@ -83,7 +83,7 @@ func run() -> void:
 	await check_world_resume()
 	check_wipe_door()
 	await check_retry_reload()
-	await check_title_door()
+	await check_title_doors()
 	await check_out_of_the_square_and_back()
 	_finish()
 
@@ -379,41 +379,20 @@ func _wait_world(timeout: float) -> Node:
 	return null
 
 
-## The title's campaign doors: the ledger lists what is saved, and FROM CHECKPOINT
-## offers the campaign whose warband file is there. A campaign is a folder now, so
-## nothing else gates them - there is no single shared file to check.
-func check_title_door() -> void:
-	var slots = root.get_node_or_null("SaveSlots")
-	check(slots != null, "the title's campaign ledger is an autoload")
-	if slots == null:
-		return
-	slots.root_path = SLOT_ROOT
-	_remove_tree(SLOT_ROOT)
-	slots.load_index()
+## The title has no campaign list and no host panel any more: PLAY opens the one
+## world and JOIN puts a friend in it. The checkpoint system is still the world's
+## own door (`restore_checkpoint`), tested above.
+func check_title_doors() -> void:
 	var title = load("res://title.tscn").instantiate()
 	root.add_child(title)
 	await process_frame
-	check(title.campaigns_button != null, "the title carries a campaigns door")
-	check(title.new_campaign_button != null, "and the new-campaign door is still there")
-	title._open_campaigns()
-	check(title.campaign_ids().is_empty(), "an empty ledger lists no campaign")
-	title._close_campaigns()
-	# A campaign with this warband in it: written where binding writes it, without
-	# binding, because the rest of this test keeps its own pinned save paths.
-	var id := str(slots.new_slot("Checkpoint campaign"))
-	var pinned := str(warband.save_path)
-	warband.save_path = str(slots.warband_path(id))
-	warband.save_state()
-	warband.save_path = pinned
-	title._refresh_campaigns()
-	check(not title.host_checkpoint_button.disabled,
-		"FROM CHECKPOINT is live on the campaign's warband save")
-	title._open_campaigns()
-	check(title.campaign_ids().size() == 1 and title.campaign_ids()[0] == id,
-		"the list names the saved campaign (%s)" % str(title.campaign_ids()))
+	check(title.play_button != null and str(title.play_button.text) == "PLAY",
+		"the title carries the PLAY door")
+	check(title.join_button != null and str(title.join_button.text) == "JOIN GAME",
+		"and the JOIN GAME door")
+	check(title.get("campaigns_button") == null and title.get("new_campaign_button") == null,
+		"there is no campaign list and no new-campaign door")
 	title.queue_free()
-	warband.save_path = WARBAND_SAVE
-	_remove_tree(SLOT_ROOT)
 	await process_frame
 
 

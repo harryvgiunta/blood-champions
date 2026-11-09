@@ -51,7 +51,6 @@ func run() -> void:
 	_check_rows_and_control()
 	_check_refresh()
 	_check_paperdoll()
-	_check_bench()
 	await _check_strip()
 	_check_item_hover()
 	_check_reequip_buttons()
@@ -370,8 +369,12 @@ func _check_paperdoll() -> void:
 		"RE-EQUIP clears the hand-set slot, got %s" % str(warband.roster.manual_slots(other)))
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
+	# Annointments are out of this game: the page carries no bench and no door to
+	# one, so a player cannot work steel the altar used to open.
+	check(doll.get("_bench_button") == null and doll.get("_bench_layer") == null,
+		"the paperdoll carries no annoint bench")
 
-# --- the bench -------------------------------------------------------------
+# --- the bench (retired with the altar) ------------------------------------
 
 ## The gear page's own anoint bench: the altar's rack without the altar. What this
 ## owns is that the door is the page's, that a weld lands on **the copy in the

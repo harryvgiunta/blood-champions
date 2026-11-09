@@ -609,7 +609,7 @@ func check_annoints() -> void:
 	check(hurled.has("THROWN"), "the axe's card names its throw (%s)" % str(hurled))
 
 
-# --- 6. the club a campaign is issued --------------------------------------
+# --- 6. the starter pair a new player is issued ---------------------------
 
 func check_issued_club() -> void:
 	var warband := root.get_node_or_null("Warband")
@@ -618,40 +618,17 @@ func check_issued_club() -> void:
 		return
 	warband.save_path = TEST_SAVE
 	warband.reset_state()
-	check(int(warband.seed_starting_band()) == 1, "a campaign opens with one body")
+	check(int(warband.seed_starting_band()) == 1, "a new game opens with one body")
 	var ids: Array[int] = warband.roster.ids()
 	var merc := int(ids[0])
-	check(str(warband.roster.equipped_of(merc).get("main", "")) == CLUB,
-		"and its one club is in his hand")
-	var copy := int(warband.annoint_copy(merc, "main"))
-	check(warband.annoints.has(CLUB, copy, HEAVY),
-		"the issued club carries Heavy Swing (copy %d)" % copy)
-	var hands: Dictionary = warband.annointment_hands(merc)
-	check(is_equal_approx(float(hands.get("main", {}).get("overhead_damage", 0.0)), 2.0),
-		"the hand holding it reads three times the overhand")
-	check(is_equal_approx(float(hands.get("main", {}).get("overhead_speed", 0.0)), 0.5),
-		"and half again its speed")
-	check(not warband.annointment_stats(merc).has("overhead_damage"),
-		"the body's own kit does not carry it")
-	check(warband.annointment_procs(merc).is_empty(),
-		"a stat weld arms no proc")
-	# Put a forged blade in the same hand: the weld does not follow the body.
-	warband.stash.add("sword_great", 1)
-	var swapped: Dictionary = warband.equip_merc(merc, "main", "sword_great")
-	check(bool(swapped.get("ok", false)), "the body takes a greatsword")
+	check(str(warband.roster.equipped_of(merc).get("main", "")) == warband.STARTING_RANGED,
+		"and the starter bow is in his hand")
+	check(str(warband.roster.weapon_set_pair(merc, 1).get("main", "")) == warband.STARTING_MELEE,
+		"with the makeshift hatchet waiting in set 2")
 	check(warband.annointment_hands(merc).get("main", {}).is_empty(),
-		"and that hand swings the greatsword's own overhead (%s)"
-			% str(warband.annointment_hands(merc)))
-	# A spare club bought later is plain steel.
-	warband.stash.add(CLUB, 1)
-	var plain := 0
-	for serial in warband.stash.serials_of(CLUB):
-		if int(serial) != copy:
-			plain += 1
-			check(warband.annoints.count(CLUB, int(serial)) == 0,
-				"a spare club is not annointed (serial %d)" % int(serial))
-			break
-	check(plain == 1, "the pool holds the spare beside the relic")
+		"the starter pair is plain steel: annointments are out of this game")
+	check(warband.annointment_procs(merc).is_empty(),
+		"and no weld arms a proc on it")
 	# The roster is the game's; a test never leaves its own band behind.
 	warband.reset_state()
 	var save := ProjectSettings.globalize_path(TEST_SAVE)

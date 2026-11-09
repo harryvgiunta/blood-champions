@@ -1,4 +1,4 @@
-"""Run the whole Ironwood regression suite in parallel, inside a hard time budget.
+"""Run the whole Blood Champions regression suite in parallel, inside a hard time budget.
 
 **The repository rule: a test run is a couple of minutes, never more.** One test
 that needs longer than `TIMEOUT` (90 s) is a test that owns a bug, not a test that
@@ -63,8 +63,6 @@ WARBAND_TESTS = [
     "possession_regression",
     "downed_revive_regression",
     "downed_bleedout_regression",
-    "altar_regression",
-    "annoint_regression",
     "stash_autoloot_regression",
     "corpse_loot_regression",
     "warband_ui_regression",
@@ -75,7 +73,6 @@ WARBAND_TESTS = [
     "loot_wow_regression",
     "arena_regression",
     "roguelite_regression",
-    "weld_regression",
     "demon_duel_regression",
     "delve_regression",
     "demon_fire_regression",

@@ -451,13 +451,8 @@ func check_town() -> void:
 		check(face_of(arena_plate.get_node_or_null("Plate"), "arena") != null,
 			"the arena's name is cut into the lintel's stone")
 		check(labels_under(arena_plate).is_empty(), "nothing floats over the arena gate")
-	var altar_node = town.get_node_or_null("SacrificialAltar")
-	check(altar_node != null, "the altar stands in the square")
-	if altar_node != null:
-		var altar_plate = altar_node.get_node_or_null("AltarNameplate")
-		check(altar_plate != null and face_of(altar_plate.get_node_or_null("Plate"), "altar") != null,
-			"the altar's name is cut into its stele")
-		check(labels_under(altar_node).is_empty(), "the altar says its name in stone")
+	check(town.get_node_or_null("SacrificialAltar") == null,
+		"the annoint altar is gone from the square")
 
 	# The ring around the fire: centred on the scene's own pit, wider than it,
 	# with the woodpile as its own merge beside the seats.
@@ -545,7 +540,8 @@ func check_town() -> void:
 	for post in TownScript.SPAWN_POSTS:
 		points.append({"what": "a muster post", "point": post, "reach": 0.0})
 	points.append({"what": "the stash", "point": TownScript.STASH_POINT, "reach": 0.0})
-	points.append({"what": "the altar", "point": TownScript.ALTAR_POINT, "reach": 0.0})
+	points.append({"what": "the weapon rack", "point": TownScript.RACK_POINT, "reach": 0.0})
+	points.append({"what": "the run portal", "point": TownScript.RUN_PORTAL_POINT, "reach": 0.0})
 	points.append({"what": "the recruiter", "point": TownScript.RECRUITER_POINT, "reach": 0.0})
 	points.append({"what": "the quartermaster", "point": TownScript.QUARTERMASTER_POINT, "reach": 0.0})
 	points.append({"what": "the signpost", "point": TownScript.SIGN_POINT, "reach": 0.0})

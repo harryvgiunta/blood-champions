@@ -8,9 +8,9 @@ extends Node3D
 ## The five sworn mercenaries stand around that fire as real `WarbandBody` bodies
 ## under the real `PossessionController`, the local soul starts inside the first
 ## of them, and every service the loop needs is a node you can walk up to: the
-## shared stash chest, the `SacrificialAltar` (where a warden's ichor wakes a
-## weapon into its skill), the Gold recruiter's booth, the quartermaster's shop,
-## and the three keepers' counters (Orla, Brann, Vey).
+## shared stash chest, the Gold recruiter's booth, the quartermaster's shop, the
+## three keepers' counters (Orla, Brann, Vey), the Weapon Rack and the Start Run
+## Portal.
 ##
 ## Behind every counter stands a keeper - an armoured humanoid, one of the five
 ## who run this place - and every one of them is a `G` away: there is no board of
@@ -36,7 +36,6 @@ const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
-const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const ArenaMenuScript = preload("res://scripts/warband/arena_menu.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -50,8 +49,7 @@ const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 const ForgePanelScript = preload("res://scripts/roguelite/town_forge_panel.gd")
 
-## How close a body must stand to the chest and the desks. The altar keeps its own
-## `interact_range`.
+## How close a body must stand to the chest, the desks and the run's two fixtures.
 const SERVICE_REACH := 3.0
 ## The town is a ring now, not a room: this is the stake wall a body stands
 ## inside, and the dressing mirrors it so the two can never drift apart.
@@ -82,15 +80,14 @@ const TOWN_WOOD_SEED := 7717
 ## The square's standing services, arranged so no two 3 m rings overlap: walking
 ## the square always names exactly one thing.
 const STASH_POINT := Vector3(-8.0, 0.0, 4.0)
-const ALTAR_POINT := Vector3(8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
 const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 ## The arena's gate: a stone arch out on the east lane, clear of every counter.
 const ARENA_POINT := Vector3(17.0, 0.0, -4.0)
-## The arena loop's three fixtures, in the muster ring's line so a fresh body
-## walks out of the fire and straight into them.
-const TOTEM_POINT := Vector3(-5.5, 0.0, -1.5)
+## The run's two fixtures, in the muster ring's line so a fresh body walks out of
+## the fire and straight into them: the rack that opens and binds the pair, and
+## the portal that starts the levels.
 const RACK_POINT := Vector3(5.5, 0.0, -1.5)
 const RUN_PORTAL_POINT := Vector3(0.0, 0.0, -8.0)
 
@@ -182,8 +179,8 @@ const SPAWN_POSTS := [
 	Vector3(4.2, 0.0, -1.2), Vector3(-3.6, 0.0, -1.6),
 ]
 
-## Spares the collective stash starts with, so the paperdoll and the altar have
-## something to move from the first minute.
+## Spares the collective stash starts with, so the paperdoll has something to
+## move from the first minute.
 const TOWN_SPARES := [
 	"sword_arming", "shield_buckler", "bow_short", "focus_skull", "focus_tome",
 	"armor_leather_head", "armor_leather_chest", "ring_copper", "ring_health",
@@ -206,7 +203,6 @@ var controller
 var hud: WarbandHud
 var screen: WarbandScreen
 var paperdoll: WarbandPaperdoll
-var altar: SacrificialAltar
 var stash_chest: Node3D
 var recruiter_desk: Node3D
 var quartermaster_desk: Node3D
@@ -219,7 +215,6 @@ var signpost: Node3D
 ## The arena's gate and its board.
 var arena_gate: Node3D
 var arena_menu
-var unlock_totem: Node3D
 var weapon_rack: Node3D
 var run_portal: Node3D
 var forge_panel
@@ -731,11 +726,6 @@ func _refresh_hud() -> void:
 # --- services --------------------------------------------------------------
 
 func _build_services() -> void:
-	altar = AltarScript.new()
-	altar.name = "SacrificialAltar"
-	altar.position = ALTAR_POINT
-	add_child(altar)
-
 	stash_chest = _build_stash_chest()
 	recruiter_desk = _build_recruiter_desk()
 	quartermaster_desk = _build_quartermaster_desk()
@@ -747,7 +737,6 @@ func _build_services() -> void:
 		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
 	arena_gate = _build_arena_gate()
-	unlock_totem = _build_unlock_totem()
 	weapon_rack = _build_weapon_rack()
 	run_portal = _build_run_portal()
 
@@ -809,43 +798,9 @@ func _build_arena_gate() -> Node3D:
 	return gate
 
 
-## The Unlock Totem: a bone pillar with a bowl of keys and fire on top. Its press
-## spends keys on a random locked weapon (`Roguelite.roll_unlock`).
-func _build_unlock_totem() -> Node3D:
-	var totem := Node3D.new()
-	totem.name = "UnlockTotem"
-	totem.position = TOTEM_POINT
-	add_child(totem)
-	var bone := StandardMaterial3D.new()
-	bone.albedo_color = Color(0.76, 0.70, 0.56)
-	bone.roughness = 0.72
-	var ember := StandardMaterial3D.new()
-	ember.albedo_color = Color(0.95, 0.62, 0.24)
-	ember.emission_enabled = true
-	ember.emission = Color(0.95, 0.54, 0.18)
-	ember.emission_energy_multiplier = 1.4
-	Geo.cylinder(totem, 0.24, 0.32, 2.4, Vector3(0.0, 1.2, 0.0), bone, 8)
-	Geo.cylinder(totem, 0.52, 0.44, 0.36, Vector3(0.0, 2.52, 0.0), _iron, 8)
-	Geo.sphere(totem, 0.34, Vector3(0.0, 2.78, 0.0), ember, Vector3(1.0, 0.7, 1.0))
-	for index in 4:
-		var angle := TAU * float(index) / 4.0
-		var horn := Geo.cylinder(totem, 0.07, 0.02, 0.52,
-			Vector3(cos(angle) * 0.3, 2.2, sin(angle) * 0.3), bone, 5)
-		horn.rotation.z = cos(angle) * 0.45
-		horn.rotation.x = sin(angle) * 0.45
-	var light := OmniLight3D.new()
-	light.light_color = Color(1.0, 0.68, 0.30)
-	light.light_energy = 1.4
-	light.omni_range = 6.0
-	light.position = Vector3(0.0, 2.8, 0.0)
-	totem.add_child(light)
-	totem.add_child(_label("UNLOCK TOTEM", Vector3(0.0, 3.5, 0.0),
-		Color(0.95, 0.78, 0.42)))
-	return totem
-
-
-## The Weapon Rack: three hafts and a bound rack, where an unlocked piece is taken
-## up before the portal.
+## The Weapon Rack: three hafts and a bound rack. Every weapon the armory holds
+## stands on it; the locked ones are bought open right here, at the price on
+## their row, and then bound to a hand.
 func _build_weapon_rack() -> Node3D:
 	var rack := Node3D.new()
 	rack.name = "WeaponRack"
@@ -1090,9 +1045,10 @@ func _try_interact() -> void:
 		hud.set_status("Nothing to use here.", 1.5)
 
 ## Resolve and use whichever service `point` is next to. Returns `"stash"`,
-## `"altar"`, `"recruiter"`, `"quartermaster"`, `"vendor_orla"`, `"vendor_brann"`,
-## `"vendor_vey"` or `""`, which is what a single `G` handler and the
-## regression both drive instead of guessing at positions.
+## `"recruiter"`, `"quartermaster"`, `"vendor_orla"`, `"vendor_brann"`,
+## `"vendor_vey"`, `"roguelite_rack"`, `"roguelite_portal"` or `""`, which is
+## what a single `G` handler and the regression both drive instead of guessing
+## at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
 	var service := service_at(point)
 	# A counter being used is the one moment a keeper has a body's attention, so
@@ -1104,10 +1060,6 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			_hide_panels()
 			paperdoll.open(controller.merc_for_peer(peer_id))
 			hud.set_status("The shared stash is open: click a free piece to wear it.", 4.0)
-		"altar":
-			_hide_panels()
-			altar.interact(peer_id)
-			hud.set_status("The altar: lay a warden's ichor on a weapon and it wakes into its skill.", 4.0)
 		"recruiter":
 			_hide_panels()
 			screen.open()
@@ -1130,15 +1082,12 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			if arena_menu != null:
 				arena_menu.open()
 			hud.set_status("THE ARENA: pick how hard the ring is, then step in.", 4.0)
-		"roguelite_totem":
-			_open_forge("totem")
-			hud.set_status("THE UNLOCK TOTEM: keys open the armory.", 4.0)
 		"roguelite_rack":
 			_open_forge("rack")
-			hud.set_status("THE WEAPON RACK: bind the two pieces the run carries.", 4.0)
+			hud.set_status("THE WEAPON RACK: %d keys. Open steel, then bind the two pieces the run carries." % _meta_keys(), 4.0)
 		"roguelite_portal":
 			_open_forge("portal")
-			hud.set_status("THE START RUN PORTAL: six islands, then the run is won.", 4.0)
+			hud.set_status("THE START RUN PORTAL: endless levels, a shop before every boss.", 4.0)
 
 	return service
 
@@ -1203,14 +1152,12 @@ func close_panels() -> void:
 func service_at(point: Vector3) -> String:
 	var entries: Array[Dictionary] = [
 		{"id": "stash", "point": stash_chest.global_position, "reach": SERVICE_REACH},
-		{"id": "altar", "point": altar.global_position, "reach": altar.interact_range},
 		{"id": "recruiter", "point": recruiter_desk.global_position, "reach": SERVICE_REACH},
 		{"id": "quartermaster", "point": quartermaster_desk.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_orla", "point": vendor_orla.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
 		{"id": "arena", "point": arena_gate.global_position, "reach": SERVICE_REACH + 1.0},
-		{"id": "roguelite_totem", "point": unlock_totem.global_position, "reach": SERVICE_REACH},
 		{"id": "roguelite_rack", "point": weapon_rack.global_position, "reach": SERVICE_REACH},
 		{"id": "roguelite_portal", "point": run_portal.global_position, "reach": SERVICE_REACH + 1.0},
 	]
@@ -1229,8 +1176,6 @@ func service_point(service: String) -> Vector3:
 	match service:
 		"stash":
 			return stash_chest.global_position
-		"altar":
-			return altar.global_position
 		"recruiter":
 			return recruiter_desk.global_position
 		"quartermaster":
@@ -1243,8 +1188,6 @@ func service_point(service: String) -> Vector3:
 			return vendor_vey.global_position
 		"arena":
 			return arena_gate.global_position if arena_gate != null else Vector3.ZERO
-		"roguelite_totem":
-			return unlock_totem.global_position if unlock_totem != null else Vector3.ZERO
 		"roguelite_rack":
 			return weapon_rack.global_position if weapon_rack != null else Vector3.ZERO
 		"roguelite_portal":
@@ -1285,8 +1228,6 @@ func prompt_line(actor) -> String:
 	match service_at(actor.global_position):
 		"stash":
 			return "G - shared stash"
-		"altar":
-			return "G - Sacrificial Altar"
 		"recruiter":
 			return "G - Gold recruiter"
 		"quartermaster":
@@ -1297,10 +1238,8 @@ func prompt_line(actor) -> String:
 			return "G - Smith Brann"
 		"vendor_vey":
 			return "G - Quartermaster Vey"
-		"roguelite_totem":
-			return "G - UNLOCK TOTEM  ·  %d keys" % _meta_keys()
 		"roguelite_rack":
-			return "G - WEAPON RACK"
+			return "G - WEAPON RACK  ·  %d keys" % _meta_keys()
 		"roguelite_portal":
 			return "G - START RUN PORTAL"
 	return ""
@@ -1319,8 +1258,6 @@ func _hide_panels() -> void:
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
 		paperdoll.close()
-	if altar != null and altar.is_open():
-		altar.close()
 	if quartermaster != null and quartermaster.is_open():
 		quartermaster.close()
 	if vendor_menu != null and vendor_menu.is_open():
@@ -1333,7 +1270,6 @@ func _hide_panels() -> void:
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
-		or (altar != null and altar.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
 		or (vendor_menu != null and vendor_menu.is_open()) \
 		or (arena_menu != null and arena_menu.is_open()) \
@@ -1355,9 +1291,6 @@ func seed_warband() -> void:
 	for item_id in TOWN_SPARES:
 		if State.ITEMS.has(str(item_id)):
 			warband.stash.add(str(item_id), 1)
-	# A bow with nothing to shoot is a stick: the band opens with one bunch of
-	# shafts in the shared quiver, and every keeper sells more.
-	warband.seed_quiver()
 	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 25)
 	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 10)
 	warband.cruor.add(Contracts.CruorTier.T3_COAGULATED_CRUOR, 5)

@@ -1,22 +1,19 @@
 class_name RogueliteMeta
 extends Node
-## Autoload `Roguelite`: the meta-progression ledger of the arena campaign.
+## Autoload `Roguelite`: the player's ledger of unlocks.
 ##
-## The keys a band earns, the weapons those keys have opened, and the loadout a
-## body carries through the Start Run Portal all live here, in one file of their
-## own (`user://roguelite_meta.json`) rather than in a campaign save. A run is
-## not a campaign: the arena is played over and over from the Town Hub, and a
-## weapon unlocked on the third run has to be there on the fourth even if the
-## warband file was started fresh.
+## Unlocking is a player's, not a run's: the weapons a player has opened, the key
+## balance those weapons are bought with, and the pair bound to the rack all live
+## here, in one file of their own (`user://roguelite_meta.json`). A run starts
+## every body with the starters and every weapon an earlier run opened is still on
+## the rack, so progression survives a wipe.
 ##
 ## The file is versioned and read defensively: an id this build no longer has is
 ## dropped, a loadout slot naming a weapon that is not unlocked falls back to the
 ## starter, and a newer file is left alone instead of being half-read.
 ##
-## In co-op the pool is the host's. A guest carries its own unlocks from its own
-## machine, and the host lends the rest by broadcasting its share (`share_pool`);
-## `is_unlocked` answers for both, so a rack row draws what the party can
-## actually field.
+## Nothing is lent. Every player unlocks on their own machine, and a guest that
+## has never fought a boss fields the starters and nothing else.
 
 signal meta_changed
 ## One line for the HUD: a key earned, a weapon opened, a slot rebound.
@@ -24,7 +21,7 @@ signal announcement(text: String)
 
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
 
-const SAVE_VERSION := 1
+const SAVE_VERSION := 2
 const DEFAULT_SAVE_PATH := "user://roguelite_meta.json"
 const RANGED_SLOT := "ranged"
 const MELEE_SLOT := "melee"
@@ -34,24 +31,18 @@ const SLOTS := [RANGED_SLOT, MELEE_SLOT]
 ## earns the rest.
 const DEFAULT_RANGED := "bow_twig"
 const DEFAULT_MELEE := "hatchet_makeshift"
-## What the Unlock Totem costs per roll. One stage clear pays two or three, so a
-## run is worth a weapon and a half on its own.
-const UNLOCK_COST := 3
-## Keys a fresh ledger starts with, so the totem is a thing a player can touch on
-## the very first walk into the square.
-const STARTING_KEYS := 3
+## A fresh player has no keys and nothing but the starters. The first key is the
+## tenth level's boss.
+const STARTING_KEYS := 0
 
 var keys := STARTING_KEYS
 var unlocked: Array[String] = []
 var loadout := {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
 var runs := 0
-var best_stage := 0
+var best_level := 0
 var lifetime_kills := 0
 var lifetime_keys := 0
 var save_path := DEFAULT_SAVE_PATH
-## The host's share, lent to this machine by `share_pool`. Empty on a host and in
-## a single-player session, which is what makes the two cases the same case.
-var shared_pool: Array[String] = []
 
 
 func _ready() -> void:
@@ -68,17 +59,16 @@ func reset(persist: bool = true) -> void:
 	unlocked.clear()
 	loadout = {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
 	runs = 0
-	best_stage = 0
+	best_level = 0
 	lifetime_kills = 0
 	lifetime_keys = 0
-	shared_pool.clear()
 	if persist:
 		save_meta()
 	meta_changed.emit()
 
 
-## Every weapon id this machine can field: the two starters, whatever its own
-## keys opened, and whatever the host lent.
+## Every weapon id this player can field: the two starters and whatever their
+## own keys have opened.
 func unlocked_ids() -> Array[String]:
 	var out: Array[String] = []
 	for id in Weapons.default_ids():
@@ -87,18 +77,13 @@ func unlocked_ids() -> Array[String]:
 	for id in unlocked:
 		if Weapons.has(id) and not out.has(id):
 			out.append(id)
-	for id in shared_pool:
-		if Weapons.has(id) and not out.has(id):
-			out.append(id)
 	return out
 
 
 func is_unlocked(weapon_id: String) -> bool:
 	if Weapons.is_default(weapon_id):
 		return true
-	if unlocked.has(weapon_id):
-		return true
-	return shared_pool.has(weapon_id)
+	return unlocked.has(weapon_id)
 
 
 ## The weapons a slot can be set to right now, in registry order.
@@ -129,7 +114,7 @@ func set_loadout_slot(slot: String, weapon_id: String) -> Dictionary:
 		return {"ok": false, "message": "%s belongs in the %s slot." % [
 			Weapons.display_name(weapon_id), weapon_slot]}
 	if not is_unlocked(weapon_id):
-		return {"ok": false, "message": "%s is still locked. Open it at the totem." % [
+		return {"ok": false, "message": "%s is still locked. Open it on the rack." % [
 			Weapons.display_name(weapon_id)]}
 	var other := MELEE_SLOT if slot == RANGED_SLOT else RANGED_SLOT
 	if loadout_for(other) == weapon_id:
@@ -171,20 +156,8 @@ func spend_keys(amount: int) -> bool:
 	return true
 
 
-## What the Unlock Totem would open, without spending. The totem shows the roll
-## it can pay for so the walk to it is never a blind bet.
-func unlock_preview(rng: RandomNumberGenerator = null) -> String:
-	var pool := locked_ids()
-	if pool.is_empty():
-		return ""
-	var die := rng if rng != null else RandomNumberGenerator.new()
-	if rng == null:
-		die.randomize()
-	return str(pool[die.randi_range(0, pool.size() - 1)])
-
-
-## The weapons that are still behind the totem, cheapest first. A pool that only
-## ever offered the dearest piece would make the first three keys feel like a tax.
+## The weapons that are still locked, cheapest first. A pool that only ever
+## offered the dearest piece would make the first keys feel like a tax.
 func locked_ids() -> Array[String]:
 	var out: Array[String] = []
 	for id in Weapons.all_ids():
@@ -199,54 +172,37 @@ func locked_ids() -> Array[String]:
 	return out
 
 
-## Spend the totem's price and open one random locked weapon.
-func roll_unlock(rng: RandomNumberGenerator = null) -> Dictionary:
-	if keys < UNLOCK_COST:
-		return {"ok": false, "message": "The totem wants %d keys. You carry %d." % [
-			UNLOCK_COST, keys]}
-	var pool := locked_ids()
-	if pool.is_empty():
-		return {"ok": false, "message": "Every weapon in the armory is already open."}
-	var die := rng if rng != null else RandomNumberGenerator.new()
-	if rng == null:
-		die.randomize()
-	var picked := str(pool[die.randi_range(0, pool.size() - 1)])
-	spend_keys(UNLOCK_COST)
-	unlocked.append(picked)
+## Open one named weapon for this player, at the price on its row. The rack calls
+## this for a locked piece; there is no roll and no pool to draw from.
+func unlock_cost_of(weapon_id: String) -> int:
+	return maxi(1, int(Weapons.get_weapon(weapon_id).get("unlock_cost", 3)))
+
+
+func unlock_weapon(weapon_id: String) -> Dictionary:
+	if not Weapons.has(weapon_id):
+		return {"ok": false, "message": "That weapon is not in the armory."}
+	if is_unlocked(weapon_id):
+		return {"ok": false, "message": "%s is already open." % Weapons.display_name(weapon_id)}
+	var price := unlock_cost_of(weapon_id)
+	if keys < price:
+		return {"ok": false, "message": "%s wants %d keys. You carry %d." % [
+			Weapons.display_name(weapon_id), price, keys]}
+	spend_keys(price)
+	unlocked.append(weapon_id)
 	save_meta()
 	meta_changed.emit()
-	var text := "%s is open. It stands on the rack." % Weapons.display_name(picked)
+	var text := "%s is open. It stands on the rack." % Weapons.display_name(weapon_id)
 	announcement.emit(text)
-	return {"ok": true, "id": picked, "name": Weapons.display_name(picked),
+	return {"ok": true, "id": weapon_id, "name": Weapons.display_name(weapon_id),
 		"message": text}
 
 
-func note_run(stage_reached: int, kills: int = 0) -> void:
+func note_run(level_reached: int, kills: int = 0) -> void:
 	runs += 1
-	best_stage = maxi(best_stage, stage_reached)
+	best_level = maxi(best_level, level_reached)
 	lifetime_kills += maxi(0, kills)
 	save_meta()
 	meta_changed.emit()
-
-
-# --- co-op ----------------------------------------------------------------
-
-## The host's share of the pool. A guest calls this with what the host sent; a
-## host calls it empty once the session ends, which takes the loan back out of
-## its own rack.
-func share_pool(ids: Array) -> void:
-	shared_pool.clear()
-	for raw in ids:
-		var id := str(raw)
-		if Weapons.has(id) and not shared_pool.has(id):
-			shared_pool.append(id)
-	meta_changed.emit()
-
-
-## What this machine lends a guest: its own opened steel and nothing of the loan
-## it was handed, so two guests cannot pass a host's pool between themselves.
-func lent_pool() -> Array:
-	return unlocked.duplicate()
 
 
 # --- persistence -----------------------------------------------------------
@@ -262,7 +218,7 @@ func save_meta() -> void:
 		"unlocked": unlocked,
 		"loadout": loadout,
 		"runs": runs,
-		"best_stage": best_stage,
+		"best_level": best_level,
 		"lifetime_kills": lifetime_kills,
 		"lifetime_keys": lifetime_keys,
 	}, "\t"))
@@ -291,7 +247,7 @@ func load_meta() -> void:
 		return
 	keys = maxi(0, int(data.get("keys", 0)))
 	runs = maxi(0, int(data.get("runs", 0)))
-	best_stage = maxi(0, int(data.get("best_stage", 0)))
+	best_level = maxi(0, int(data.get("best_level", data.get("best_stage", 0))))
 	lifetime_kills = maxi(0, int(data.get("lifetime_kills", 0)))
 	lifetime_keys = maxi(0, int(data.get("lifetime_keys", 0)))
 	unlocked.clear()
@@ -322,6 +278,6 @@ func _ensure_defaults() -> void:
 
 
 func describe() -> String:
-	return "%d key%s  ·  %d/%d weapons open  ·  best stage %d" % [
+	return "%d key%s  ·  %d/%d weapons open  ·  best level %d" % [
 		keys, "" if keys == 1 else "s", unlocked_ids().size(), Weapons.all_ids().size(),
-		best_stage]
+		best_level]

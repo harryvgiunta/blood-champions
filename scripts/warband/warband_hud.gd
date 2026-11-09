@@ -17,9 +17,9 @@ extends CanvasLayer
 ##     stamina. Under that plate sits the ten-slot hotbar, one compact tile per
 ##     skill the worn kit grants, numbered from 1 to 10. Every fact about the
 ##     body you are driving is in that corner and nowhere else.
-##   * **Top right - the band.** Headed by the purse (gold and the quiver, which
-##     is what a bow runs out of), then one row per mercenary in the field: the
-##     badge for how he fights, his name, his health and his state. The campaign
+##   * **Top right - the band.** Headed by the purse (gold; arrows are unlimited,
+##     so there is no quiver count), then one row per mercenary in the field: the
+##     badge for how he fights, his name, his health and his state. The band's
 ##     ledger hangs under it.
 ##   * **Centre.** The crosshair, the contextual prompt at the bottom and the two
 ##     banners at the top. There is no standing key legend: the controls are
@@ -193,8 +193,7 @@ func set_prompt(text: String) -> void:
 		_prompt_label.text = text
 		_prompt_label.visible = not text.is_empty()
 
-## The purse strip's text: gold and the party's quiver on one line, because a bow
-## with no shafts is the one number a player has to be able to see at a glance.
+## The purse strip's text: the band's gold.
 func purse_line() -> String:
 	return str(_purse_label.text) if _purse_label != null else ""
 
@@ -1025,17 +1024,15 @@ func _nearest_engaged(entries: Array, ids: Array) -> Dictionary:
 			best = entry
 	return best
 
-## The purse on the band's header rail: gold and the party's quiver on one line,
-## because a bow with no shafts is the one number a player has to be able to see at
-## a glance. The ritual essence has its own ledger on the altar screen; it is not a
-## number a fight turns on.
+## The purse on the band's header rail. Arrows are unlimited, so gold is the only
+## wallet on the strip; the run's crystals and keys have their own line.
 func _refresh_purse() -> void:
 	if _purse_label == null:
 		return
 	if _warband == null:
 		_purse_label.text = ""
 		return
-	_purse_label.text = "%d gold  ·  %d arrows" % [_warband.gold(), _warband.arrows()]
+	_purse_label.text = "%d gold" % _warband.gold()
 
 func _roster_id_for(body) -> int:
 	if _warband == null or body == null:

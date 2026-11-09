@@ -211,12 +211,12 @@ func check_keys() -> void:
 	game._unhandled_input(_key(KEY_TAB))
 	check(not game.screen.is_open(), "TAB does not open the warband screen")
 	var hands: Dictionary = warband.roster.equipped_of(merc_id)
-	check(str(hands.get("main", "")).is_empty() and str(hands.get("off", "")).is_empty(),
-		"TAB puts the bow away and the empty Set 2 is in its hands")
+	check(str(hands.get("main", "")) == warband.STARTING_MELEE,
+		"TAB takes the starter hatchet out of Set 2 (%s)" % str(hands.get("main", "")))
 	check(str(game.controller.body_of(merc_id).rig.weapon) != "bow",
-		"and the rig let go of it (%s)" % str(game.controller.body_of(merc_id).rig.weapon))
+		"and the rig let go of the bow (%s)" % str(game.controller.body_of(merc_id).rig.weapon))
 	check(bool(warband.equip_merc(merc_id, "main", "club_makeshift").get("ok", false)),
-		"a club goes into the empty Set 2")
+		"a club goes into Set 2")
 	game.controller.refresh_gear(merc_id)
 	game._unhandled_input(_key(KEY_TAB))
 	hands = warband.roster.equipped_of(merc_id)
@@ -305,25 +305,31 @@ func check_one_of_each() -> void:
 	check(game.town.warband == warband, "and to the one warband")
 	check(game.squad != null and game.squad.watchers == game.guards,
 		"the squad drives the world's one hostile list, not a copy")
-	# A new campaign starts in the town with the band `Warband.STARTING_BAND`
-	# names - one body, the issued club in its hand - and the soul is inside it.
-	check(game.start_area == "town", "a new campaign opens in the town (%s)" % game.start_area)
+	# A new game starts in the town with the band `Warband.STARTING_BAND` names -
+	# one body, the starter bow in set 1 and the hatchet in set 2 - and the soul
+	# is inside it.
+	check(game.start_area == "town", "a new game opens in the town (%s)" % game.start_area)
 	check(game.bodies.size() == warband.STARTING_BAND.size(),
 		"the starting band stands in the square (%d bodies for %d sworn)"
 			% [game.bodies.size(), warband.STARTING_BAND.size()])
 	check(warband.roster.count() == warband.STARTING_BAND.size(),
 		"and that is the whole of it (%d sworn)" % warband.roster.count())
-	# The one piece the campaign issues: a club in the main hand, out of the shared
-	# pool. A body that opens the run bare-handed cannot cut a latch or win the
-	# wood's first duel, and the runts in the warcamps are tuned for exactly this.
+	# The pair a new player is issued: the twig bow in set 1 and the makeshift
+	# hatchet in set 2, both out of the shared pool. The run binds the same pair,
+	# so the body that walks through the portal is the body that left the fire.
 	var starting_id: int = warband.roster.ids()[0] if warband.roster.count() > 0 else 0
 	var starting_gear: Dictionary = warband.roster.equipped_of(starting_id) \
 		if starting_id > 0 else {}
-	check(str(starting_gear.get("main", "")) == warband.STARTING_ARMS,
-		"the starting body opens with the issued club (%s)"
+	check(str(starting_gear.get("main", "")) == warband.STARTING_RANGED,
+		"the starting body opens with the starter bow (%s)"
 			% str(starting_gear.get("main", "")))
-	check(warband.stash.owns(warband.STARTING_ARMS, warband.roster),
-		"and the issued club is a piece the warband owns, not a phantom hand")
+	var melee_set: Dictionary = warband.roster.weapon_set_pair(starting_id, 1)
+	check(str(melee_set.get("main", "")) == warband.STARTING_MELEE,
+		"set 2 carries the makeshift hatchet (%s)" % str(melee_set.get("main", "")))
+	check(warband.stash.owns(warband.STARTING_RANGED, warband.roster),
+		"the starter bow is a piece the warband owns, not a phantom hand")
+	check(warband.stash.owns(warband.STARTING_MELEE, warband.roster),
+		"and the hatchet in set 2 is a piece the warband owns")
 	var local = game.controller.active_body(1)
 	check(local != null, "the local soul starts inside a body")
 	check(local != null and game.town.in_square(local), "and the body it is inside stands in the square")
@@ -840,12 +846,13 @@ func check_town_end() -> void:
 	check(body != null, "the body is standing in the square")
 	check(is_instance_valid(game.stash_chest), "the stash chest stands in the square")
 	check(is_instance_valid(game.recruiter_desk), "the recruiter desk stands in the square")
-	check(game.altar != null and game.altar.has_method("interact"), "the altar is the shared object")
 	check(is_instance_valid(game.quartermaster), "the quartermaster's counter is real")
 
 	# Each counter answers G from where the body stands - and the answer is the
-	# object itself, not a message.
-	for service in ["stash", "altar", "recruiter", "quartermaster"]:
+	# object itself, not a message. The altar is gone: annointments are out of
+	# this game and the square has no rite to work.
+	check(game.service_point("altar") == Vector3.ZERO, "the square has no annoint altar")
+	for service in ["stash", "recruiter", "quartermaster"]:
 		var point: Vector3 = game.service_point(service)
 		body.global_position = point + Vector3(1.2, 0.1, 1.2)
 		await create_timer(0.15).timeout
