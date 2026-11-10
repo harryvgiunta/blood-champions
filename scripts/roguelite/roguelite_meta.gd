@@ -2,48 +2,45 @@ class_name RogueliteMeta
 extends Node
 ## Autoload `Roguelite`: the player's ledger of unlocks.
 ##
-## Unlocking is a player's, not a run's: the weapons a player has opened, the key
-## balance those weapons are bought with, and the pair bound to the rack all live
-## here, in one file of their own (`user://roguelite_meta.json`). A run starts
-## every body with the starters and every weapon an earlier run opened is still on
-## the rack, so progression survives a wipe.
+## Unlocking is a player's, not a run's: the weapons and skills a player has
+## opened and the keys they were bought with live here, in one file of their own
+## (`user://roguelite_meta.json`, a sealed container - `scripts/save_file.gd` - so
+## a key count is not a number in a text file), so progression survives a wipe. The
+## *pair* is not here: what a body carries is its own worn kit, in the warband's
+## inventory.
+## The rack opens a piece and the warband forges it into the shared stash; the
+## stash is the only place a carried weapon can come from.
 ##
 ## The file is versioned and read defensively: an id this build no longer has is
-## dropped, a loadout slot naming a weapon that is not unlocked falls back to the
-## starter, and a newer file is left alone instead of being half-read.
+## dropped, and a newer file is left alone instead of being half-read.
 ##
-## Nothing is lent. Every player unlocks on their own machine, and a guest that
-## has never fought a boss fields the starters and nothing else.
+## Nothing is lent. Every player unlocks on their own machine.
 
 signal meta_changed
-## One line for the HUD: a key earned, a weapon opened, a slot rebound.
+## One line for the HUD: a key earned, a weapon opened, a skill opened.
 signal announcement(text: String)
 
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+## The sealed save container: AES-256 over a binary payload with an HMAC tail.
+const SaveFileScript = preload("res://scripts/save_file.gd")
 
-const SAVE_VERSION := 3
+const SAVE_VERSION := 4
 const DEFAULT_SAVE_PATH := "user://roguelite_meta.json"
-const RANGED_SLOT := "ranged"
-const MELEE_SLOT := "melee"
-const SLOTS := [RANGED_SLOT, MELEE_SLOT]
-## What a fresh body walks into Hearthstead holding. These two are never locked:
-## the whole point of the arc is that a band starts with a bow and a hatchet and
-## earns the rest.
-const DEFAULT_RANGED := "bow_twig"
-const DEFAULT_MELEE := "hatchet_makeshift"
 ## A fresh player has no keys and nothing but the starters. The first key is the
 ## tenth level's boss.
 const STARTING_KEYS := 0
 
 var keys := STARTING_KEYS
 var unlocked: Array[String] = []
-## The combat abilities this player has opened, by `AbilityRules` id. A weapon is
-## unlocked once and equipped on the rack; an ability is unlocked once and then
-## equipped on a body whose hands fit its family. Neither is ever welded to a
-## piece, so a wipe keeps both.
+## The combat abilities this player has opened, by `AbilityRules` id. An ability
+## is unlocked once and then equipped on a body whose hands fit its family; a
+## weapon is unlocked once and the warband forges it into the shared stash.
 var unlocked_abilities: Array[String] = []
-var loadout := {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
+## The opened pieces the warband has already forged a copy of. The forge is a
+## ledger fact, not a stash one: a piece the player has worn and sold must not be
+## re-minted by pressing its open row again.
+var forged: Array[String] = []
 var runs := 0
 var best_level := 0
 var lifetime_kills := 0
@@ -64,7 +61,10 @@ func reset(persist: bool = true) -> void:
 	keys = STARTING_KEYS
 	unlocked.clear()
 	unlocked_abilities.clear()
-	loadout = {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
+	# A fresh warband is seeded with the starters' copies: they owe no forge.
+	forged.clear()
+	for id in Weapons.default_ids():
+		forged.append(str(id))
 	runs = 0
 	best_level = 0
 	lifetime_kills = 0
@@ -93,45 +93,19 @@ func is_unlocked(weapon_id: String) -> bool:
 	return unlocked.has(weapon_id)
 
 
-## The weapons a slot can be set to right now, in registry order.
-func pool_for(slot: String) -> Array[String]:
-	var out: Array[String] = []
-	for id in Weapons.ids_for_slot(slot):
-		if is_unlocked(id):
-			out.append(id)
-	return out
+## Whether an opened piece still owes the warband its one copy. True until the
+## forge has booked it, so a sold weapon is not re-minted by the rack.
+func needs_forge(weapon_id: String) -> bool:
+	return is_unlocked(weapon_id) and not forged.has(weapon_id)
 
 
-func loadout_for(slot: String) -> String:
-	var id := str(loadout.get(slot, ""))
-	if id.is_empty() or not is_unlocked(id) or Weapons.slot_of(id) != slot:
-		return DEFAULT_RANGED if slot == RANGED_SLOT else DEFAULT_MELEE
-	return id
-
-
-## Bind a slot to an unlocked weapon. Refuses a locked piece, a piece that
-## belongs in the other slot, and the same piece in both hands.
-func set_loadout_slot(slot: String, weapon_id: String) -> Dictionary:
-	if not SLOTS.has(slot):
-		return {"ok": false, "message": "That is not a loadout slot."}
-	if not Weapons.has(weapon_id):
-		return {"ok": false, "message": "That weapon is not in the armory."}
-	var weapon_slot := Weapons.slot_of(weapon_id)
-	if weapon_slot != slot:
-		return {"ok": false, "message": "%s belongs in the %s slot." % [
-			Weapons.display_name(weapon_id), weapon_slot]}
-	if not is_unlocked(weapon_id):
-		return {"ok": false, "message": "%s is still locked. Open it on the rack." % [
-			Weapons.display_name(weapon_id)]}
-	var other := MELEE_SLOT if slot == RANGED_SLOT else RANGED_SLOT
-	if loadout_for(other) == weapon_id:
-		return {"ok": false, "message": "%s is already in the other hand." % [
-			Weapons.display_name(weapon_id)]}
-	loadout[slot] = weapon_id
+## Book one piece as forged into the shared stash.
+func mark_forged(weapon_id: String) -> void:
+	if weapon_id.is_empty() or forged.has(weapon_id):
+		return
+	forged.append(weapon_id)
 	save_meta()
 	meta_changed.emit()
-	return {"ok": true, "message": "%s takes the %s slot." % [
-		Weapons.display_name(weapon_id), slot]}
 
 
 # --- keys and unlocks ------------------------------------------------------
@@ -235,10 +209,44 @@ func unlock_weapon(weapon_id: String) -> Dictionary:
 	unlocked.append(weapon_id)
 	save_meta()
 	meta_changed.emit()
-	var text := "%s is open. It stands on the rack." % Weapons.display_name(weapon_id)
+	var text := "%s is open. It is forged into the stash." % Weapons.display_name(weapon_id)
 	announcement.emit(text)
 	return {"ok": true, "id": weapon_id, "name": Weapons.display_name(weapon_id),
 		"message": text}
+
+
+## The admin console's grant, and nothing else's: the piece becomes this
+## player's own without a key changing hands, so the rack lists it as worn kit
+## from then on. `unlock_weapon` stays the one path a purchase spends through.
+func grant_weapon(weapon_id: String) -> Dictionary:
+	if not Weapons.has(weapon_id):
+		return {"ok": false, "message": "That weapon is not in the armory."}
+	if is_unlocked(weapon_id):
+		return {"ok": true, "id": weapon_id, "message": "%s is already open."
+			% Weapons.display_name(weapon_id)}
+	unlocked.append(weapon_id)
+	save_meta()
+	meta_changed.emit()
+	var text := "%s is open  ·  ADMIN" % Weapons.display_name(weapon_id)
+	announcement.emit(text)
+	return {"ok": true, "id": weapon_id, "message": text}
+
+
+## The admin console's ability grant: the skill is this player's without a key,
+## and the rack's book can then equip it on any body whose hands fit it.
+func grant_ability(ability_id: String) -> Dictionary:
+	var definition := AbilityRules.by_id(ability_id)
+	if definition.is_empty():
+		return {"ok": false, "message": "No such skill."}
+	if AbilityRules.is_automatic(ability_id) or unlocked_abilities.has(ability_id):
+		return {"ok": true, "id": ability_id, "message": "%s is already open."
+			% str(definition.get("name", ability_id)).capitalize()}
+	unlocked_abilities.append(ability_id)
+	save_meta()
+	meta_changed.emit()
+	var text := "%s is open  ·  ADMIN" % str(definition.get("name", ability_id)).capitalize()
+	announcement.emit(text)
+	return {"ok": true, "id": ability_id, "message": text}
 
 
 func note_run(level_reached: int, kills: int = 0) -> void:
@@ -252,39 +260,29 @@ func note_run(level_reached: int, kills: int = 0) -> void:
 # --- persistence -----------------------------------------------------------
 
 func save_meta() -> void:
-	var file := FileAccess.open(save_path, FileAccess.WRITE)
-	if file == null:
-		push_warning("Roguelite: cannot write %s" % save_path)
-		return
-	file.store_string(JSON.stringify({
+	if not SaveFileScript.write(save_path, {
 		"version": SAVE_VERSION,
 		"keys": keys,
 		"unlocked": unlocked,
 		"abilities": unlocked_abilities,
-		"loadout": loadout,
+		"forged": forged,
 		"runs": runs,
 		"best_level": best_level,
 		"lifetime_kills": lifetime_kills,
 		"lifetime_keys": lifetime_keys,
-	}, "\t"))
-	file.close()
+	}):
+		push_warning("Roguelite: cannot write %s" % save_path)
 
 
 func load_meta() -> void:
-	if not FileAccess.file_exists(save_path):
+	var opened: Dictionary = SaveFileScript.inspect(save_path)
+	if not bool(opened.get("ok", false)):
+		var problem := str(opened.get("problem", ""))
+		if problem != "missing":
+			push_warning("Roguelite: ignoring %s ledger at %s" % [problem, save_path])
 		_ensure_defaults()
 		return
-	var file := FileAccess.open(save_path, FileAccess.READ)
-	if file == null:
-		_ensure_defaults()
-		return
-	var raw := file.get_as_text()
-	file.close()
-	var parsed: Variant = JSON.parse_string(raw)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		_ensure_defaults()
-		return
-	var data: Dictionary = parsed
+	var data: Dictionary = opened.get("data", {})
 	if int(data.get("version", 0)) > SAVE_VERSION:
 		# A ledger from a newer build is left as it stands; reading half of it
 		# would quietly spend a player's keys on a weapon this build cannot hold.
@@ -311,24 +309,26 @@ func load_meta() -> void:
 				continue
 			if not unlocked_abilities.has(id):
 				unlocked_abilities.append(id)
-	var raw_loadout: Variant = data.get("loadout", {})
-	if raw_loadout is Dictionary:
-		var saved: Dictionary = raw_loadout
-		for slot in SLOTS:
-			var id := str(saved.get(slot, ""))
-			if not id.is_empty() and Weapons.slot_of(id) == slot and (Weapons.is_default(id) or unlocked.has(id)):
-				loadout[slot] = id
+	# A v3 file also carried the rack's bound pair. It is dropped: the pair is the
+	# warband's inventory now, and a saved id here would be a second truth.
+	forged.clear()
+	var raw_forged: Variant = data.get("forged", [])
+	if raw_forged is Array:
+		for entry in raw_forged:
+			var id := str(entry)
+			if Weapons.has(id) and not forged.has(id):
+				forged.append(id)
 	_ensure_defaults()
 
 
 func _ensure_defaults() -> void:
-	if not Weapons.has(DEFAULT_RANGED) or not Weapons.has(DEFAULT_MELEE):
+	if not Weapons.has(Weapons.STARTER_RANGED) or not Weapons.has(Weapons.STARTER_MELEE):
 		push_error("Roguelite: the starter weapons are missing from the registry")
 		return
-	if not is_unlocked(str(loadout.get(RANGED_SLOT, ""))) or Weapons.slot_of(str(loadout.get(RANGED_SLOT, ""))) != RANGED_SLOT:
-		loadout[RANGED_SLOT] = DEFAULT_RANGED
-	if not is_unlocked(str(loadout.get(MELEE_SLOT, ""))) or Weapons.slot_of(str(loadout.get(MELEE_SLOT, ""))) != MELEE_SLOT:
-		loadout[MELEE_SLOT] = DEFAULT_MELEE
+	# The starters are seeded into a fresh warband's stash: they owe no forge.
+	for id in Weapons.default_ids():
+		if not forged.has(id):
+			forged.append(str(id))
 
 
 func describe() -> String:

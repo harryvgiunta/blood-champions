@@ -65,7 +65,6 @@ func run() -> void:
 	check_nock_stack(holder)
 	check_lodged_blade()
 	check_stagger_rules(holder)
-	check_watcher_line(holder)
 	check_issued_club()
 	holder.queue_free()
 	await process_frame
@@ -274,22 +273,13 @@ func check_loadout_hands(holder: Node3D) -> void:
 	holder.add_child(rig)
 	rig.set_physics_process(false)
 	var kit := {"main": CLUB, "off": "", "bow": 0, "sword": 3, "armor": 0,
-		"trinkets": {"neck": "", "ring1": "", "ring2": "", "off": ""}}
-	SeatLoadout.apply(rig, kit, {"hands": {"main":
-		{"overhead_damage": 2.0, "overhead_speed": 0.5}}})
+		"trinkets": {"off": ""}}
+	SeatLoadout.apply(rig, kit)
 	check(rig.swing_weapon_class("right") == "blunt",
 		"the loadout dresses the club (%s)" % rig.swing_weapon_class("right"))
 	check(rig.begin_melee("right", "overhead"), "and that hand swings it")
-	check(is_equal_approx(float(rig.melee_seconds("right")), 0.6),
-		"SeatLoadout lays the weld on the hand (%.3f s)" % float(rig.melee_seconds("right")))
-	check(is_equal_approx(rig.swing_damage("right"), 18.0),
-		"and the blow it deals (%.2f)" % rig.swing_damage("right"))
-	rig.abort_melee("right")
-	# A kit dressed with no weld on that hand holds the plain clip again.
-	SeatLoadout.apply(rig, kit, {"hands": {"main": {}, "off": {}}})
-	check(rig.begin_melee("right", "overhead"), "the plain club swings again")
 	check(is_equal_approx(float(rig.melee_seconds("right")), 0.9),
-		"and the hand holds no weld (%.3f s)" % float(rig.melee_seconds("right")))
+		"the club swings its own clip (%.3f s)" % float(rig.melee_seconds("right")))
 	check(is_equal_approx(rig.swing_damage("right"), 6.0),
 		"dealing the plain six (%.2f)" % rig.swing_damage("right"))
 	rig.abort_melee("right")

@@ -322,6 +322,14 @@ static func night() -> WorldStyle:
 	return style
 
 
+## The species entry this style builds a stand from, or {} when the id names none.
+func species_by_id(species_id: String) -> Dictionary:
+	for entry in trees:
+		if String(entry.get("id", "")) == species_id:
+			return entry
+	return {}
+
+
 static func _species(values: Dictionary) -> Dictionary:
 	var entry := {
 		"id": "",

@@ -5,9 +5,12 @@ extends RefCounted
 ## instead of a plain sentence about clicking it.
 ##
 ## Two shapes, because the screens build rows two ways: `Row` is the Button row
-## the paperdoll, delve prep, loot window and altar use, and `LabelRow` is the
+## the corpse screen, delve prep, loot window and altar use, and `LabelRow` is the
 ## name half of a keeper row (a Label beside its BUY/SELL button). Both carry the
-## same fields, so one `show_item()` call is the whole wiring.
+## same fields, so one `show_item()` call is the whole wiring. The character
+## screen's own gear slots and inventory tiles do not use these: they raise its
+## `_hover_card` inside the page, because a Godot tooltip popup is sized by the
+## window rather than by the piece.
 ##
 ## The tooltip string itself stays on the control (`tooltip_text` = the piece's
 ## name): Godot only asks for a custom tooltip when that string is non-empty, and

@@ -94,9 +94,6 @@ const ANCHORS := {
 	"thigh_l": {"type": "point", "slot": "legs", "bone": "thigh_l", "at": Vector3(0.09, 0.72, -0.036),
 		"dir": Vector3(0.96, 0.0, 0.28), "reach": 0.03, "clear": 0.004,
 		"out": Vector3(0.96, 0.0, 0.28), "up": Vector3(0.0, 1.0, 0.0), "surfaces": ["legs", "chest"]},
-	"neck": {"type": "ring", "slot": "chest", "bone": "spine_03", "at": Vector3(0.0, 1.46, -0.02),
-		"axis": Vector3(0.0, 1.0, 0.4), "half": 0.02, "cap": 0.17, "clear": 0.008,
-		"out": Vector3(0.0, 0.0, 1.0), "surfaces": ["chest", "head"]},
 	"wrist_l": {"type": "ring", "slot": "hands", "bone": "lowerarm_l", "at": Vector3(0.0, 1.456, -0.07),
 		"axis": Vector3(1.0, 0.0, 0.0), "half": 0.015, "cap": 0.11, "clear": 0.004, "edge": "inner",
 		"out": Vector3(0.0, 0.0, 1.0), "surfaces": ["hands", "chest"]},
@@ -493,11 +490,7 @@ func _place_trophies(pieces: Dictionary) -> void:
 func _build_trophy(trophy: Dictionary, size: Vector2) -> MeshInstance3D:
 	var anchor: Dictionary = trophy["anchor"]
 	var kind := str(trophy["kind"])
-	var merged
-	if str(trophy["name"]) == "neck":
-		merged = Trophies.build_necklace(kind, _trophy_mats, size)
-	else:
-		merged = Trophies.build(kind, _trophy_mats, size, float(anchor.get("side", 1.0)))
+	var merged = Trophies.build(kind, _trophy_mats, size, float(anchor.get("side", 1.0)))
 	# Trophies cast no shadow: a skull's shadow on the hip it hangs from is acne
 	# at this scale, and eight bodies' worth of small casters is not free.
 	return merged.commit(trophy["holder"], "Trophy", false)

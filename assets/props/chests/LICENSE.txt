@@ -1,0 +1,34 @@
+IRONWOOD REWARD CHEST - LICENSE AND PROVENANCE
+
+Everything under this directory (assets/props/chests/) is built by one command:
+
+    python tools/build_reward_chests.py
+
+which runs Blender 5.1 in background mode on tools/prepare_reward_chests.py.
+reward_chests.json records the Blender version, the seed, the digest of every
+output and every texture map, and the measured bounds of the three variants.
+No downloaded model, scan or texture is used: the geometry, the analytic surface
+fields and the Cycles bakes are all authored by that script from nothing, so
+there is no upstream licence to carry and no source pack to stage.
+
+WHAT IS HERE
+
+  reward_chests.glb              Chest_Island, Chest_Cache, Chest_Hoard
+  reward_chests.json             the build record
+  textures/chest_<group>_*.png   the shipped maps, one set per material:
+                                 albedo (sRGB, pigment only), tangent normal
+                                 (OpenGL), ORM (R = occlusion, G = roughness,
+                                 B = metallic). chest_gem_emit.png is the only
+                                 emissive map; the runtime tints that surface to
+                                 the chest's tier.
+
+CONVENTIONS
+
+  axes      Godot +Y up; every chest stands on its origin and its front faces -Z
+  albedo    pigment only - no light, shadow or glare is baked into a map
+  normal    OpenGL tangent space (+Y green up), which is what glTF and Godot read
+
+LICENCE
+
+Original work made for this project: CC BY-NC-SA 4.0, section 3 of LICENSE.md.
+The upstream-generic CC0 dedication does not apply to these files.

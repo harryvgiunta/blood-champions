@@ -70,11 +70,11 @@ func _run() -> void:
 func _check_starters() -> void:
 	check(AbilityRules.STARTER_BY_FAMILY.size() == 8,
 		"eight families carry a free starter")
-	check(AbilityRules.catalog_ids().size() == 35,
-		"35 active skills: 29 base + 6 new family starters (%d)"
+	check(AbilityRules.catalog_ids().size() == 36,
+		"36 active skills: 29 base + 6 new family starters + Fire Ray (%d)"
 		% AbilityRules.catalog_ids().size())
-	check(AbilityRules.unlockable_ids().size() == 27,
-		"the 27 purchased skills are unchanged")
+	check(AbilityRules.unlockable_ids().size() == 28,
+		"the 28 purchased skills are unchanged")
 	for family in AbilityRules.STARTER_BY_FAMILY:
 		var id := str(AbilityRules.STARTER_BY_FAMILY[family])
 		check(AbilityRules.is_automatic(id) and AbilityRules.is_starter(id),
@@ -98,8 +98,8 @@ func _check_starters() -> void:
 
 
 func _check_catalog() -> void:
-	check(Mods.all().size() == 161,
-		"the pool grew to 161 rows (%d)" % Mods.all().size())
+	check(Mods.all().size() == 173,
+		"the pool grew to 173 rows (%d)" % Mods.all().size())
 	var ability_rows := 0
 	for row in Mods.all():
 		if str(row.family) != Mods.FAMILY_ABILITY:
@@ -112,7 +112,7 @@ func _check_catalog() -> void:
 			"%s is categorized as a verb or a family" % id)
 		check(bool(row.get("ready", true)) == (not tags.is_empty()),
 			"%s is live when it is a family row" % id)
-	check(ability_rows == 60, "60 ability rows: 19 verbs + 41 family (%d)" % ability_rows)
+	check(ability_rows == 61, "61 ability rows: 19 verbs + 42 family (%d)" % ability_rows)
 	check(Mods.tags_of("echo_cast") == ["any"], "Echo Cast is any-family")
 	check(Mods.tags_of("spiral_shot") == ["bow"], "Spiral Shot is bow-only")
 	check(Mods.verb_of("fleet_roll") == "roll", "Fleet Roll is a roll verb")
@@ -205,7 +205,7 @@ func _check_run_plans() -> void:
 			"bouncing_arrows", "bouncing_arrows", "spiral_shot",
 			"double_nock", "double_nock", "double_nock", "double_nock",
 			"quick_draw", "quick_draw", "arcane_focus", "arcane_focus",
-			"ricochet_rounds"]:
+			"ricochet_rounds", "magical_nock"]:
 		caster.engine.add_mod(id, 1)
 	check(caster.ability_damage_multiplier("bow") > 1.0,
 		"Focused Force raises bow ability damage")
@@ -217,6 +217,7 @@ func _check_run_plans() -> void:
 		"Bouncing Arrows and Ricochet Rounds stack bounces")
 	check(caster.ability_spiral("bow"), "Spiral Shot marks the arrow")
 	check(caster.bow_draw_scale() > 1.0, "Quick Draw shortens the draw")
+	check(caster.bow_no_nock(), "Magical Nock reaches the run's bow as the no-nock flag")
 	var plan: Dictionary = caster.fire_plan(Vector3.ZERO, Vector3.FORWARD)
 	check(int(plan.get("arrow_split", 0)) == 2,
 		"the fire plan carries the split shafts")

@@ -64,7 +64,7 @@ static func lightning(parent: Node3D, from: Vector3, to: Vector3,
 	tween.chain().tween_callback(node.queue_free)
 
 
-## A ring on the ground: the nova, the bomb's burst, the pedestal's halo.
+## A ring on the ground: the nova, the bomb's burst, a chest's opening.
 static func ring(parent: Node3D, at: Vector3, colour: Color = BLOOD,
 		size: float = 2.0, hold: float = 0.26) -> void:
 	if parent == null or not is_instance_valid(parent):

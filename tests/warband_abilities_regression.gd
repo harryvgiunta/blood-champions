@@ -153,8 +153,8 @@ func _check_number_row(actor) -> void:
 	actor.ability.cooldowns[0] = 0.0
 	actor.stamina = actor.max_stamina
 
-	# The equipped skills take the first keys; the bandage and the potion keep
-	# the last two. The list is capped at seven beside the starter.
+	# The assigned skills sit on the keys the player gave them and the starters
+	# fill the free ones; medicine is not on the bar at all.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
 	actor.rig.set_ability_loadout([
 		"barrage", "triple_volley", "piercing_shot", "rain_of_ash", "skewer",
@@ -162,28 +162,74 @@ func _check_number_row(actor) -> void:
 	])
 	var grants: Array = AbilityRules.granted(actor.rig)
 	check(grants.size() == AbilityRules.SLOT_COUNT,
-		"the hotbar is always ten slots")
-	check(_granted_ids(grants).size() == 9,
-		"seven equipped skills and the two consumables fill nine keys, got %s"
+		"the hotbar is five keys wide")
+	check(_granted_ids(grants).size() == AbilityRules.SLOT_COUNT,
+		"five assigning skills fill the five keys, got %s"
 		% str(_granted_ids(grants)))
-	check(str(grants[8].get("id", "")) == "bandage"
-			and str(grants[9].get("id", "")) == "healing_potion",
-		"the last two keys are the bandage and the potion, got %s / %s"
-		% [str(grants[8].get("id", "")), str(grants[9].get("id", ""))])
+	check(_granted_ids(grants) == ["barrage", "triple_volley",
+			"piercing_shot", "rain_of_ash", "skewer"],
+		"the assigned row comes first, in its own order, got %s"
+		% str(_granted_ids(grants)))
+	check(not _granted_ids(grants).has("bandage")
+			and not _granted_ids(grants).has("healing_potion"),
+		"medicine is not on the bar")
 
-	# A whole body is refused its dressing and its draught with the line the
-	# player can act on. The channel itself belongs to the body (`try_consume`);
-	# this harness has no floor to stand on, so only the refusal is exercised.
+	# A dressing is bought, not free: the body is the gate - an empty pack refuses,
+	# a whole body refuses, and a spent dose keeps its cooldown. The band's own
+	# stock is the `Warband` autoload.
+	var pack = root.get_node_or_null("Warband")
+	check(pack != null, "the warband's books are up, where the medicine is counted")
+	if pack != null:
+		pack.supplies["bandage"] = 0
+		pack.supplies["potion"] = 0
 	actor.health = actor.max_health
-	var dressing: Dictionary = actor.ability.activate(8)
-	check(not bool(dressing.get("ok", true))
-			and str(dressing.get("message", "")).contains("not wounded"),
-		"key 9 answers a whole body, got %s" % str(dressing.get("message", "")))
-	var draught: Dictionary = actor.ability.activate(9)
-	check(not bool(draught.get("ok", true))
-			and str(draught.get("message", "")).contains("not wounded"),
-		"key 0 answers a whole body, got %s" % str(draught.get("message", "")))
+	check(not actor.try_consume("bandage"), "an empty pack refuses a bandage")
+	check(not actor.try_consume("potion"), "an empty pack refuses a draught")
+
+	# With a stocked pack the body's own refusal answers instead, and the dose is
+	# kept: a whole body wastes no bandage.
+	if pack != null:
+		pack.supplies["bandage"] = 3
+		pack.supplies["potion"] = 2
+	actor.health = actor.max_health
+	check(not actor.try_consume("bandage"), "a whole body refuses a bandage")
+	check(not actor.try_consume("potion"), "a whole body refuses a draught")
+	if pack != null:
+		check(pack.supply_count("bandage") == 3 and pack.supply_count("potion") == 2,
+			"a refused dose is never spent, got %d bandages / %d potions"
+			% [pack.supply_count("bandage"), pack.supply_count("potion")])
+
+	# A wound takes the dose only from a body standing on its feet with stock in
+	# the pack, and a dose starts the catalogue's own cooldown on that medicine.
+	# This harness has no floor under the body, so the standing gate itself is the
+	# refusal here; the clock and the catalogue's figure are checked directly.
+	actor.health = actor.max_health * 0.5
+	check(float(actor.get("consume_ready").get("bandage", -1.0)) == 0.0,
+		"a fresh body has its dressing ready")
+	check(is_equal_approx(actor._consume_cooldown("bandage"),
+		float(AbilityRules.by_id("bandage").get("cooldown", 0.0))),
+		"and the dressing's clock is the catalogue's own, got %.1f"
+		% actor._consume_cooldown("bandage"))
+	check(is_equal_approx(actor._consume_cooldown("potion"),
+		float(AbilityRules.by_id("healing_potion").get("cooldown", 0.0))),
+		"as is the draught's, got %.1f" % actor._consume_cooldown("potion"))
+	var stocked := 0
+	if pack != null:
+		stocked = pack.supply_count("bandage")
+	check(not actor.try_consume("bandage"),
+		"a body with no floor under it takes no dressing")
+	if pack != null:
+		check(pack.supply_count("bandage") == stocked,
+			"and a refused dose is never spent, got %d of %d"
+			% [pack.supply_count("bandage"), stocked])
+	# A spent dose is gated by the clock the dose itself set.
+	actor.consume_ready["bandage"] = 5.0
+	check(not actor.try_consume("bandage"),
+		"a spent dressing refuses until its clock runs out")
+	actor.consume_ready["bandage"] = 0.0
 	actor.ability.cancel()
+	actor.rig.end_consumable()
+	actor.consume_kind = ""
 	actor.ability.reset()
 	actor.rig.apply_loadout(State.build_loadout("", "", ARMOR))
 	actor.stamina = actor.max_stamina
@@ -208,9 +254,9 @@ func _check_hud(world: Node3D, actor) -> void:
 			"the stamina bar reads the body's stamina, got %.1f vs %.1f"
 			% [bar.value, float(actor.stamina)])
 	var tiles: Array = hud.ability_tiles()
-	check(tiles.size() == AbilityRules.SLOT_COUNT,
-		"the hotbar has one tile per slot, got %d" % tiles.size())
-	check(tiles.size() == 10, "the hotbar is ten keys, got %d" % tiles.size())
+	check(tiles.size() == AbilityRules.MAX_SLOT_COUNT,
+		"the HUD builds every key a bar can have, got %d" % tiles.size())
+	check(tiles.size() == 10, "that ceiling is ten keys, got %d" % tiles.size())
 	for index in tiles.size():
 		check(str(tiles[index].name) == "Ability%d" % (index + 1),
 			"tile %d is named Ability%d" % [index, index + 1])
@@ -220,26 +266,31 @@ func _check_hud(world: Node3D, actor) -> void:
 		% tile_key(tiles[0]))
 	check(tiles[1].visible and tile_id(tiles[1]).is_empty(),
 		"a hand with no grant keeps an empty numbered slot")
+	var base_shown := 0
+	for index in tiles.size():
+		if (tiles[index] as Control).visible:
+			base_shown += 1
+	check(base_shown == AbilityRules.SLOT_COUNT,
+		"a five-key bar draws five frames, got %d" % base_shown)
 
-	# Stock steel carries no skill: a dagger and a buckler with no equipped list
-	# leave every kit slot empty; the consumables still take the last two.
-	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
-		{"neck": "neck_shield"}))
+	# Stock steel carries no skill: a dagger and a buckler with no assignment leave
+	# every key empty (this dressing carries no starter: `starter_ability` is off).
+	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR))
 	actor.rig.set_ability_loadout([])
 	actor.stamina = actor.max_stamina
 	hud.set_body(actor, "Probe", 1)
 	check(tile_id(tiles[0]).is_empty() and tile_key(tiles[0]) == "1",
-		"stock steel leaves the first slot empty and numbered, got %s"
+		"stock steel leaves the first key empty and numbered, got %s"
 		% tile_id(tiles[0]))
 
-	# Equipped on that dagger-and-shield kit: the dagger skill, the shield skill
-	# and an any-hand ward, then the consumables.
+	# Assigned on that dagger-and-shield kit: the dagger skill, the shield skill
+	# and an any-hand ward fill the first three keys, and medicine is not on the
+	# row at all.
 	actor.rig.set_ability_loadout(["backstab", "shield_bash", "energy_shield"])
 	hud.set_body(actor, "Probe", 1)
 	var equipped_ids := ["backstab", "shield_bash", "energy_shield"]
-	check(_granted(tiles) == equipped_ids.size() + 2,
-		"three equipped skills and the two consumables fill five slots, got %d"
-		% _granted(tiles))
+	check(_granted(tiles) == equipped_ids.size(),
+		"three assigned skills fill three keys, got %d" % _granted(tiles))
 	for index in equipped_ids.size():
 		check(tile_id(tiles[index]) == equipped_ids[index],
 			"slot %d draws %s, got %s" % [index, equipped_ids[index],
@@ -248,16 +299,14 @@ func _check_hud(world: Node3D, actor) -> void:
 			"tile %d is labelled %d, got %s" % [index, index + 1,
 			tile_key(tiles[index])])
 
-	# Every equipped skill takes its own hotbar slot in the order the player laid
+	# Every assigned skill takes its own hotbar slot in the order the player laid
 	# it, rather than being hidden behind the first.
-	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR,
-		{"neck": "neck_shield", "ring1": "ring_dash"}))
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
 	actor.rig.set_ability_loadout(["barrage", "triple_volley", "energy_shield", "dash"])
 	hud.set_body(actor, "Probe", 1)
 	var bow_ids := ["barrage", "triple_volley", "energy_shield", "dash"]
-	check(_granted(tiles) == bow_ids.size() + 2,
-		"four equipped skills and the two consumables fill six slots, got %d"
-		% _granted(tiles))
+	check(_granted(tiles) == bow_ids.size(),
+		"four assigned skills fill four keys, got %d" % _granted(tiles))
 	for index in bow_ids.size():
 		check(tile_id(tiles[index]) == bow_ids[index],
 			"slot %d draws %s, got %s" % [index, bow_ids[index],
@@ -266,18 +315,29 @@ func _check_hud(world: Node3D, actor) -> void:
 			"hotbar slot %d keeps its number, got %s" % [index + 1,
 			tile_key(tiles[index])])
 	check(tile_id(tiles[bow_ids.size()]).is_empty(),
-		"the rest of the kit's keys stay empty")
-	check(tile_id(tiles[AbilityRules.SLOT_COUNT - 2]) == "bandage"
-			and tile_id(tiles[AbilityRules.SLOT_COUNT - 1]) == "healing_potion",
-		"the bandage and the potion keep the last two keys")
-	check(tile_key(tiles[AbilityRules.SLOT_COUNT - 1]) == "10",
-		"the tenth slot is labelled 10, got %s"
-		% tile_key(tiles[AbilityRules.SLOT_COUNT - 1]))
+		"the free key stays empty: this dressing carries no starter")
+	check(not (tiles[AbilityRules.MAX_SLOT_COUNT - 1] as Control).visible,
+		"a key past the five-key bar is hidden, not numbered")
+
+	# A run's upgrade buys more keys: the frames past the five appear, and the
+	# ceiling still holds.
+	actor.rig.set("ability_extra_slots", 2)
+	hud.set_body(actor, "Probe", 1)
+	var widened := 0
+	for index in tiles.size():
+		if (tiles[index] as Control).visible:
+			widened += 1
+	check(widened == AbilityRules.SLOT_COUNT + 2,
+		"two keys bought by the run draw two more frames, got %d" % widened)
+	check(tile_key(tiles[AbilityRules.SLOT_COUNT + 1]) == "7",
+		"the seventh key is labelled 7, got %s"
+		% tile_key(tiles[AbilityRules.SLOT_COUNT + 1]))
+	actor.rig.set("ability_extra_slots", 0)
+	hud.set_body(actor, "Probe", 1)
 
 	# Hand the later checks a melee kit back: the guard checks below need a blade
 	# in the hand, and this test's last kit is a bow.
-	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
-		{"neck": "neck_shield"}))
+	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR))
 	actor.stamina = actor.max_stamina
 
 	hud.set_body(null, "", -1)
@@ -437,6 +497,7 @@ func _check_ability_node(world: Node3D, actor, controller) -> void:
 		"and the shot takes the body out of the recovery (%s)" % str(actor.rig.phase))
 	actor.ability.cancel()
 	_check_starter_venom(world, actor, abilities)
+	await _check_fire_ray(world, actor, abilities)
 	abilities.queue_free()
 
 
@@ -495,3 +556,122 @@ func _check_starter_venom(world: Node3D, actor, abilities) -> void:
 	actor.ability.cancel()
 	actor.ability.cooldowns.fill(0.0)
 	victim.queue_free()
+
+
+## Fire Ray is the one held spell: the cue stands a beam, the beam pays its DPS
+## on a fifth-second tick to every body in its line, ignores a body outside it,
+## stops at a wall, and stops the same frame its caster's cast does. The bodies
+## stand on the mob layer (`2`), which is what the scene's target mask selects.
+func _check_fire_ray(world: Node3D, actor, abilities) -> void:
+	actor.rig.apply_loadout(State.build_loadout("staff_fire", "", ARMOR))
+	actor.rig.set_ability_loadout(["fire_ray"])
+	actor.rig.starter_ability = ""
+	actor.ability.cancel()
+	actor.ability.cooldowns.fill(0.0)
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+	# The world adopts a body against the wood's mobs (layer 2); a squadmate on
+	# layer 4 is deliberately not in the mask.
+	actor.combat.target_mask = 2
+	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "fire_ray",
+		"a staff draws Fire Ray on its key")
+	var effect: Dictionary = AbilityRules.by_id("fire_ray").get("effect", {})
+	check(str(effect.get("kind", "")) == "beam",
+		"Fire Ray is the beam effect (%s)" % str(effect.get("kind", "")))
+	check(is_equal_approx(float(effect.get("damage_scale", 0.0)), 1.0),
+		"its damage share is a per-second figure (%s)"
+			% str(effect.get("damage_scale")))
+
+	var near := fighter(world, 7, Vector3(0.0, 0.0, -4.0))
+	var far := fighter(world, 8, Vector3(0.0, 0.0, -8.0))
+	var side := fighter(world, 9, Vector3(3.0, 0.0, -4.0))
+	for victim in [near, far, side]:
+		# A mob's layer, not a warband body's: the scene's target mask is 1 | 2
+		# and a squadmate (layer 4) is deliberately not in it.
+		victim.collision_layer = 2
+		victim.health = 300.0
+		victim.max_health = 300.0
+	actor.combat.aim_point = Vector3(0.0, 1.2, -8.0)
+	actor.combat.update_aim()
+	await physics_frame
+
+	abilities._beams.clear()
+	abilities._missiles.clear()
+	var started: Dictionary = actor.try_ability(0)
+	check(bool(started.get("ok", false)), "Fire Ray starts: %s"
+		% str(started.get("message", "")))
+	var rays: Array = abilities.beams()
+	check(rays.size() == 1, "the beam cue stands one ray (%d)" % rays.size())
+	if rays.is_empty():
+		actor.ability.cancel()
+		_clear_fire_ray_probes([near, far, side], null)
+		return
+	var ray = rays[0]
+	ray.set_physics_process(false)
+	# Five ticks of a 50 dps ray at 0.2 s: fifty points off each body in the line.
+	for _tick in 5:
+		ray._physics_process(0.2)
+	check(ray.beam_length > 7.0,
+		"the ray reaches down the line (%.2f m)" % float(ray.beam_length))
+	check(absf((300.0 - near.health) - 50.0) < 3.0,
+		"the near body takes five ticks (%.2f)" % (300.0 - near.health))
+	check(absf((300.0 - far.health) - 50.0) < 3.0,
+		"so does the far body in the same line (%.2f)" % (300.0 - far.health))
+	check(is_equal_approx(side.health, 300.0),
+		"a body off the line is not in the beam (%.2f)" % side.health)
+	# The sixth tick ends the cast's 1.2 s clock and the node with it.
+	ray._physics_process(0.2)
+	check(ray.is_queued_for_deletion(), "the ray frees itself at the end of the cast")
+	actor.ability.cancel()
+	await process_frame
+	abilities._beams.clear()
+
+	# A wall stops the ray: the near body is still burnt, the far one is not.
+	var wall := StaticBody3D.new()
+	wall.name = "FireRayWall"
+	wall.collision_layer = 1
+	wall.collision_mask = 0
+	var box := BoxShape3D.new()
+	box.size = Vector3(8.0, 4.0, 0.4)
+	var collider := CollisionShape3D.new()
+	collider.shape = box
+	wall.add_child(collider)
+	world.add_child(wall)
+	wall.global_position = Vector3(0.0, 2.0, -6.0)
+	near.health = 300.0
+	far.health = 300.0
+	side.health = 300.0
+	actor.ability.cooldowns.fill(0.0)
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+	actor.combat.aim_point = Vector3(0.0, 1.2, -8.0)
+	await physics_frame
+	var capped: Dictionary = actor.try_ability(0)
+	check(bool(capped.get("ok", false)), "Fire Ray starts again at the wall: %s"
+		% str(capped.get("message", "")))
+	var second: Array = abilities.beams()
+	check(second.size() == 1, "one fresh ray at the wall (%d)" % second.size())
+	if not second.is_empty():
+		var wall_ray = second[0]
+		wall_ray.set_physics_process(false)
+		for _tick in 5:
+			wall_ray._physics_process(0.2)
+		check(wall_ray.beam_length < 6.0,
+			"the wall caps the ray (%.2f m)" % float(wall_ray.beam_length))
+		check(absf((300.0 - near.health) - 50.0) < 3.0,
+			"the body before the wall still burns (%.2f)" % (300.0 - near.health))
+		check(is_equal_approx(far.health, 300.0),
+			"the body behind the wall does not (%.2f)" % far.health)
+		wall_ray._physics_process(0.2)
+		check(wall_ray.is_queued_for_deletion(),
+			"the wall's ray frees itself too")
+	actor.ability.cancel()
+	_clear_fire_ray_probes([near, far, side], wall)
+
+
+func _clear_fire_ray_probes(victims: Array, extra: Node) -> void:
+	for victim in victims:
+		if is_instance_valid(victim):
+			victim.queue_free()
+	if is_instance_valid(extra):
+		extra.queue_free()

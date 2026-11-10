@@ -1,7 +1,8 @@
 class_name DemonFire
 extends RefCounted
-## The goatmen's fire: the three spells the Hollow's demons throw, their numbers,
-## and the projectile, cone and burning ground each one becomes.
+## The Hollow's fire: the three spells the goatmen throw and the beam the
+## watcher caster carries, their numbers, and the projectile, cone, burning
+## ground and held ray each one becomes.
 ##
 ## `devil_mob.gd` owns the clock and the tell - a cast is a third action beside a
 ## swing and a guard, and the windup is what a player answers. This file owns what
@@ -23,6 +24,7 @@ extends RefCounted
 ## Every visual is `AbilityFx`'s and every cast is heard with the `fire` cue.
 
 const AbilityFx = preload("res://scripts/ability_fx.gd")
+const FireRayScript = preload("res://scripts/fire_ray.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 ## Every blow a demon's fire books is attributed to the demon family, beside the
@@ -51,7 +53,24 @@ const SPELLS := {
 	"ember_rain": {"shape": "hazard", "range": 13.0, "windup": 1.2,
 		"cooldown": 14.0, "damage": 6.0, "radius": 2.6, "tick": 0.6,
 		"duration": 3.0},
+	# The Hollow caster's held ray: 5 damage every 0.2 s for 1.2 s down a fixed
+	# 14 m line - 30 in all to anything still standing in it. The watcher's own
+	# version of the Ember Staff's Fire Ray, down to the shared `fire_ray.gd`
+	# node that draws it, so a caster met on the road and a player's ray are the
+	# same light and the same line.
+	"fire_ray": {"shape": "beam", "range": 14.0, "windup": 0.85,
+		"cooldown": 11.0, "damage": 5.0, "radius": 0.55, "tick": 0.2,
+		"duration": 1.2},
 }
+## How far off a ray's axis a body's aim point may sit and still be inside it:
+## the flesh around the line, the same guarantee `Combat.BEAM_BODY_MARGIN` gives
+## the player's ray.
+const LINE_BODY_SLACK := 0.5
+## The fire rites an enemy caster may draw: the Hollow's own three and the
+## Ember Staff's Fire Ray. One pool, so the watcher caster and the casting
+## archer cannot offer different spells from the same wood; the archer's own
+## picker drops a rite that cannot reach its bow ring (`watcher_archer.HOLD_NEAR`).
+const RITE_POOL := ["fire_ray", "fireball", "hellfire_breath", "ember_rain"]
 
 
 # --- the projectile ---------------------------------------------------------
@@ -265,7 +284,13 @@ static func wound(victim, amount: float, caster: Node3D) -> bool:
 		victim.note_attacker(caster)
 	if not victim.has_method("take_damage"):
 		return false
-	victim.take_damage(amount, DAMAGE_SOURCE)
+	# A watcher's fire is booked to the camp's own family (90), not to the
+	# demons: the number is what the reduction and the kill record read. A body
+	# that names no source is the goatman's 93.
+	var source := DAMAGE_SOURCE
+	if is_instance_valid(caster) and caster.has_method("fire_damage_source"):
+		source = int(caster.fire_damage_source())
+	victim.take_damage(amount, source)
 	return true
 
 
@@ -397,3 +422,55 @@ static func ember_rain(parent: Node3D, at: Vector3, row: Dictionary,
 	patch.start()
 	SfxScript.play(FIRE_CUE, at)
 	return patch
+
+
+## The held ray: the same `fire_ray.gd` node the Ember Staff's spell spawns, but
+## with the caster's own answers. The line is frozen at the point and heading the
+## windup was loosed on; the body may walk on and the fire stays where it was.
+## `on_tick` is the watcher's own line scorch, handed to the ray as a callable.
+static func ray(parent: Node3D, caster: Node3D, origin: Vector3,
+		forward: Vector3, row: Dictionary) -> Node3D:
+	if not is_instance_valid(parent) or not is_instance_valid(caster) or row.is_empty():
+		return null
+	var tick := maxf(float(row.get("tick", 0.2)), 0.05)
+	var beam := FireRayScript.new()
+	beam.name = "DemonFireRay"
+	parent.add_child(beam)
+	beam.launch(caster, null, null, float(row.get("damage", 5.0)) / tick,
+		float(row.get("duration", 1.2)), tick, float(row.get("range", 14.0)),
+		float(row.get("radius", 0.55)), 0.0)
+	beam.lock_line(origin, forward)
+	beam.set_hold_source(func() -> bool:
+		return is_instance_valid(caster) and caster.get("alive") != false)
+	beam.set_wound_source(func(at_origin: Vector3, direction: Vector3,
+			length: float, width: float, amount: float) -> void:
+		line_scorch(caster, at_origin, direction, length, width, amount))
+	SfxScript.play(FIRE_CUE, origin)
+	return beam
+
+
+## Everything inside the ray's line: a body's aim point must lie within `radius`
+## of the segment (plus the flesh around it) and between the mouth and the wall
+## the ray stopped at. One tick, one wound per body; `wound` owns the downed rule,
+## the armour and the source family.
+static func line_scorch(caster: Node3D, origin: Vector3, direction: Vector3,
+		length: float, radius: float, damage: float) -> int:
+	if direction.length_squared() < 0.000001:
+		return 0
+	var dir := direction.normalized()
+	var caught := 0
+	for victim in bodies(caster):
+		if not is_instance_valid(victim) or not (victim is Node3D):
+			continue
+		var point: Vector3 = (victim as Node3D).global_position
+		if victim.has_method("get_aim_position"):
+			point = victim.get_aim_position()
+		var along := (point - origin).dot(dir)
+		if along < -radius or along > length + radius:
+			continue
+		var closest := origin + dir * clampf(along, 0.0, length)
+		if point.distance_to(closest) > radius + LINE_BODY_SLACK:
+			continue
+		if wound(victim, damage, caster):
+			caught += 1
+	return caught

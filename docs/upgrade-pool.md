@@ -1,20 +1,22 @@
 # The upgrade pool — Crab Champions, re-cut for the warband
 
 Production record. The pool in this document **is** the pool in
-`scripts/roguelite/mod_catalog.gd`: **161 rows**, four tiers, five families, and
-the tier ladder each loot surface rolls. The first 120 rows are the re-cut below;
-the last 41 are the live weapon-family ability upgrades added by the ability
-pass (`family: ability`, `tags` bow/sword/two_hand/dagger/staff/shield/any/melee/
-ranged). Where a number here is live in that file the
+`scripts/roguelite/mod_catalog.gd`: **173 rows**, four tiers, five families, and
+the tier ladder each loot surface rolls. Every row is tabled below: the first 120
+are the re-cut, family by family and tier by tier; the next 42 are the live
+weapon-family ability upgrades the ability pass added, under *Ability weapon*
+(`family: ability`, `tags` bow/sword/two_hand/dagger/staff/shield/any/melee/
+ranged); and the last 11 are the movement rows the **Speed** chest ships with,
+under *Perk*, three or four a tier. Where a number here is live in that file the
 row is marked **PINNED**, because `tests/roguelite_regression.gd` asserts it.
 
 Phases 1 to 3 of the plan at the end are landed and the whole regression passes.
 Phases 4 and 5 - the mark ledger and the verb rows' roll / parry / guard hooks -
 are not, so the 31 rows that need them are in the pool and carry `ready: false`:
-they are never offered until their keys are read. The 41 ability rows are live.
-That gate, and the **130 live rows** the surfaces do offer, are the two places
-this document and the code could drift, so they are pinned by the regression's
-own census check.
+they are never offered until their keys are read. The 42 ability rows and the 11
+speed rows are live and carry no gate. That gate, and the **142 live rows** the
+surfaces do offer, are the two places this document and the code could drift, so
+they are pinned by the regression's own census check.
 
 The job was three parts: lift every upgrade off
 [crabchampions.wiki.gg](https://crabchampions.wiki.gg), store it so it can be
@@ -169,13 +171,13 @@ and none is hyperbolic where the downside is money or health.
 | keys | keys | unchanged: boss-only income, rack-only spend |
 | elemental stacks (fire, ice, lightning, poison, arcane) | **marks** (burn, chill, storm, bleed, hex) | see below |
 
-The `ability` family is not the active ability catalog. The **35 active skills**
-(Barrage, Fireball, the shields, the wards, and eight free family starters) live
-in `ability_rules.gd` and are unlocked and equipped at the rack; the ability rows
-are run upgrades. `scripts/roguelite/ability_index.gd` joins the two catalogs -
-35 active + 60 ability upgrades = 95 - so a lookup can say which kind an id is
-instead of treating one as the other. The ability census is **63 common / 51
-epic / 33 legendary / 14 greed**.
+The `ability` family is not the active ability catalog. The **36 active skills**
+(Barrage, Fireball, Fire Ray, the shields, the wards, and eight free family
+starters) live in `ability_rules.gd` and are unlocked and equipped at the rack;
+the ability rows are run upgrades. `scripts/roguelite/ability_index.gd` joins the
+two catalogs - 36 active + 61 ability upgrades = 97 - so a lookup can say which
+kind an id is instead of treating one as the other. The ability census is
+**63 common / 51 epic / 33 legendary / 14 greed**.
 
 Our run body's whole verb set is bow draw, melee swing, block/parry, roll, step,
 throw, fireball, bandage, potion, jump. A run body is dressed with a *starter
@@ -292,21 +294,74 @@ common, and greed is the only tier that gates anything. That is the one part of
 the source system worth importing wholesale, because their tier *is* their
 acquisition model and ours is currently nothing.
 
-### The ladder
+### The chest surfaces
 
-| Surface | Offers | common | epic | legendary | greed |
-| --- | ---: | --- | --- | --- | --- |
-| Upgrade pedestal (every clear) | 3 | always | island 2+ | **never** | never |
-| Pedestal at the shop level | 1 | always | always | never | never |
-| Reward chest | 1 mod | always | always | island 4+, 4% | island 2+ |
-| Warden's Hoard (boss level) | 2 mods | — | always | **1 guaranteed** | island 2+ |
-| Shop stall | 3 | always | always | island 3+ | island 2+ |
-| Greed Totem | 1 | — | — | — | always |
+The source's surfaces table is the model: a chest is a **category** first and a
+rarity second. Ours is ten surfaces and three tiers, and every surface can be any
+tier - the pair is what a gate promises, so three doors are three different
+rewards at three prices.
 
-Three sentences cover it. **A pedestal is a common chest** — it is where commons
-come from, and it never carries a legendary. **A legendary is a boss's, or the
-stall's.** **Greed is never a choice you walk past**: it is the totem's one
-offer, exactly as their greed chest shows a single option.
+| Surface | Reads | common | epic | legendary | Pays |
+| --- | --- | ---: | ---: | ---: | --- |
+| Weapons | rows tagged with a weapon family (bow, staff, sword, two_hand, dagger, shield, melee, ranged) | 12 | 15 | 7 | cards |
+| Damage | the damage keys: `damage_mult`, `melee_damage_mult`, `flat_damage`, the conditional and counter multipliers, the splashes and the bursts | 14 | 13 | 5 | cards |
+| Health | max HP, heals, lifesteal, regen, damage taken, dodge, block | 9 | 3 | 1 | cards |
+| Stamina | the cost/charge economy: ability stamina and cooldowns, the guard's price, the roll's charges, the throw's kit, movement | 7 | 2 | 6 | cards |
+| Speed | the body's own travel: the walk's scale, the roll's distance, speed and charges, the side step's travel, speed and recovery, the sprint slide's speed and length | 5 | 4 | 4 | cards |
+| Luck | luck, drops, chests, shop and gold | 5 | 4 | 6 | cards |
+| Critical | crit chance, crit multiplier, mega crit, crit bursts | 3 | 3 | 0 | cards |
+| Ability | the ability family: the throw/roll/guard/parry kit and the weapon kit | 16 | 15 | 10 | cards |
+| Attack | the shot and hand families, shot shape, swings, on-hit procs and the marks they leave | 22 | 16 | 12 | cards |
+| Key | no rows | — | — | — | 1 / 2 / 3 keys |
+| Gear | no rows | — | — | — | 1 / 2 / 3 armour pieces |
+
+The counts are the **ready** rows on each shelf (a pending row is never offered),
+and a surface is promised at a tier only when its shelf holds a whole hand there
+(`Mods.SURFACE_MIN_ROWS`, 3): Health never promises a legendary and Critical
+never promises one, because it cannot pay it. That is also why the counts climb as
+phases 4 and 5 land: a surface grows its own shelf, with no table to edit.
+
+A row belongs to **every** surface it acts on, so Glass Cannon is a Damage chest's
+and a Health chest's, a staff row is a Weapons and an Ability chest's, and a
+claw's bleed is an Attack chest's. A surface reads one of three things: a family
+(`attack` = shot + hand, `ability` = ability), a tag (a weapon family), or a key
+it writes (`CHEST_KEYS`, `CHEST_PREFIX_KEYS`). The tables live at the top of
+`mod_catalog.gd` and the index is built once, with the catalog.
+
+**Speed** is the only shelf whose whole content is a verb rather than a stat:
+`move_mult` is the walk, `roll_distance` / `roll_speed` / `roll_charges` / `roll_regen`
+the roll, `step_distance` / `step_speed` / `step_recovery` the grounded side step,
+`slide_speed` / `slide_duration` the sprint slide. Its cards are `Perk` rows and it shares them with two older surfaces
+- Speed Demon was a Stamina card and Ring Of Swiftness a Legendary Relic - because
+a row is on every surface it acts on. The metres they buy, measured off the three
+state machines at 60 Hz on an island floor:
+
+| Card | Effect | Measured |
+| --- | --- | ---: |
+| *(none)* | the body's own constants | step 1.62 m, roll 5.81 m, slide 4.66 m |
+| Lightfoot ×1 | `step_distance +0.30` | step 1.94 m |
+| Quick Heel ×1 | `step_speed +0.15` | the same step in 1.64 m / 0.27 s instead of 1.62 m / 0.30 s |
+| Spring Step ×1 | `step_recovery 0.15` | step cooldown 0.85 s → 0.72 s |
+| Long Roll ×1 / ×2 | `roll_distance +1.5` | roll 7.32 m / 8.82 m |
+| Rolling Start ×4 | `roll_speed +0.48` | roll 8.60 m |
+| Low Slide + Slipstream ×1 | `slide_duration 0.18`, `slide_speed 0.12` | slide 6.21 m in 0.89 s |
+| Ground Skimmer ×2 | `slide_speed 0.50`, `slide_duration 0.50` | slide 10.58 m in 1.13 s |
+| Hunter's Pace ×3 | `move_mult +0.30` | walk 5.5 → 7.15 m/s |
+
+The walk is the one figure on the whole shelf that the rig already knew: the body
+asks `RunPlayer.move_scale()` for it, and 2.2 m/s (crouched), 5.5 (walk) and 8.5
+(sprint) are all multiplied by the same scale, floored at 0.2. The other six keys
+are read by `WarbandBody._tune_movement` once a frame and written into
+`DodgeRoll.speed`, `DodgeStep.travel` / `recovery` and `RunningSlide.duration` /
+`start_speed` / `end_speed`; the roll's *clock* is never touched, because the rig
+animates the roll over `DodgeRoll.DURATION` and a roll whose clock moved would
+land its pose before the body did.
+
+Three sentences cover it. **The chest is the commons shelf** - three cards at a
+time, of the one rarity the gate promised. **A legendary is a promise**: the
+island's ladder rolls it, the elite trial raises the promise a rung and the swarm
+trial doubles the box. **Greed is never a promise**: it is the totem's one offer and
+the boss's hoard.
 
 ### The roll
 
@@ -325,31 +380,37 @@ picks the row inside it:
 common into epic and four from epic into legendary; legendary is floored at 0 and
 capped at 35 **after the row is normalised to a hundred**, because the cap is a
 share of the finished roll and not of an intermediate pool. **Luck cannot open a
-tier the surface does not sell** — a pedestal on island 9 with six stacks of
-Streamer Loot still offers no legendary, because the pedestal never carries one.
+tier the surface does not sell** — a weld on island 9 with six stacks of Streamer
+Loot still welds nothing legendary, because the weld never carries one.
 That is the same rule as theirs: `Streamer Loot` improves the loot in a chest, it
 does not turn a common chest into a legendary one.
 
-The reward chest rolls the same table at a quarter of its legendary weight,
-because it is one mod with no choice: 4% at island 4 and 5.5% on island 5+. A
-surface that sells greed carves a **six-point greed share out of the commons and
-epics in proportion**, never out of the legendary, so the chest's 4% survives the
-carve. Six rules, one helper (`Mods.tier_weights`), and the regression asserts
-each of them:
+A gate rolls one *promise* off that table (`Mods.roll_promise`, the party's best
+`luck` bending the weights, the elite rung and the surface folded into the same
+call), and the pair it returns is absolute: the chest lays out that one tier and
+nothing else. An unpromised source still rolls the whole table (`SOURCE_CACHE`,
+`SOURCE_STALL`, `SOURCE_WELD`, `SOURCE_HOARD`), and a source that sells greed -
+the totem's own row and the boss's hoard - carves a **six-point greed share out of
+the commons and epics in proportion**, never out of the legendary. Nine rules,
+three helpers (`Mods.tier_weights`, `Mods.shelf`, `Mods.source_tiers`), and the
+regression asserts each:
 
 | Rule | Asserted by |
 | --- | --- |
 | the three ladder tiers sum to a hundred | `_check_ladder` |
 | six luck leans the roll away from common | `_check_ladder` |
 | the legendary share never passes 35 | `_check_ladder` |
-| a chest's legendary is 4% on island 4, 5.5% on 5+ | `_check_ladder` |
-| a pedestal never carries a legendary or greed, at any luck | `_check_ladder` |
+| six points of luck promise legendaries on island 5 | `_check_ladder` |
+| a promise is one rarity, and greed is never one | `_check_ladder` |
+| a surface's shelf is only its own ready rows of that tier | `_check_ladder` |
+| a surface is only promised where a whole hand fits | `_check_ladder` |
+| a weld never carries a legendary or greed, at any luck | `_check_ladder` |
 | a boss's hoard always contains one legendary | `_check_ladder` |
 
 Two rows move the offer count instead, which is what their `Big Chests` and
-`Coral Amulet` do: `big_chests` adds a pedestal card, `coral_amulet` adds a mod
-to the chest's payout, `special_delivery` adds a stall ware and `hoarder` takes a
-pedestal card away.
+`Coral Amulet` do: `big_chests` adds a chest card, `coral_amulet` adds a mod to
+the hoard's payout, `special_delivery` adds a stall ware and `hoarder` takes a
+chest card away.
 
 ### What a tier costs
 
@@ -374,39 +435,53 @@ was the first level's clear alone.
 
 The source's own wiki warns against reading tier as strength, and the re-cut
 keeps that. `broadhead` is common and is the best damage-per-pick in the shot
-family at the starter bow's 10 damage. `split_shot` is legendary because
+family at the twig bow's 10 damage. `split_shot` is legendary because
 Firepower is. The tier says where it lives.
 
 ## The pool
 
-The original re-cut was 120 rows: 47 common, 36 epic, 23 legendary, 14 greed. The current pool adds 41 ability rows for 63/51/33/14. Every row names the source
-row it mirrors and that row's tier; `— (house)` marks a row with no source, and
-there are five of those: our crescent, our parry, our dodge and the two bargain
-rows the old pool already shipped (`bloodthirst`, `cursed_arsenal`). The other
-twenty-two rows of the old pool are in the tables with a source row, because the
-migration moved them to the tier their source carries.
+The original re-cut was 120 rows: 47 common, 36 epic, 23 legendary, 14 greed. The
+current pool adds 41 ability rows and 11 speed rows for 67/55/36/14. Every re-cut
+row names the source row it mirrors and that row's tier; `— (house)` marks a row
+with no source, and there are fifteen of those: our crescent, our parry, our
+dodge, the two bargain rows the old pool already shipped (`bloodthirst`,
+`cursed_arsenal`) and the eleven movement rows the Speed chest added - their verbs
+are the body's own walk, roll, step and slide, which the source's grenade-shaped
+pool never priced. The other twenty-two rows of the old pool are in the tables
+with a source row, because the migration moved them to the tier their source
+carries. The 41 ability weapon rows name a `Tag` instead, for the reason *Ability
+weapon* gives.
 
-The catalog carries ids, tiers, caps, stats and flags. The `Mirrors` column lives
-here, in the design record, so the code has one fewer field to drift.
+The catalog carries ids, tiers, caps, stats, tags and flags. The `Mirrors` and
+`Tag` columns live here, in the design record, so the code has one fewer field to
+drift.
 
-Share, against the source:
+Share, against the source, for both pools - the 120-row re-cut and the 173 rows
+the catalog carries now:
 
-| Tier | Source | Re-cut | Delta |
-| --- | ---: | ---: | --- |
-| common | 39.3% | 39.2% | -0.1 |
-| epic | 32.2% | 30.0% | -2.2 |
-| legendary | 22.4% | 19.2% | -3.2 |
-| greed | 6.1% | 11.7% | +5.6 |
+| Tier | Source | Re-cut (120) | Pool (173) |
+| --- | ---: | ---: | ---: |
+| common | 39.3% | 39.2% | 38.7% |
+| epic | 32.2% | 30.0% | 31.8% |
+| legendary | 22.4% | 19.2% | 21.4% |
+| greed | 6.1% | 11.7% | 8.1% |
+
+The 53 non-re-cut rows are 16 common, 15 epic, 11 legendary and no greed in the
+ability half, and 4 common, 4 epic, 3 legendary in the speed half, so the two
+passes lift the epics and legendaries back toward the source's share: greed is
+still over-weight, by +2.0 rather than +5.6.
 
 Greed is deliberately over-weight, and it is the only tier that is. Their greed
-lives behind a chest that shows a single option; our Greed Totem shows a single
-option on six levels in ten — 1, 2, 4, 5, 7 and 8 — so a body is offered a
+lives behind a chest that shows a single option; ours lives on the shop's shelf
+and in a boss's hoard, both from the second island on, so a body is offered a
 bargain about once an island however the chests fall. Fourteen rows is the
 smallest pool that keeps two visits from repeating.
 
 Groups in family order, tiers in rarity order. `Writes` is the engine key the
 row touches, with the curve where the curve is the design; `Mirrors` is the
-source row and the tier the row inherits.
+source row and the tier the row inherits; `Tag` stands in its place on the ability
+weapon tables and is the active-skill family the row reaches, which
+`ProcEngine.row_matches` matches in place of a source row.
 
 A row crosses a family boundary where the verb does. Their spinning-blade and
 homing-blade rounds are weapon mods that fire blades; ours are thrown pieces, so
@@ -522,7 +597,89 @@ they sit in Ability.
 | **Spinning Blade** | `spinning_blade` | 2 | A thrown piece that does not come down: it spins in place for 3 s, cutting 45% weapon damage a second in 2 m. | `throw_spin 0.45, throw_spin_radius 2.0` | Spinning Blade (L) |
 | **Homing Blades** | `homing_blades` | 2 | The thrown piece decides for itself: it curves to the nearest body and strikes for 130%. | `throw_homing +1, throw_damage_mult +0.30` | Homing Blades (L) |
 
-### Perk · common (18)
+### Ability weapon · what the ability pass added
+
+The verb tables above are 19 of the ability family's 61 rows. The other 42
+upgrade the **active skills**, not the run's own buttons: same family, same tier
+ladder, same surfaces, but each carries `tags` rather than a `verb`, and the
+engine scopes it by that tag (`ProcEngine.row_matches`) so a bow row never reaches
+a staff cast. `any` reaches every family, `ranged` is bow and staff, `melee` is
+sword, two-hand, dagger, shield and unarmed. Every key but one is read through
+`RunPlayer`'s ability accessors over `ProcEngine.stat_for(family, key)`, and none
+of them is in `MAX_KEYS`, so a stack sums. The exception is Heavy Robes'
+`melee_damage_mult`: that is the hand's own key, aggregated by `ProcEngine.stat()`
+for every row in the pool, so a staff body pays the penalty with the blade
+whatever its hands fit - which is the trade the row's text names.
+
+All 41 are live: the `ready: false` gate is the verb rows and the mark rows, not
+this half. They were authored against the active-skill catalog
+([`run.md`](run.md), *The 36 active abilities*) rather than the wiki crossing, so
+their last column is the tag and not a source row. Four of the keys are chance
+keys with a flat cap rather than a hyperbolic curve - `bleed_chance` .50,
+`whirlwind_chance` .35, `extra_arrow_chance` .55, `passive_block_chance` .75 - so
+the `cap` in the `Writes` column is where the key stops, not a curve. The
+family's one hyperbolic key is `ability_recast_chance` (`.40 / 4`), shared by Echo
+Cast, Spell Siphon, Chain Cast and Spellstorm, which is why a staff body carrying
+all four at their caps reads 0.31 and never 0.40.
+
+### Ability weapon · common (16)
+
+| Upgrade | `id` | Max | Per stack | Writes | Tag |
+| --- | --- | ---: | --- | --- | --- |
+| **Echo Cast** | `echo_cast` | 4 | A cast sometimes repeats itself: a chance for any ability to activate a second time. | `ability_recast_chance cap .40 half 4` | `any` |
+| **Quickening** | `quickening` | 5 | Ability cooldowns 7% shorter a stack. | `ability_cooldown_mult -0.07` | `any` |
+| **Focused Force** | `focused_force` | 6 | +10% ability damage. | `ability_damage_mult +0.10` | `any` |
+| **Light Hands** | `light_hands` | 4 | Abilities cost 10% less stamina. | `ability_stamina_mult -0.10` | `any` |
+| **Broad Arc** | `broad_arc` | 3 | A melee ability reaches one more body. | `ability_cleave +1` | `melee` |
+| **Bloodletting** | `bloodletting` | 5 | Melee hits have a chance to open a bleed. | `bleed_chance +0.05 (cap .50)` | `melee` |
+| **Duelist's Grace** | `duelists_grace` | 4 | Sword cooldowns 6% shorter a stack. | `ability_cooldown_mult -0.06` | `sword` |
+| **Serrated Edge** | `serrated_edge` | 4 | Sword hits have a chance to bleed. | `bleed_chance +0.05 (cap .50)` | `sword` |
+| **Opening Vein** | `opening_vein` | 4 | Dagger hits have a chance to bleed. | `bleed_chance +0.05 (cap .50)` | `dagger` |
+| **Quick Hands** | `quick_hands` | 4 | Dagger cooldowns 7% shorter a stack. | `ability_cooldown_mult -0.07` | `dagger` |
+| **Arcane Focus** | `arcane_focus` | 6 | +10% spell damage. | `spell_damage_mult +0.10` | `staff` |
+| **Guardian's Instinct** | `guardians_instinct` | 5 | A shield blocks attacks even when not raised, up to 75%. | `passive_block_chance +0.05 (cap .75)` | `shield` |
+| **Double Nock** | `double_nock` | 4 | A chance to loose an extra arrow on the draw. | `extra_arrow_chance +0.10 (cap .55)` | `bow` |
+| **Quick Draw** | `quick_draw` | 5 | Bow draw time 10% shorter a stack. | `bow_draw_mult +0.10` | `bow` |
+| **Piercing Points** | `piercing_points` | 3 | Bow shots pass through one more body. | `ability_pierce +1` | `bow` |
+| **Long Flight** | `long_flight` | 3 | Ranged projectiles fly 15% faster. | `ability_speed_mult +0.15` | `ranged` |
+
+### Ability weapon · epic (15)
+
+| Upgrade | `id` | Max | Per stack | Writes | Tag |
+| --- | --- | ---: | --- | --- | --- |
+| **Whirling Fury** | `whirling_fury` | 4 | A landed two-hand hit has a chance to whirlwind. | `whirlwind_chance +0.05 (cap .35)` | `two_hand` |
+| **Cleaving Steel** | `cleaving_steel` | 2 | A melee ability reaches one more body a stack. | `ability_cleave +1` | `sword` |
+| **Heavy Arc** | `heavy_arc` | 2 | A two-hand ability reaches one more body a stack. | `ability_cleave +1` | `two_hand` |
+| **Momentum** | `momentum` | 4 | +18% two-hand ability damage. | `ability_damage_mult +0.18` | `two_hand` |
+| **Heavy Robes** | `heavy_robes` | 3 | The robe is a trade: -25% melee damage, +10% spell damage. | `melee_damage_mult -0.25, spell_damage_mult +0.10` | `staff` |
+| **Spell Siphon** | `spell_siphon` | 3 | Staff casts have a chance to repeat. | `ability_recast_chance cap .40 half 4` | `staff` |
+| **Piercing Hex** | `piercing_hex` | 3 | Spells pierce one more body. | `ability_pierce +1` | `staff` |
+| **Ember Spread** | `ember_spread` | 4 | Spell blasts are 0.35 m wider a stack. | `ability_radius +0.35` | `staff` |
+| **Bulwark** | `bulwark` | 4 | A stronger passive block chance, still capped at 75%. | `passive_block_chance +0.05 (cap .75)` | `shield` |
+| **Shield Force** | `shield_force` | 4 | +15% shield ability damage. | `ability_damage_mult +0.15` | `shield` |
+| **Spiral Shot** | `spiral_shot` | 2 | Arrows corkscrew in flight and hit 15% harder. | `bow_spiral 1, ability_damage_mult +0.15` | `bow` |
+| **Split Fletching** | `split_fletching` | 3 | Each shot looses an extra arrow at 25% damage. | `arrow_split +1` | `bow` |
+| **Bouncing Arrows** | `bouncing_arrows` | 3 | Arrows fold to another body after the first. | `projectile_bounce +1` | `bow` |
+| **Homing Fletching** | `homing_fletching` | 3 | Arrows steer toward the nearest body. | `arrow_homing +1` | `bow` |
+| **Ricochet Rounds** | `ricochet_rounds` | 3 | Ranged projectiles fold to a second body. | `projectile_bounce +1` | `ranged` |
+
+### Ability weapon · legendary (11)
+
+| Upgrade | `id` | Max | Per stack | Writes | Tag |
+| --- | --- | ---: | --- | --- | --- |
+| **Overcharge** | `overcharge` | 3 | +30% ability damage. | `ability_damage_mult +0.30` | `any` |
+| **Chain Cast** | `chain_cast` | 4 | A much greater chance for an ability to activate twice. | `ability_recast_chance cap .40 half 4` | `any` |
+| **Battle Trance** | `battle_trance` | 3 | Ability cooldowns 12% shorter a stack. | `ability_cooldown_mult -0.12` | `any` |
+| **Widened Bar** | `widened_bar` | 5 | One more skill key for this run, up to ten. The key waits empty until a skill is put on it. | `hotbar_slots +1 (ceiling 5) ` | `any` |
+| **Arcane Surge** | `arcane_surge` | 4 | +22% spell damage. | `spell_damage_mult +0.22` | `staff` |
+| **Shield Wall** | `shield_wall` | 3 | A large passive block chance, capped at 75%. | `passive_block_chance +0.05 (cap .75)` | `shield` |
+| **Whirlwind Edge** | `whirlwind_edge` | 3 | A large chance for a two-hand hit to whirlwind. | `whirlwind_chance +0.05 (cap .35)` | `two_hand` |
+| **Magical Nock** | `magical_nock` | 1 | Arrows nock themselves: no reach for the quiver, no re-nock. The string still has to be drawn. | `bow_no_nock 1` | `bow` |
+| **Bloodstorm** | `bloodstorm` | 3 | Melee hits bleed and can whirlwind in the same breath. | `bleed_chance +0.05 (cap .50), whirlwind_chance +0.05 (cap .35)` | `melee` |
+| **Spellstorm** | `spellstorm` | 2 | Staff casts repeat and hit 15% harder. | `ability_recast_chance cap .40 half 4, spell_damage_mult +0.15` | `staff` |
+| **Hunter's Focus** | `hunters_focus` | 2 | An extra arrow and a chance for one more. | `arrow_split +1, extra_arrow_chance +0.10 (cap .55)` | `bow` |
+
+### Perk · common (22)
 
 | Upgrade | `id` | Max | Per stack | Writes | Mirrors |
 | --- | --- | ---: | --- | --- | --- |
@@ -544,8 +701,12 @@ they sit in Ability.
 | **Eagle Eye** | `eagle_eye` | 5 | +12% damage to bodies beyond 12 m. The bow's whole world. | `damage_far_mult +0.12, far_range 12` | Eagle Eye (C) |
 | **Elemental Expert** | `mark_expert` | 4 | +8% damage per different mark on the body, up to four. | `damage_per_mark +0.08` | Elemental Expert (C) |
 | **Featherstep** | `featherstep` | 8 | HOUSE ROW. A step that is never quite where the blow lands: +10% dodge, hyperbolic toward 60%. | `dodge_chance cap .60 half 4` | — (house) |
+| **Lightfoot** | `lightfoot` | 4 | HOUSE ROW. The side step carries a half pace further: +0.30 m of travel on every step. | `step_distance +0.30` | — (house) |
+| **Spring Step** | `spring_step` | 3 | HOUSE ROW. The step comes back sooner: 15% off its recovery, so it chains a beat earlier. | `step_recovery +0.15` | — (house) |
+| **Quick Heel** | `quick_heel` | 3 | HOUSE ROW. The same step, taken quicker: +15% side step speed, same distance off the same floor. | `step_speed +0.15` | — (house) |
+| **Skirmish Legs** | `skirmish_legs` | 5 | HOUSE ROW. The walk keeps up with the fight: +4% movement speed and 0.10 m more on every side step. | `move_mult +0.04, step_distance +0.10` | — (house) |
 
-### Perk · epic (12)
+### Perk · epic (16)
 
 | Upgrade | `id` | Max | Per stack | Writes | Mirrors |
 | --- | --- | ---: | --- | --- | --- |
@@ -557,21 +718,28 @@ they sit in Ability.
 | **Damage Aura** | `damage_aura` | 5 | A standing field of blood: 6 damage a second to everything inside 3.5 m. | `aura_damage +6, aura_radius 3.5` | Damage Aura (E) |
 | **Shockwave** | `shockwave` | 3 | A blow landed on you answers with a ring: 80% weapon damage in 4 m, through cover. | `shock_on_hurt 0.80, shock_radius 4` | Shockwave (E) |
 | **Exploding Enemies** | `exploding_enemies` | 3 | A dying body bursts for 25% of its own max HP in a 3 m circle. | `explode_on_kill 0.25, explode_radius 3` | Exploding Enemies (E) |
-| **Big Chests** | `big_chests` | 2 | The pedestal lays out one more card. | `pedestal_offers +1` | Big Chests (E) |
+| **Big Chests** | `big_chests` | 2 | The reward chest lays out one more card. | `chest_offers +1` | Big Chests (E) |
 | **Critical Blast** | `crit_blast` | 3 | A crit bursts for 60% of the blow in 2.5 m. | `crit_burst 0.60, crit_burst_radius 2.5` | Critical Blast (E) |
 | **Mega Crit** | `mega_crit` | 3 | 12% chance a crit becomes a mega crit at 3.0x instead of 2.0x. | `mega_crit_chance cap .55 half 3, mega_crit_mult 3.0` | Mega Crit (E) |
 | **Buried Cache** | `bonus_chest` | 6 | EXISTING ROW. 15% chance per stack that clearing a level buries a mini-chest beside the reward. | `chest_chance cap .75 half 3` | Performance Bonus (E) |
+| **Rolling Start** | `rolling_start` | 4 | HOUSE ROW. The roll leaves the ground faster: +12% roll speed, and the same clock carries it further. | `roll_speed +0.12` | — (house) |
+| **Hunter's Pace** | `hunter_pace` | 3 | HOUSE ROW. A long stride that keeps: +10% movement speed, walk and sprint alike. | `move_mult +0.10` | — (house) |
+| **Low Slide** | `low_slide` | 3 | HOUSE ROW. The sprint slide runs a fifth longer: +18% of its own length, same low profile. | `slide_duration +0.18` | — (house) |
+| **Slipstream** | `slipstream` | 3 | HOUSE ROW. The slide starts and ends quicker: +12% slide speed. | `slide_speed +0.12` | — (house) |
 
-### Perk · legendary (6)
+### Perk · legendary (9)
 
 | Upgrade | `id` | Max | Per stack | Writes | Mirrors |
 | --- | --- | ---: | --- | --- | --- |
-| **Rare Treasure** | `rare_treasure` | 3 | A body has a 3% chance a stack to leave an upgrade card on the ground, for whoever reaches it. | `drop_chance cap .70 half 4` | Rare Treasure (L) |
+| **Rare Treasure** | `rare_treasure` | 3 | A body has a 3% chance a stack to leave a small cache holding one upgrade card, for whoever reaches it. | `drop_chance cap .70 half 4` | Rare Treasure (L) |
 | **Level Up** | `level_up` | 2 | After every island, two carried upgrades gain a stack. The cheapest power in the pool. | `levelup_per_island +2` | Level Up (L) |
 | **Bonus Chests** | `bonus_chests` | 2 | A reward chest every 25 kills, on top of the level's own. | `extra_chest_kills 25` | Bonus Chests (L) |
 | **Care Package** | `care_package` | 1 | An extra chest after every third island. | `extra_chest_islands 3` | Care Package (L) |
-| **Faulty Chests** | `faulty_chests` | 2 | A pedestal card you did not take stays on the ground as a pickup, once a card a stack. | `keep_offer +1` | Faulty Chests (L) |
+| **Faulty Chests** | `faulty_chests` | 2 | A chest card you did not take stays on the ground as a pickup, once a card a stack. | `keep_offer +1` | Faulty Chests (L) |
 | **Conducting Bodies** | `conducting_bodies` | 3 | A body put down discharges 25 Storm into everything within 5 m. | `death_marks.storm 25, death_mark_radius 5` | Electric Enemies (L) |
+| **Long Roll** | `long_roll` | 2 | HOUSE ROW. The roll becomes a dive: +1.5 m of travel on every one, on the roll's own clock. | `roll_distance +1.5` | — (house) |
+| **Thoroughbred** | `thoroughbred` | 3 | HOUSE ROW. The island is crossed at a canter: +22% movement speed. | `move_mult +0.22` | — (house) |
+| **Ground Skimmer** | `ground_skimmer` | 2 | HOUSE ROW. The slide skims further and faster: +25% of its speed and of its length together. | `slide_speed +0.25, slide_duration +0.25` | — (house) |
 
 ### Perk · greed (12)
 
@@ -586,7 +754,7 @@ they sit in Ability.
 | **Damage Seeker** | `damage_seeker` | 3 | +60% damage, but a landed blow costs you 3 max HP for the rest of the run. | `damage_mult +0.60, max_hp_flat_on_hit -3` | Damage Seeker (G) |
 | **Brute Force** | `brute_force` | 3 | +50% damage out and +30% damage in. The pool and the purse both run hotter. | `damage_mult +0.50, damage_taken_mult +0.30` | Brute Force (G) |
 | **Slippery Slope** | `slippery_slope` | 3 | Mechanism live, not pinned. +100% gold, but you bleed 2% of your max HP a second while standing still in a live wave. | `currency_mult +1.00, standing_drain +0.02` | Slippery Slope (G) |
-| **Hoarder** | `hoarder` | 2 | An extra chest every island, but the pedestal only lays out two cards from now on. | `extra_chest_islands 1, pedestal_offers -1` | Hoarder (G) |
+| **Hoarder** | `hoarder` | 2 | An extra chest every island, but the reward chest lays out two cards from now on. | `extra_chest_islands 1, chest_offers -1` | Hoarder (G) |
 | **Bloodthirst** | `bloodthirst` | 2 | HOUSE ROW. No more breathing between islands: passive heals stop and +300% melee lifesteal replaces them. | `melee_lifesteal +3.00, blocks_passive_healing` | — (house) |
 | **Cursed Arsenal** | `cursed_arsenal` | 2 | HOUSE ROW. The hands lock for the run: +150% weapon damage and +50% proc coefficient on what you hold. | `damage_mult +1.50, proc_coeff_mult +0.50, hands_locked` | — (house) |
 
@@ -692,22 +860,23 @@ this size is a pile of multipliers unless something says which keys may be summe
 
 If every row in the pool were at its ceiling at once, these are the numbers. The
 column is a sanity check, not a target — a run grants about twenty stacks by the
-end of its first island (one pedestal pick and one chest mod a level), against a
-ceiling that needs some five hundred.
+end of its first island (one chest pick a level, plus whatever its armour welds
+on), against a ceiling that needs some five hundred.
 
 | Key | Ceiling | Rows | Why that is the shape |
 | --- | ---: | ---: | --- |
-| `damage_mult` | +16.42 | 11 | ×17.4 if every damage row maxed; unreachable, and each row is a pick not spent on health |
+| `damage_mult` + `damage_planted_mult` | +16.42 | 11 | ×17.4 if every damage row maxed; unreachable, and each row is a pick not spent on health |
 | `max_hp_flat` | +280 | 2 | 380 HP on a 100 pool: the plate family is the game's largest single-axis growth, deliberately |
 | `max_hp_mult` | +3.59 | 6 | all of it is greed or thick blood; `health_factor()` floors at 0.15 |
 | `crit_chance` | +0.32 | 2 | plus Sharpshooter's 0.72, clamped at `CRIT_CAP` 0.85 |
 | `crit_mult_flat` | +2.70 | 2 | 4.7x crits at the cap; the reason `Mega Crit` is only +0.12 a stack |
-| `melee_damage_mult` | +5.25 | 4 | ×6.25 in the hand; the bow gets its own axis so one does not double-dip |
+| `melee_damage_mult` | +4.50 | 5 | ×5.5 in the hand: the four claw rows sum +5.25 and Heavy Robes pays -0.75 with the blade; the bow gets its own axis so one does not double-dip |
 | `throw_damage_mult` | +3.40 | 3 | ×4.4 on a three-charge budget |
 | `attack_mult` | +1.20 | 2 | ×2.2 rate on top of any weapon profile, floored at 0.25 |
 | `enemy_count_mult` | +2.25 | 3 | greed only: ×3.25 bodies |
 | `currency_mult` | +7.25 | 3 | ×8.25 gold; greed pays for its bargains |
 | `luck` | +6 | 2 | moves 36 points of common into epic and 24 into legendary, where the surface allows legendary at all |
+| `move_mult` | +1.41 | 6 | ×2.41 the walk and the sprint, floored at 0.2: `speed_demon`, `skirmish_legs`, `hunter_pace`, `thoroughbred`, Ring Of Swiftness and Ring Of Tankiness' -0.35 all land on one scale, so a Speed build is fast and never untouchable |
 
 Three caps are new and exist for one reason each:
 
@@ -737,7 +906,7 @@ No work needed — a row that writes one of these is data:
 | `split_shots`, `pierce`, `ricochet`, `homing`, `wave_damage` | linear | `on_weapon_fire`, `on_melee_swing` |
 | `enemy_speed_mult`, `enemy_damage_mult` | linear | `_spawn_spec` |
 | `damage_taken_mult` | linear, floored at 0.25 | `ProcEngine.damage_taken_multiplier()` in `on_player_damaged` — Hard Target, Brute Force and Ring Of Defense are its customers |
-| `dodge_chance`, `arc_chance`, `nova_chance`, `chain_chance`, `bomb_chance`, `scatter_chance`, `chest_chance`, `mace_chance`, `spike_chance`, `double_chance`, `mega_crit_chance`, `drop_chance`, `throw_burst_chance`, `triple_throw_chance`, `double_burst_chance` | hyperbolic | the fifteen curves in `ProcEngine.HYPERBOLIC` |
+| `dodge_chance`, `arc_chance`, `nova_chance`, `chain_chance`, `bomb_chance`, `scatter_chance`, `chest_chance`, `mace_chance`, `spike_chance`, `double_chance`, `mega_crit_chance`, `drop_chance`, `throw_burst_chance`, `triple_throw_chance`, `double_burst_chance`, `ability_recast_chance` | hyperbolic | the sixteen curves in `ProcEngine.HYPERBOLIC` (the ability pass added `ability_recast_chance`) |
 
 ### Keys the pool adds
 
@@ -746,20 +915,20 @@ the real cost of a pool this size; the alternative is a pool of forty rows.
 
 | Area | Keys | Curve |
 | --- | --- | --- |
-| Shot shape | `flat_damage`, `shot_size`, `spread_add`, `projectile_speed_mult`, `drop_mult`, `windup_per_shot`, `windup_cap`, `streak_per_hit`, `streak_cap`, `splash_frac`, `splash_radius`, `shot_aura_damage`, `shot_aura_duration`, `shot_aura_radius`, `pierce_growth` | linear, and `windup_cap` / `streak_cap` / `pierce_growth` by maximum |
+| Shot shape | `flat_damage`, `shot_size`, `spread_add`, `projectile_speed_mult`, `drop_mult`, `windup_per_shot`, `windup_cap`, `streak_per_hit`, `streak_cap`, `splash_frac`, `splash_radius`, `shot_aura_damage`, `shot_aura_duration`, `shot_aura_radius`, `pierce_growth` | linear, and `windup_cap` / `streak_cap` / `pierce_growth` / `splash_radius` / `shot_aura_duration` / `shot_aura_radius` by maximum |
 | Standing field | `aura_damage`, `aura_radius` | linear, radius by maximum |
 | Shot chances | `mace_chance`, `spike_chance`, `double_chance` | hyperbolic |
-| Crit | `crit_mult_flat`, `crit_burst`, `crit_burst_radius`, `mega_crit_chance`, `mega_crit_mult` | linear except `mega_crit_chance` |
-| Hand | `melee_damage_mult`, `melee_attack_mult`, `melee_reach`, `melee_delay` | linear |
-| Verb upgrades | `roll_charges`, `roll_regen`, `roll_repel`, `roll_refund_throw`, `roll_blades`, `roll_blade_scale`, `parry_window_add`, `parry_refund`, `guard_cost_mult`, `throw_damage_mult`, `throw_speed_mult`, `throw_delay`, `throw_charges_flat`, `throw_regen_mult`, `throw_stagger`, `throw_homing`, `blast_radius`, `throw_fan`, `throw_fan_scale`, `throw_void`, `throw_void_radius`, `throw_spin`, `throw_spin_radius` | linear |
+| Crit | `crit_mult_flat`, `crit_burst`, `crit_burst_radius`, `mega_crit_chance`, `mega_crit_mult` | linear; `crit_burst_radius` and `mega_crit_mult` by maximum, `mega_crit_chance` hyperbolic |
+| Hand | `melee_damage_mult`, `melee_attack_mult`, `melee_reach`, `melee_delay`, `wave_step` | linear; `wave_step` is the crescent's own step, read beside `wave_damage` in `on_melee_swing` (`wave_damage` pays on the first stack, `wave_step` on every stack after it) |
+| Verb upgrades | `roll_charges`, `roll_regen`, `roll_repel`, `roll_refund_throw`, `roll_blades`, `roll_blade_scale`, `parry_window_add`, `parry_refund`, `guard_cost_mult`, `throw_damage_mult`, `throw_speed_mult`, `throw_delay`, `throw_charges_flat`, `throw_regen_mult`, `throw_stagger`, `throw_homing`, `blast_radius`, `throw_fan`, `throw_fan_scale`, `throw_void`, `throw_void_radius`, `throw_spin`, `throw_spin_radius` | linear, the two radii by maximum |
 | Verb chances | `triple_throw_chance`, `double_burst_chance` | hyperbolic |
-| Marks | `mark_stacks.<kind>`, `mark_potency.<kind>`, `mark_damage_taken_mult`, `mark_lockout.<kind>`, `death_marks.<kind>`, `death_mark_radius` | linear |
+| Marks | `mark_stacks.<kind>`, `mark_potency.<kind>`, `mark_damage_taken_mult`, `mark_lockout.<kind>`, `death_marks.<kind>`, `death_mark_radius` | linear, `death_mark_radius` by maximum |
 | Conditional damage | `damage_high_hp_mult`, `damage_planted_mult`, `damage_close_mult`, `close_range`, `damage_far_mult`, `far_range`, `damage_per_hp`, `damage_per_gold`, `damage_per_kill`, `damage_per_island`, `damage_per_stack`, `damage_per_mark` | linear, each with its own counter; `close_range` and `far_range` by maximum |
-| Bursts on an event | `shock_on_hurt`, `shock_radius`, `explode_on_kill`, `explode_radius` | linear |
+| Bursts on an event | `shock_on_hurt`, `shock_radius`, `explode_on_kill`, `explode_radius` | linear, both radii by maximum |
 | Temporary damage | `damage_on_kill`, `attack_on_kill`, `attack_per_island` | linear, timed or persistent |
-| Movement | `move_mult`, `roll_distance` | linear |
-| Health over time | `regen_hp_per_s`, `regen_window`, `heal_on_hit` | linear |
-| Economy and loot | `luck`, `shop_offers`, `shop_discount`, `chest_mods`, `pedestal_offers`, `keep_offer`, `extra_chest_kills`, `extra_chest_islands`, `gold_on_hit`, `gold_on_hit_taken`, `drop_chance` | linear except `drop_chance` |
+| Speed | `move_mult`, `roll_distance`, `roll_speed`, `roll_charges`, `roll_regen`, `step_distance`, `step_speed`, `step_recovery`, `slide_speed`, `slide_duration` | linear; the roll's clock and the slide's steering are constants, not keys, and the step's clock is `step_speed`'s own business |
+| Health over time | `regen_hp_per_s`, `regen_window`, `heal_on_hit` | linear, `regen_window` by maximum |
+| Economy and loot | `luck`, `shop_offers`, `shop_discount`, `chest_mods`, `chest_offers`, `keep_offer`, `extra_chest_kills`, `extra_chest_islands`, `gold_on_hit`, `gold_on_hit_taken`, `drop_chance` | linear except `drop_chance` |
 | Enemy pressure | `enemy_count_mult`, `enemy_health_mult`, `max_hp_flat_on_hit` | linear, greed only |
 | Meta | `levelup_per_island` | linear; the only key that writes to **other** rows' stacks, which is why it is capped at 2 |
 
@@ -781,66 +950,78 @@ ground as a flat clear heal instead.
 
 ## Wiring the surfaces
 
-`draft()` is the single funnel — pedestal, shop, chest, hoard and mini-chest all
-call `Mods.draft(...)` and the totem calls `greed_offer`. Nothing else in the pool
-touches the world:
+Two questions, two funnels. **A promise** is what a gate says, and its tier is
+absolute: `Mods.roll_promise` settles the pair, `Mods.deal` lays it out. **An
+unpromised shelf** is where a row comes from when nobody named one: the cache,
+the stall, the weld and the hoard all call `Mods.roll_shelf`. The totem calls
+`greed_offer`. Nothing else in the pool touches the world:
 
 ```gdscript
-# what shipped
-Mods.draft(rng, count, tiers, luck, island, exclude)
-# tiers: the surface's own ladder row, from Mods.surface_tiers(surface, island)
-# the old three-argument call still means the pedestal: draft(rng, 3, false)
-Mods.hoard(rng, count, luck, island, exclude)   # the boss's guaranteed legendary
-Mods.stall_price(tier, level)                   # 22 + 5 x level + the surcharge
+# a promise: rolled once, dealt as written, never re-weighted
+Mods.roll_promise(rng, island, luck, hands, elite, taken)  # {surface, tier}
+Mods.keeps_promise(promise, hands)      # every body can lay out a whole hand
+Mods.deal(rng, promise, count, exclude, carrier_tags)     # the cards, topped up
+
+# an unpromised shelf: the island's ladder picks the tier
+Mods.roll_shelf(rng, source, island, count, luck, exclude, carrier_tags)
+# source: Mods.SOURCE_CACHE / SOURCE_STALL / SOURCE_WELD / SOURCE_HOARD
+Mods.source_tiers(source, island)      # which tiers that source sells at all
+Mods.shelf(surface, tier, carrier_tags, taken)           # one surface's rows
+
+Mods.hoard(rng, count, luck, island, exclude)      # the boss's guaranteed legendary
+Mods.stall_price(tier, level)                      # 22 + 5 x level + the surcharge
 ```
 
-| Surface | Offer count | Ladder | Price |
+| Chest | Offer count | Ladder | Price |
 | --- | ---: | --- | --- |
-| Pedestal | 3, +1 per 3 `luck`, ±`pedestal_offers` | common, epic from island 2 | free |
-| Shop-level pedestal | 1 | common and epic | free |
-| Reward chest | 1 mod, +`chest_mods` | common, epic, legendary from island 4 at 4%, greed from island 2 | 38 + 10 an island |
+| A gate's chest (any surface) | 3 cards, ±`chest_offers` | the one tier on the label, and nothing else | 38 / 64 / 90 by tier, + 10 an island |
+| Call it at a shop stop | the same, rolled from the route | the same | the same |
+| A Key chest | 1 / 2 / 3 keys | any tier | 38 / 64 / 90 |
+| A Gear chest | 1 / 2 / 3 pieces, set floor +0 / +1 / +2 | any tier | 38 / 64 / 90 |
+| A cache (mini, buried, bonus, Rare Treasure) | 1 mod, +`chest_mods` | `SOURCE_CACHE`: the whole ladder | 24 + 10 an island |
 | Warden's Hoard | 2 mods | epic floor, **one legendary** | 60 + 10 an island |
+| A chest's weld | 1 mod, +`chest_mods` | common, epic from island 2, never a legendary | free |
 | Shop stall | 3 + `shop_offers` | all four, legendary from island 3, greed from island 2 | by tier, see above |
-| Greed Totem | 1 | greed only | 20% of max health |
 
 Four consequences worth stating, because they are the design:
 
-1. **The boss level is where a run's ceiling comes from.** A legendary is the
-   hoard's, once, at level 10, 20, 30. Every ten levels a body's build changes
-   shape, and the nine levels between are the commons proving the shape was
-   worth it.
-2. **The pedestal never lies.** Three cards, free, one pick per peer, and the
-   tier is visible on the card. The chest is the gamble: one mod, no choice.
+1. **A legendary is a promise, and the boss is still the floor.** Once the
+   island's ladder can roll a legendary, a gate may promise one - and the elite
+   trial raises any promise a rung. The hoard still writes one down, at level 10,
+   20, 30, so the boss is where a build changes shape.
+2. **The chest never lies.** The gate names a surface and a tier, the lid glows
+   that tier, and the cards are exactly that pair: one rarity, one category, one
+   pick per peer. A surface that cannot fill a hand at that tier is not promised
+   at all.
 3. **Greed is opt-in and already is.** The totem stands on waves 1, 2, 4, 5, 7
    and 8 — not on the shop level at 9, where the shop is the point, and not
    beside a boss at 10. The condition is `not boss_level and wave % 3 != 0`, and
    the comment above it claims "every third level", which is the opposite of what
    the code does; either way level 9 never carries one, which keeps the bargain
    off the breath-before-the-boss level.
-4. **The host rolls, the guests receive.** The tier roll happens inside
-   `Mods.draft` on the host and the offers travel in the prop payload, exactly as
-   they do today. `luck` is per body, so a party's pedestal must roll the tier
-   once and let each peer's own luck re-roll *its* card — or, simpler and what
-   this design asks for, **the pedestal's ladder uses the best luck in the
-   party**, so a lucky body is lucky for the warband. That is one line and it is
-   the co-op answer.
+4. **The host rolls, the guests receive.** The promise happens inside
+   `Mods.roll_promise` on the host and the offers travel in the prop payload,
+   exactly as they do today. `luck` is per body: the chest draws a row for every body in the
+   run on that body's own engine, so a lucky body pays for nobody else's card and
+   a party's chest is three cards each.
 
 ## The screens
 
-The pedestal card, the draft button and the shop row already draw the tier colour
-from `Mods.RARITY_COLOUR`; 161 rows means the card must say more than a name and
-a description.
+The draft card, its button and the shop row already draw the tier colour from
+`Mods.RARITY_COLOUR`; 171 rows means the card must say more than a name and a
+description.
 
 - **Card**: name in the tier colour, the family as a small caps line under it
   (`SHOT · EPIC`), the description, and a `×n` badge when the body already
   carries the row. Landed: `open_draft` builds all three lines and reads the
   carried count off the local body's engine.
-- **Draft list**: `open_draft` builds one button an offer, 620 × 340 for three.
-  Seven offers at the ceiling — three, plus Big Chests' two, plus luck's two —
-  needs two columns or a 620 × 700 panel. Landed: past four offers the cards go
-  into a two-column grid and the panel grows to fit them (`_resize_overlay`).
+- **Draft list**: `open_draft` builds one button an offer, 322 × 108 in a 660-wide
+  panel for three. Five offers at the ceiling — three, plus `Big Chests`' two, and
+  never fewer than one once `Hoarder` has taken its share — need two columns or a
+  taller panel. Landed: past four offers the cards go into a two-column grid
+  (`PANEL_GRID`, 720 wide) and the panel grows to fit them (`_resize_overlay`).
 - **Stack read-out**: twelve rows, then "…and more". Landed: grouped by family
-  in `SHOT / HAND / KIT / PERK / RELIC` order with a small caps header per run.
+  in `SHOT / HAND / ABILITY / PERK / RELIC` order with a small caps header per run.
 - **Marks**: one thin bar under the health bar on a marked body, one segment a
   kind, coloured per mark. `mob_health_bars.gd` already draws the health bar with
   one `Control` and one `_draw()` for the whole island; the mark pips are one more
@@ -856,7 +1037,7 @@ the tables above.
 | Phase | What lands | Files | State |
 | --- | --- | --- | --- |
 | 1. The data | the original 120 rows, `RARITY_COLOUR` unchanged, the 23 rows of the migration table, `brutal_pact` out | `scripts/roguelite/mod_catalog.gd` | **landed** |
-| 2. The ladder | `draft()` takes a tier row, a luck figure and an island; the surface tables above; `luck` on the plate; the four ladder checks | `mod_catalog.gd`, `run_director.gd` (`_draft_for_party`, `_shop_wares`, `_open_chest`, `_stand_pedestal`), `run_player.gd`, `roguelite_hud.gd` | **landed** |
+| 2. The ladder | `draft()` takes a tier row, a luck figure and an island; the surface tables above; `luck` on the plate; the four ladder checks | `mod_catalog.gd`, `run_director.gd` (`_chest_offers`, `_shop_wares`, `_open_chest`, `_stand_stop_chest`), `run_player.gd`, `roguelite_hud.gd` | **landed** |
 | 3. The keys that are arithmetic | conditional damage, crit, health, economy, temporary buffs, shot shape, the blast and aura requests, the deferred wound — the keys with a counter and no new node | `proc_engine.gd`, `run_player.gd`, `run_director.gd`, `combat.gd`, `warband_body.gd`, `arrow.gd`, `thrown_weapon.gd` | **landed** |
 | 4. The verb upgrades | roll charges and refunds, parry window, guard cost, throw charges — the three verbs with **no run hook today** (roll, parry, guard) plus the throw, whose charges are static registry data. `Combat.defense_resolved` is emitted on every guard outcome and has no subscriber, so parry and guard are one connection each | `combat.gd`, `warband_body.gd`, `run_director.gd`, `proc_engine.gd` | pending |
 | 5. The marks | the ledger, the five kinds, the application on hit, the tick, the death marks | new `scripts/roguelite/marks.gd`, `run_director.gd`, `mob_health_bars.gd` | pending |
@@ -888,15 +1069,15 @@ this document set:
 
 | Assertion | Kept by |
 | --- | --- |
-| `Mods.all().size() >= 20` | 161 rows |
+| `Mods.all().size() >= 20` | 171 rows |
 | every tier in `Mods.RARITIES` has a row | 47 / 36 / 23 / 14 |
 | `split_shot` ×2 means 2 shafts | `split_shots +1`, max 6 |
 | `rapid_fire` ×5 + `heavy_caliber` ×1 gives ×1.8 rate and ×1.35 damage | `attack_mult +0.18`, `damage_mult +0.35`, `attack_mult -0.10` |
 | `chain_lightning` at 100 stacks stays at the .70 cap | `chain_chance cap .70` |
 | `glass_cannon` ×5 is ×6.0 damage and a floored pool | unchanged |
 | `crit_sharpshooter` ×6 is 0.72 | `crit_chance +0.12` |
-| `draft(rng, 3, false)` returns three unique, no greed | the pedestal's ladder |
-| the pedestal gives 3 offers, the totem takes 20% health, the stall sells | the surface table |
+| `draft(rng, 3, false)` returns three unique, no greed | the weld's ladder |
+| the chest gives 3 offers, the totem takes 20% health, the stall sells | the surface table |
 | `take_mod`, `choose_draft`, the per-body draft table, the crescent on every swing | untouched |
 
 Two of the document's own numbers were wrong and are corrected here: the rate
@@ -907,12 +1088,14 @@ rather than edits to old ones:
 
 | Check | What it proves |
 | --- | --- |
-| `_check_pool` census | 161 rows, 63/51/33/14, families 30/11/60/48/12, unique ids, 130 live |
-| `_check_pool` ceiling | every row at its cap reads back the design's own ceiling table (+16.42 damage, +280 HP, +3.59 HP multiplier, +0.32 crit, +2.70 crit multiplier, +4.50 hand, +3.40 throw, +1.20 rate, +2.25 bodies, +7.25 gold, +6 luck) |
-| `_check_ladder` shelf | an island-1 pedestal is commons, and a six-luck pedestal on island 9 still offers no legendary or greed |
+| `_check_pool` census | 173 rows, 67/55/37/14, families 30/11/61/59/12, unique ids, 142 live |
+| `_check_pool` ceiling | every row at its cap reads back the design's own ceiling table (+16.42 damage, +280 HP, +3.59 HP multiplier, +0.32 crit, +2.70 crit multiplier, +4.50 hand, +3.40 throw, +1.20 rate, +2.25 bodies, +7.25 gold, +6 luck, +1.41 speed) |
+| `_check_speed_shelf` | the Speed chest lays out a whole hand at every tier (five common, four epic, four legendary), every one of those cards writes a key the body's own walk, roll, step or slide reads, and a promise on it pays its promised tier |
+| `_check_waves` speed | a Speed card reaches the body's own state machines: Lightfoot's +0.30 m on `DodgeStep.travel`, Long Roll's metre on `DodgeRoll.speed`, Low Slide's +18% on `RunningSlide.duration` |
+| `_check_ladder` shelf | an island-1 weld is commons, and a six-luck weld on island 9 still offers no legendary or greed |
 | `_check_ladder` hoard | a boss's hoard always contains one legendary |
 | `_check_ladder` roll | the three ladder tiers sum to a hundred, luck leans away from common, the legendary share never passes 35 |
-| `_check_ladder` chest | a reward chest's legendary is 4% on island 4 and 5.5% on island 5+ |
+| `_check_ladder` promise | a legendary promise still lays out three legendaries where the island's ladder holds none, and every body it is dealt to can fill a whole hand |
 | `_check_ladder` stall | a common is 67 and a legendary 137 at level 9 |
 
 The fourth check the plan asked for - "a body at the pool's ceiling clears a level
@@ -1274,7 +1457,7 @@ Where this document stands against its own four conditions:
   to a source name at the tier this document claims. `fetch_crab_champions.py
   --check` is the command that keeps that true.
 - **The migration is mechanical.** Phase 1 landed with
-  `tests/roguelite_regression.gd` untouched and green: the pool's 161 rows, the
+  `tests/roguelite_regression.gd` untouched and green: the pool's 171 rows, the
   tier inheritances of the migration table and `brutal_pact` retired are data
   changes only.
 - **The ladder is testable.** The checks exist and pass (`_check_pool`,
@@ -1282,8 +1465,9 @@ Where this document stands against its own four conditions:
   `draft()`, which ignored the tier entirely. The kill-time check is the one still
   open, and it is open because it needs a played run.
 - **The two substructures are costed, not assumed.** The mark ledger and the four
-  verb hooks are phases 4 and 5, both pending, both gated: 31 rows carry
-  `ready: false` and the surfaces offer the other 89. That is the number the
+  verb hooks are phases 4 and 5, both pending, both gated: 31 of the 120 re-cut
+  rows carry `ready: false`, so the surfaces offer the other 89, all 41 ability
+  weapon rows and all 11 speed rows - 141 cards. That is the number the
   implementation plan names, and it is a ceiling on what the pool can pretend to
   do until those two land.
 

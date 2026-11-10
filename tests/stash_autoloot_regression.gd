@@ -2,7 +2,7 @@ extends SceneTree
 ## Battlefield looting regression for Ghost of the Warband: a real drop node a
 ## battle can leave on the ground, the instant single-piece pick, the
 ## end-of-battle sweep into the infinite shared stash, and the proof that the
-## shipping catalog can fill all ten worn slots and every weapon subtype.
+## shipping catalog can fill all seven worn slots and every weapon subtype.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
@@ -15,9 +15,9 @@ const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
 const TEST_SAVE := "user://stash_autoloot_state.json"
 
 ## The five drops the battle leaves behind. Values descend cleanly
-## (360 / 340 / 280 / 260 / 120) so the stash order is unambiguous.
-const DROP_IDS := ["bow_long", "sword_great", "shield_tower", "focus_skull_death", "neck_ember"]
-const QUICK_TAKE := "neck_ember"
+## (360 / 340 / 280 / 260 / 18) so the stash order is unambiguous.
+const DROP_IDS := ["bow_long", "sword_great", "shield_tower", "focus_skull_death", "axe_makeshift"]
+const QUICK_TAKE := "axe_makeshift"
 const DROPPER := 7
 
 var checks := 0
@@ -69,7 +69,7 @@ func run() -> void:
 	check_no_survivors()
 	await check_sweep()
 	check_infinite_stash()
-	check_ten_slot_kit()
+	check_seven_slot_kit()
 
 	_remove_test_save()
 	print("STASH_AUTOLOOT_REGRESSION checks=", checks, " failures=", failures)
@@ -78,7 +78,7 @@ func run() -> void:
 # --- gear vocabulary -------------------------------------------------------
 
 func check_coverage() -> void:
-	check(Rules.SLOTS.size() == 10, "there are ten worn slots")
+	check(Rules.SLOTS.size() == 7, "there are seven worn slots, and no neck or ring")
 	var candidates := _slot_candidates()
 	for slot in Rules.SLOTS:
 		var ids: Array = candidates.get(slot, [])
@@ -285,7 +285,7 @@ func check_sweep() -> void:
 	survivor.name = "Survivor"
 	root.add_child(survivor)
 	survivor.global_position = Vector3(6.0, 0.0, 0.0)
-	var far := _loot.spawn("ring_silver", Vector3(500.0, 0.0, 0.0))
+	var far := _loot.spawn("dagger_iron", Vector3(500.0, 0.0, 0.0))
 	check(far != null, "a drop far off the battlefield exists")
 
 	var result := _loot.sweep([survivor])
@@ -306,16 +306,16 @@ func check_sweep() -> void:
 	check(int(result.get("skipped", 0)) == 1, "the drop 500 m away is out of reach")
 	check(far != null and not far.collected and far.get_parent() == _field,
 		"the unreachable drop stays in the world")
-	check(stash.pooled_count("ring_silver") == 0, "an unreachable drop never enters the stash")
+	check(stash.pooled_count("dagger_iron") == 0, "an unreachable drop never enters the stash")
 
 	for item_id in DROP_IDS:
 		check(stash.pooled_count(item_id) == 1, "%s reached the shared stash exactly once" % item_id)
-	# neck_ember + dagger_ironwood + sword_makeshift from the manual picks, the
+	# axe_makeshift + dagger_ironwood + sword_makeshift from the manual picks, the
 	# four swept pieces, and the worn boots are out of the pool.
 	check(stash.pooled_total() == 7, "seven pooled pieces after the sweep, got %d" % stash.pooled_total())
 
 	var expected_value := 0
-	for item_id in ["neck_ember", "dagger_ironwood", "club_makeshift", "bow_long",
+	for item_id in ["axe_makeshift", "dagger_ironwood", "club_makeshift", "bow_long",
 			"sword_great", "shield_tower", "focus_skull_death"]:
 		expected_value += StashScript.value_of(item_id)
 	check(_loot.battlefield_value() == expected_value,
@@ -369,15 +369,15 @@ func check_sweep() -> void:
 func check_infinite_stash() -> void:
 	_warband.reset_state()
 	var stash: WarbandStash = _warband.stash
-	stash.add("ring_copper", 1000)
-	check(stash.pooled_count("ring_copper") == 1000, "a thousand copies of one id are stored")
+	stash.add("club_makeshift", 1000)
+	check(stash.pooled_count("club_makeshift") == 1000, "a thousand copies of one id are stored")
 	var rows := stash.rows(_warband.roster)
 	check(rows.size() == 1, "a thousand copies are one row, got %d" % rows.size())
 	if rows.size() == 1:
 		check(int(rows[0]["total"]) == 1000, "that row counts all thousand, got %d" % int(rows[0]["total"]))
-		check(str(rows[0]["name"]) == str(StateScript.ITEMS["ring_copper"]["name"]),
+		check(str(rows[0]["name"]) == str(StateScript.ITEMS["club_makeshift"]["name"]),
 			"the row still reads its catalog name")
-		check(int(rows[0]["value"]) == StashScript.value_of("ring_copper"),
+		check(int(rows[0]["value"]) == StashScript.value_of("club_makeshift"),
 			"the row still reads its value")
 
 	var ids: Array[String] = []
@@ -408,12 +408,12 @@ func check_infinite_stash() -> void:
 	check(descending, "1500 pieces come back value-sorted, highest first")
 	check(int(rows[0]["value"]) == StashScript.value_of("bow_long"),
 		"the longbow leads the sorted stash, got %s" % str(rows[0].get("item_id", "")))
-	check(int(_row_of(rows, "ring_copper").get("total", 0)) > 1000,
+	check(int(_row_of(rows, "club_makeshift").get("total", 0)) > 1000,
 		"the thousand-copy row grew with the mix instead of capping")
 
-# --- ten pieces, ten slots -------------------------------------------------
+# --- seven pieces, seven slots --------------------------------------------
 
-func check_ten_slot_kit() -> void:
+func check_seven_slot_kit() -> void:
 	_warband.reset_state()
 	var stash: WarbandStash = _warband.stash
 	var candidates := _slot_candidates()
@@ -421,21 +421,17 @@ func check_ten_slot_kit() -> void:
 	var off_id := _first_of_category(candidates.get("off", []), "shield")
 	check(not main_id.is_empty() and not off_id.is_empty(),
 		"a one-hander and a shield can be worn together")
-	var rings: Array = candidates.get("ring2", [])
-	check(rings.size() > 1, "two rings are available for the two ring slots")
 	var kit := {
 		"head": _first(candidates, "head"),
 		"chest": _first(candidates, "chest"),
 		"hands": _first(candidates, "hands"),
 		"legs": _first(candidates, "legs"),
 		"feet": _first(candidates, "feet"),
-		"neck": _first(candidates, "neck"),
-		"ring1": str(rings[0]) if rings.size() > 0 else "",
-		"ring2": str(rings[1]) if rings.size() > 1 else "",
 		"main": main_id,
 		"off": off_id,
 	}
-	check(str(kit["ring1"]) != str(kit["ring2"]), "two different rings fill both ring slots")
+	check(not candidates.has("neck") and not candidates.has("ring1"),
+		"the catalog has nothing for a neck or a ring")
 
 	var merc_id: int = _warband.add_mercenary("Full Kit")
 	for slot in Rules.SLOTS:
@@ -449,7 +445,7 @@ func check_ten_slot_kit() -> void:
 	for slot in Rules.SLOTS:
 		if not str(worn.get(slot, "")).is_empty():
 			filled += 1
-	check(filled == 10, "all ten slots are filled at once, got %d" % filled)
+	check(filled == 7, "all seven slots are filled at once, got %d" % filled)
 	check(str(worn.get("main", "")) == main_id and str(worn.get("off", "")) == off_id,
 		"the hands hold the one-hander and the shield together")
 
@@ -458,8 +454,8 @@ func check_ten_slot_kit() -> void:
 	for row in rows:
 		if int(row["total"]) == 1 and (row["tags"] as Array).size() == 1:
 			tagged += 1
-	check(rows.size() == 10 and tagged == 10,
-		"ten worn pieces are ten tagged rows, got %d rows / %d tagged" % [rows.size(), tagged])
+	check(rows.size() == 7 and tagged == 7,
+		"seven worn pieces are seven tagged rows, got %d rows / %d tagged" % [rows.size(), tagged])
 
 # --- helpers ---------------------------------------------------------------
 

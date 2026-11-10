@@ -366,6 +366,99 @@ func run() -> void:
 	check(_kill_slots.has(18) and int(_kill_sources[_kill_slots.rfind(18)]) == KILLER_SLOT,
 		"Bleeding out credits the slot that put the body down")
 
+	# --- the town keeps its own ---------------------------------------------
+	# A body knocked down on the square's ground is never carried off: the bleed
+	# clock runs out into a stand-up instead of a death, and a blow on the body
+	# cannot finish it. That is what lets a co-op party scrap in the town - which
+	# it may - without a player losing their session to it.
+	var town_body = make_actor(24,24,false,Vector3(0,0,80))
+	town_body.home_ground = true
+	hit_from_plus_x(town_body,100.0)
+	check(town_body.downed and town_body.alive,"A blow on town ground downs the body as it would anywhere")
+	var kills_before_town := _kill_slots.size()
+	hit_from_plus_x(town_body,500.0)
+	check(town_body.downed and town_body.alive,
+		"and a finisher on the square does not end it")
+	check(_kill_slots.size() == kills_before_town,"no death is filed for a blow in the town")
+	for tick in 300:
+		town_body.step(0.1,[town_body])
+	check(not town_body.downed and town_body.alive,
+		"the town's own clock stands the body back up")
+	check(is_equal_approx(town_body.health,
+		WarbandContracts.REVIVE_HEALTH_FRACTION * town_body.max_health),
+		"on the contract's revive share (%.1f of %.1f)" % [
+			town_body.health, town_body.max_health])
+	check(town_body.health_state == Contracts.HealthState.ALIVE,
+		"and the roster reads ALIVE again")
+	check(town_body.home_ground == false,
+		"the town's hold is cleared once the body is on its feet")
+	# Off the square's ground the same body is the campaign's again.
+	var wild_body = make_actor(25,25,false,Vector3(0,0,84))
+	hit_from_plus_x(wild_body,100.0)
+	for tick in 300:
+		wild_body.step(0.1,[wild_body])
+	check(not wild_body.alive,
+		"a body downed off the square still bleeds out")
+
+	# --- the band's hireling: ten seconds, and no one hands him back -------
+	# A body nobody's soul is inside is the band's man, not the player's: the
+	# world marks it at the fall (`WorldScene._on_body_downed`) and the mark is
+	# what makes the clock ten seconds, finishes him on any second blow, and gives
+	# the town square and the run's hold no claim on him. Nothing in the game
+	# stands him up when those ten seconds run out - the desk that sold him does
+	# not sell him back, so the band hires another.
+	var hireling = make_actor(26,0,true,Vector3(0,0,88))
+	hireling.expendable = true
+	check(is_equal_approx(hireling.downed_limit(), Contracts.MERCENARY_DOWNED_SECONDS),
+		"a hireling's clock is the contract's ten seconds, not the soul's thirty")
+	hit_from_plus_x(hireling,100.0)
+	check(hireling.downed and hireling.alive,"a lethal blow puts a hireling on his chest like anyone else")
+	for tick in 99:
+		hireling.step(0.1,[hireling])
+	check(hireling.downed and hireling.alive,"9.9 s is still a body worth picking up")
+	hireling.step(0.1,[hireling])
+	check(not hireling.alive and hireling.health_state == Contracts.HealthState.DEAD,
+		"the tenth second kills him where he lies")
+
+	# The square is the band's home ground, and it is not his: it neither stops
+	# the clock nor the blow that follows.
+	var square = make_actor(27,0,true,Vector3(0,0,92))
+	square.expendable = true
+	square.home_ground = true
+	hit_from_plus_x(square,100.0)
+	check(square.downed,"a hireling knocked down on town ground still goes down")
+	hit_from_plus_x(square,1.0)
+	check(not square.alive,"and the square does not stop a second blow finishing him")
+
+	var square_clock = make_actor(28,0,true,Vector3(0,0,96))
+	square_clock.expendable = true
+	square_clock.home_ground = true
+	hit_from_plus_x(square_clock,100.0)
+	for tick in 100:
+		square_clock.step(0.1,[square_clock])
+	check(not square_clock.alive,"nor does the clock stop killing him on home ground")
+
+	# The arena holds a soul on the dirt until the island is cleared. A hireling
+	# is nobody's spectator: his ten seconds run inside a wave just the same.
+	var island = make_actor(29,0,true,Vector3(0,0,100))
+	island.expendable = true
+	island.roguelite_hold_downed = true
+	hit_from_plus_x(island,100.0)
+	for tick in 100:
+		island.step(0.1,[island])
+	check(not island.alive,"a run holds a soul on the dirt, never a hireling")
+
+	# The same blow on a body with a soul inside it keeps the campaign's rule.
+	var soul_body = make_actor(30,1,false,Vector3(0,0,104))
+	soul_body.roguelite_hold_downed = true
+	hit_from_plus_x(soul_body,100.0)
+	for tick in 320:
+		soul_body.step(0.1,[soul_body])
+	check(soul_body.downed and soul_body.alive,
+		"the run's hold keeps a soul's body down for the whole of the thirty")
+	check(is_equal_approx(soul_body.downed_limit(), Contracts.DOWNED_BLEED_SECONDS),
+		"and that body's clock is still the thirty seconds")
+
 	# --- a replica reads the downed state back off the wire -----------------
 	# The snapshot shape is unchanged: a body at zero health that is still alive
 	# is downed, so no new field (and no extra datagram bytes) was needed.

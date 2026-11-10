@@ -65,7 +65,7 @@ const SIGNED := [
 	"gut_hook", "knife_work", "three_strike", "heavy_swing", "wide_sweep",
 	"ground_breaker", "executioner", "lunge_thrust", "spin_slash", "backstab",
 	"quick_stab", "shield_shove", "shield_bash", "shield_charge", "shield_slam",
-	"rebuke", "fireball", "cinder_lance", "bone_spear", "grave_bloom",
+	"rebuke", "fireball", "cinder_lance", "fire_ray", "bone_spear", "grave_bloom",
 	"ember_ward", "energy_shield", "focus", "stone_skin",
 	# The two consumables are not combat skills and never emit a cue; they are in
 	# the list so the one table names every row of the bar the player can press.
@@ -141,6 +141,7 @@ static func cue(parent: Node3D, rig, definition: Dictionary, cue_name: String,
 		"rebuke": _rebuke(parent, rig, cue_name, heading, effect)
 		"fireball": _fireball(parent, rig, cue_name, heading)
 		"cinder_lance": _cinder_lance(parent, rig, cue_name, heading)
+		"fire_ray": _fire_ray(parent, rig, cue_name, heading)
 		"bone_spear": _bone_spear(parent, rig, cue_name, heading)
 		"grave_bloom": _grave_bloom(parent, rig, cue_name, heading, aim, effect)
 		"ember_ward": _ember_ward(parent, rig, cue_name)
@@ -740,6 +741,23 @@ static func _cinder_lance(parent: Node3D, rig, cue_name: String,
 			0.03 * float(slot))
 	_flare(parent, origin + forward * reach * 0.85, EMBER, 0.7)
 	_light(parent, origin, EMBER, 2.4, 4.0, 0.5)
+
+
+## Fire Ray: the ignition of a held line. The ray itself is a standing node
+## (`fire_ray.gd`) because it outlives its cue; this beat only lights the mouth -
+## a hot knot on the staff head, a pressure ring around it, the first spray of
+## fire down the line and the light that paints the caster's arms.
+static func _fire_ray(parent: Node3D, rig, cue_name: String,
+		forward: Vector3) -> void:
+	if cue_name != "beam":
+		return
+	var origin := _staff(rig)
+	var dir := _flat(forward, _heading(rig))
+	_orb(parent, origin, 0.24, EMBER, EMBER_HOT, 0.0)
+	_ring_cross(parent, origin + dir * 0.14, 0.44, EMBER, 0.0, dir)
+	_cone(parent, origin, dir, 0.8, 9, EMBER_HOT, 0.0)
+	_flare(parent, origin + dir * 0.32, EMBER, 0.82)
+	_light(parent, origin, EMBER, 2.6, 4.5, 0.5)
 
 
 ## Bone Spear: the dead channel. Bone shards converge on the staff, a spectral ring

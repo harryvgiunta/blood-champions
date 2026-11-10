@@ -4,7 +4,8 @@ extends CanvasLayer
 ## edge, with the purse and worth in the header, one two-line row per mercenary
 ## (live health, ALIVE/DOWNED/DEAD chip - RESERVE for a name waiting in the town
 ## with no body - disposition, gear and a click-to-control button) and the Gold
-## recruiter's board underneath. The party list scrolls, so the panel stays small
+## recruiter's board underneath: three bodies already inside their kit, level one,
+## bought whole and locked whole. The party list scrolls, so the panel stays small
 ## however many names are sworn.
 ##
 ## It owns no state and no input. Every number is read out of `Warband` at paint
@@ -20,7 +21,6 @@ extends CanvasLayer
 signal possess_requested(merc_id: int)
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
-const Vendor = preload("res://scripts/warband/mercenary_vendor.gd")
 const State = preload("res://scripts/player_state.gd")
 
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
@@ -61,9 +61,9 @@ var rows: Dictionary = {}
 ## Header fields, in the order the screen reads them.
 var gold_label: Label
 var value_label: Label
-## Recruiter board: the three fresh names currently offered, and the button that
-## swears each one in.
-var hire_names: Array[String] = []
+## Recruiter board: the three bodies currently offered - `RecruitCatalog` rows at
+## `TOWN_LEVEL`, kit and skill on each - and the button that swears each one in.
+var hire_offers: Array[Dictionary] = []
 var hire_buttons: Array[Button] = []
 ## The peer this screen belongs to. A body held by any other peer is not
 ## controlable, so its button is disabled rather than lying about it.
@@ -76,6 +76,7 @@ var _open := false
 var _rows_box: VBoxContainer
 var _empty_label: Label
 var _recruiter_box: VBoxContainer
+var _recruiter_title: Label
 var _cost_label: Label
 var _status: Label
 var _hire_rows: Array[Dictionary] = []
@@ -236,9 +237,9 @@ func _ensure_built() -> void:
 	var recruiter_head := HBoxContainer.new()
 	recruiter_head.add_theme_constant_override("separation", 8)
 	column.add_child(recruiter_head)
-	var recruiter_title := _label(recruiter_head, "GOLD RECRUITER", 11, GOLD)
-	recruiter_title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
-	recruiter_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_recruiter_title = _label(recruiter_head, "GOLD RECRUITER", 11, GOLD)
+	_recruiter_title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	_recruiter_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_cost_label = _label(recruiter_head, "", 8, MUTED)
 	_recruiter_box = VBoxContainer.new()
 	_recruiter_box.add_theme_constant_override("separation", 2)
@@ -362,10 +363,14 @@ func _apply_row(merc_id: int) -> void:
 	var disposition: Button = row["disposition"]
 	var style := str(roster.disposition_of(merc_id))
 	disposition.text = Contracts.disposition_label(style)
-	disposition.tooltip_text = "%s - press for the next." % Contracts.disposition_text(style)
+	# A bought body's trade is the card's: the desk sold a tank, a press cannot
+	# turn it into a bowman. The chip reads its stance and refuses the change.
+	var locked: bool = _warband.is_gear_locked(merc_id)
+	disposition.tooltip_text = "Bought off a desk: this body fights in what it was sworn in." \
+		if locked else "%s - press for the next." % Contracts.disposition_text(style)
 	# A lent warband's bodies are the host's to command; the button says so the
 	# same way the control button does, instead of taking a press that is refused.
-	disposition.disabled = _warband.lent
+	disposition.disabled = _warband.lent or locked
 	var control: Button = row["control"]
 	var holder := 0
 	if _souls != null and _souls.has_body(merc_id):
@@ -459,70 +464,108 @@ func _refresh_header() -> void:
 func _make_hire_row(index: int) -> Dictionary:
 	var root := HBoxContainer.new()
 	root.add_theme_constant_override("separation", 8)
-	var name_label := _label(root, "", HIRE_SIZE, CREAM)
-	name_label.custom_minimum_size = Vector2(78, 0)
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var lines := VBoxContainer.new()
+	lines.add_theme_constant_override("separation", 0)
+	lines.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_child(lines)
+	var name_label := _label(lines, "", HIRE_SIZE, CREAM)
+	name_label.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	name_label.clip_text = true
+	# What the gold buys, in the width the panel has: the trade and the hands on
+	# one line, the armour and the one skill on the next. A bought kit never opens
+	# on the paperdoll, so these two lines are the only place the player reads what
+	# is walking into the band (the whole card is the button's tooltip).
+	var detail := _label(lines, "", CHIP_SIZE, MUTED)
+	detail.clip_text = true
+	var kit := _label(lines, "", CHIP_SIZE, MUTED)
+	kit.clip_text = true
 	var button := Button.new()
 	button.text = "HIRE"
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(74, 20)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.add_theme_font_size_override("font_size", CONTROL_SIZE)
 	button.pressed.connect(func() -> void: _on_hire(index))
 	root.add_child(button)
 	hire_buttons.append(button)
 	_recruiter_box.add_child(root)
-	return {"root": root, "name": name_label, "button": button}
+	return {"root": root, "name": name_label, "detail": detail, "kit": kit, "button": button}
 
 func _refresh_recruiter() -> void:
 	if _warband == null or _hire_rows.is_empty():
 		return
-	var offered := _fresh_names(_hire_rows.size())
+	# The board is the host's. A guest plays a lent warband, so nothing on this
+	# page could swear a body into it: the rows close, the title says whose desk
+	# it is, and the cost line says why. The section stays on the page so the
+	# party list above it keeps its size.
+	var guest := bool(_warband.lent)
+	if _recruiter_title != null:
+		_recruiter_title.text = "GOLD RECRUITER  ·  THE HOST'S DESK" if guest \
+			else "GOLD RECRUITER"
+	for index in _hire_rows.size():
+		var hire_row: Dictionary = _hire_rows[index]
+		(hire_row["root"] as Node).visible = not guest
+		(hire_row["button"] as Button).disabled = guest
+	if guest:
+		_cost_label.text = "Only the host hires: the band is theirs."
+		hire_offers.clear()
+		return
+	var offered: Array[Dictionary] = _warband.town_board()
 	var cost := int(_warband.hire_cost())
-	var full: bool = int(_warband.roster.count()) >= int(_warband.deployment_cap)
+	# The cap counts the oaths on the field, not the friends at the table: a
+	# joining player's own character never spends one of the town's places.
+	var sworn := int(_warband.band_field_count())
+	var full := int(_warband.field_room()) <= 0
 	# Every oath under the cap costs nothing, and a board that says "0 gold" makes
 	# the player look for a catch. It says FREE.
 	if cost <= 0:
 		_cost_label.text = "Next oath: free  /  %d of %d sworn" % [
-			int(_warband.roster.count()), int(_warband.deployment_cap)]
+			sworn, int(_warband.deployment_cap)]
 	else:
 		_cost_label.text = "Next oath: %d gold  /  %d of %d sworn" % [cost,
-			int(_warband.roster.count()), int(_warband.deployment_cap)]
-	hire_names.clear()
+			sworn, int(_warband.deployment_cap)]
+	hire_offers.clear()
 	for index in _hire_rows.size():
 		var row: Dictionary = _hire_rows[index]
-		var candidate := offered[index] if index < offered.size() else ""
-		(row["name"] as Label).text = candidate
+		var offer: Dictionary = offered[index] if index < offered.size() else {}
+		(row["name"] as Label).text = str(offer.get("name", ""))
+		var detail: Label = row["detail"]
+		detail.text = _hire_detail(offer)
+		detail.visible = not offer.is_empty()
+		var kit: Label = row["kit"]
+		kit.text = _hire_kit(offer)
+		kit.visible = not kit.text.is_empty()
 		var button: Button = row["button"]
-		button.text = "HIRE  FREE" if cost <= 0 else "HIRE  %d" % cost
+		var price := int(offer.get("price", cost))
+		button.text = "HIRE  FREE" if price <= 0 else "HIRE  %d" % price
 		# The cap is not a disabled button: pressing it must report the refusal
-		# the vendor returns, so the player learns why the board is empty.
-		button.disabled = candidate.is_empty()
-		button.tooltip_text = ("The warband already fields %d." % int(_warband.deployment_cap)) if full else ""
-		hire_names.append(candidate)
+		# the warband returns, so the player learns why the board is empty.
+		button.disabled = offer.is_empty()
+		button.tooltip_text = ("The warband already fields %d." % int(_warband.deployment_cap)) \
+			if full else str(offer.get("body", ""))
+		hire_offers.append(offer)
 
-## Three names nobody in the warband already carries. The candidate list itself
-## is `WarbandVendor.NAMES`; only the "already sworn" filter lives here, because
-## the vendor can only hand out one name at a time.
-func _fresh_names(count: int) -> Array[String]:
-	var used: Dictionary = {}
-	if _warband != null:
-		for merc in _warband.roster.records():
-			used[str(merc.get("name", "")).to_lower()] = true
-	var out: Array[String] = []
-	for candidate in Vendor.NAMES:
-		if out.size() >= count:
-			break
-		if used.has(candidate.to_lower()):
-			continue
-		out.append(candidate)
-	return out
+## One board row's first line: the trade and the hands it is sold holding.
+func _hire_detail(offer: Dictionary) -> String:
+	if offer.is_empty():
+		return ""
+	return " · ".join([str(offer.get("archetype_label", "")),
+		str(offer.get("hands", ""))].filter(
+			func(part: String) -> bool: return not part.is_empty()))
+
+## The second line: the armour set and the one skill the card names.
+func _hire_kit(offer: Dictionary) -> String:
+	if offer.is_empty():
+		return ""
+	var armor := str(offer.get("armor_set", ""))
+	return " · ".join([armor.capitalize(), str(offer.get("skill_name", ""))].filter(
+		func(part: String) -> bool: return not part.is_empty()))
 
 func _on_hire(index: int) -> void:
 	if _warband == null:
 		return
-	var candidate := hire_names[index] if index < hire_names.size() else ""
-	var result: Dictionary = _warband.hire(candidate)
+	var offer: Dictionary = hire_offers[index] if index < hire_offers.size() else {}
+	var result: Dictionary = _warband.hire(offer)
 	set_status(str(result.get("message", "")))
 	refresh()
 

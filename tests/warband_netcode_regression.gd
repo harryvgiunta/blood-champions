@@ -286,7 +286,9 @@ func clock_checks() -> void:
 	clock.advance(STEP)
 	check(clock.newest_tick() == 103, "the clock keeps the newest snapshot tick")
 	var render := clock.render_tick()
-	check(render >= 95 and render <= 103,
+	# The playout starts one configured delay behind the first packet and eases
+	# toward the newest one; it must never sit on the newest itself.
+	check(render < clock.newest_tick() and render >= clock.newest_tick() - 12,
 		"the render tick trails the newest sample (%d)" % render)
 
 

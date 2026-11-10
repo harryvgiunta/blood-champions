@@ -1,0 +1,124 @@
+{
+ "generator": "tools/prepare_reward_cards.py",
+ "builder": "python tools/build_reward_cards.py",
+ "blender": "5.1.2",
+ "seed": 7301,
+ "license": "CC BY-NC-SA 4.0 (LICENSE.md section 3); original renders",
+ "conventions": {
+  "frames": "9-slice; patch margin 34 px, edge strips averaged for stretching",
+  "sigils": "RGBA on transparency, drawn on the card's field",
+  "plaques": "RGBA on transparency, drawn as a world billboard"
+ },
+ "frame_margin": 34,
+ "rarities": [
+  "common",
+  "epic",
+  "greed",
+  "legendary",
+  "neutral"
+ ],
+ "families": [
+  "shot",
+  "hand",
+  "ability",
+  "perk",
+  "relic"
+ ],
+ "frames": {
+  "common": {
+   "idle": {
+    "file": "frame_common.png",
+    "sha256": "4e01cd1263f99a937b625fc2aeac2bf187bb3c36e42045b80ceee2f70b6e4d78"
+   },
+   "lit": {
+    "file": "frame_common_lit.png",
+    "sha256": "ec809e99b44275b368c66b548b09a752818ef18d1c71397f28b0981ae74a3759"
+   }
+  },
+  "epic": {
+   "idle": {
+    "file": "frame_epic.png",
+    "sha256": "581834f0f2322c545af05810f95573a05d2aa745497698d3b61c1847ed1e80c4"
+   },
+   "lit": {
+    "file": "frame_epic_lit.png",
+    "sha256": "c1cacc71b0f19d6e984df662a6fcac5faff4a2c1f79c577bd11e426ce32b485a"
+   }
+  },
+  "legendary": {
+   "idle": {
+    "file": "frame_legendary.png",
+    "sha256": "22db26e8e65a5905b2f0c88c39b9ba8f8b1559cb3ee8db7f5dc1da1e74d7c6ec"
+   },
+   "lit": {
+    "file": "frame_legendary_lit.png",
+    "sha256": "e62cb64f95d824accc6b06b9b53236bb8015991e1812c718d6c99641a0ac428f"
+   }
+  },
+  "greed": {
+   "idle": {
+    "file": "frame_greed.png",
+    "sha256": "91fb214d6ffc15816a00dbda0c74016b9b6ccc4b61af5cc874c6b47d5f1db2f6"
+   },
+   "lit": {
+    "file": "frame_greed_lit.png",
+    "sha256": "30770fa5434cd6f7d88ace785fc1ab3783b69e1abec4d29d15deb1b529fbfada"
+   }
+  },
+  "neutral": {
+   "idle": {
+    "file": "frame_neutral.png",
+    "sha256": "6b299606bf19be7db805d58fe3c2e4bde3747dd19d25d5e593f2b742d098271d"
+   },
+   "lit": {
+    "file": "frame_neutral_lit.png",
+    "sha256": "ef0be39e2fa85286ed280c41f9cd59ef4d0598408e4c3f2f1bcb0b3256f0eecb"
+   }
+  }
+ },
+ "sigils": {
+  "shot": {
+   "file": "sigil_shot.png",
+   "sha256": "cd98a88489905f2853f2d2acf27f9c9d1f227c8b233c7df83235e42fefbc0723"
+  },
+  "hand": {
+   "file": "sigil_hand.png",
+   "sha256": "00853fb6736e30c848f53a925581fdd6a3daada7b48a397fef17c1abd06536a3"
+  },
+  "ability": {
+   "file": "sigil_ability.png",
+   "sha256": "712e3c25fdb1d3b8a625ccf31e5d2c18717ff7c4dedf5709efb2e690535361f6"
+  },
+  "perk": {
+   "file": "sigil_perk.png",
+   "sha256": "078e70e64522c24c01b0fd97a2af7aff38f31e8373067a25d3a187335211cf06"
+  },
+  "relic": {
+   "file": "sigil_relic.png",
+   "sha256": "cf1c40b3c219486f77feea429fff2c4bde669da3ed6e7ec7eba54e8d244f4790"
+  }
+ },
+ "plaques": {
+  "common": {
+   "file": "plaque_common.png",
+   "sha256": "ce98a246bc2160857139a3fb3a1b4ce513c195a2525f67874184c19032f61e85"
+  },
+  "epic": {
+   "file": "plaque_epic.png",
+   "sha256": "d90640e7d12f8c4b07714ca25bcee869d5a4171c9468e42d19974f567ae03d8b"
+  },
+  "legendary": {
+   "file": "plaque_legendary.png",
+   "sha256": "afa4aa15830b1eec48e78cf0427a71218ee997b14b94473ba183851562b8811d"
+  },
+  "greed": {
+   "file": "plaque_greed.png",
+   "sha256": "044092cc5c7ce828ee10ba242b54e500963307e306ab4dca0515882bb0e09823"
+  },
+  "neutral": {
+   "file": "plaque_neutral.png",
+   "sha256": "25613434f74e7d24c14900b2d32efd0e9074451cf6ef952bc751a5af39544a26"
+  }
+ },
+ "build_seconds": 34.6
+}

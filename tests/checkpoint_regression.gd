@@ -4,9 +4,9 @@ extends SceneTree
 ## The warband save is now also a bookmark. Standing anywhere out on the road
 ## writes `trail_start` at the soul's own feet; the town square writes `town`. The
 ## bookmark rides in the same file as the roster, stash and essence, so a load is
-## one truthful picture, and it must survive a save/load round trip, reject a
-## hand-edited record rather than half-read it, and never appear in a file written
-## before checkpoints existed.
+## one truthful picture, and it must survive a save/load round trip, refuse a file
+## that changed outside the game outright (`SaveFile`'s MAC) rather than half-read
+## it, and never appear in a file written before checkpoints existed.
 ##
 ## This drives the real world twice: once opening on a trail bookmark (the party
 ## stands in a ring on the bookmark with the squad walking and the bookmark itself
@@ -16,11 +16,13 @@ extends SceneTree
 ## checkpoint with no living body refuses to be loaded at all.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const SaveFileScript = preload("res://scripts/save_file.gd")
 const WorldScene := "res://scenes/warband_world.tscn"
 const TEST_SAVE := "user://checkpoint_player.json"
 const WARBAND_SAVE := "user://checkpoint_warband.json"
 const OLD_SAVE := "user://checkpoint_v3.json"
 const BAD_SAVE := "user://checkpoint_bad.json"
+const TAMPERED_SAVE := "user://checkpoint_tampered.json"
 const SLOT_ROOT := "user://checkpoint_saves"
 
 var state
@@ -65,7 +67,7 @@ func _remove_tree(path: String) -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 func run() -> void:
-	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE]:
+	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE, TAMPERED_SAVE]:
 		_remove(path)
 	state = root.get_node("PlayerState")
 	warband = root.get_node("Warband")
@@ -79,6 +81,7 @@ func run() -> void:
 
 	check_persistence()
 	check_sanitising()
+	check_tamper()
 	check_restore()
 	await check_world_resume()
 	check_wipe_door()
@@ -94,7 +97,7 @@ func _finish() -> void:
 	await process_frame
 	flow.active = false
 	flow.world_start = "town"
-	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE]:
+	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE, TAMPERED_SAVE]:
 		_remove(path)
 	_remove_tree(SLOT_ROOT)
 	print("CHECKPOINT_REGRESSION checks=", checks, " failures=", failures)
@@ -115,16 +118,17 @@ func check_persistence() -> void:
 	_seed_warband()
 	check(not warband.has_checkpoint(), "a fresh warband has no checkpoint")
 	warband.save_checkpoint("trail_start", "trail", Vector3(4.5, 0.25, -90.0), "ON THE ROAD")
-	var file := FileAccess.open(WARBAND_SAVE, FileAccess.READ)
-	check(file != null, "the checkpoint writes a save file")
-	if file == null:
+	# The file is a sealed container, not JSON: nothing a cheater would open reads
+	# the roster, and the checkpoint rides inside the same envelope as the rest.
+	var opened: Dictionary = SaveFileScript.inspect(WARBAND_SAVE)
+	check(bool(opened.get("ok", false)), "the checkpoint writes a save file")
+	if not bool(opened.get("ok", false)):
 		return
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
-	file.close()
-	check(parsed is Dictionary, "the checkpoint save is JSON")
-	if not (parsed is Dictionary):
-		return
-	var data: Dictionary = parsed
+	check(str(opened.get("format", "")) == SaveFileScript.SEALED,
+		"and it is sealed, not JSON (%s)" % str(opened.get("format", "")))
+	check(not FileAccess.get_file_as_string(WARBAND_SAVE).contains("mercenaries"),
+		"whose roster keys are not readable in the bytes on disk")
+	var data: Dictionary = opened.get("data", {})
 	check(data.get("checkpoint", {}) is Dictionary, "the file carries a checkpoint block")
 	var stored: Dictionary = warband.sanitise_checkpoint(data.get("checkpoint", {}))
 	check(stored.get("id", "") == "trail_start", "the bookmark names the tutorial's end")
@@ -146,9 +150,7 @@ func check_persistence() -> void:
 	var old: Dictionary = warband.to_dict()
 	old["version"] = 3
 	old.erase("checkpoint")
-	var old_file := FileAccess.open(OLD_SAVE, FileAccess.WRITE)
-	old_file.store_string(JSON.stringify(old))
-	old_file.close()
+	check(SaveFileScript.write(OLD_SAVE, old), "a v3 body is written for the old-save path")
 	warband.save_path = OLD_SAVE
 	check(warband.load_state(), "a v3 save loads")
 	check(not warband.has_checkpoint(), "a v3 save carries no bookmark")
@@ -174,18 +176,56 @@ func check_sanitising() -> void:
 	check(good.get("id", "") == "town" and good.get("area", "") == "town", "a clean record is accepted")
 	check(warband.checkpoint_vector(good) == Vector3(1, 2, 3), "and reads back as a point")
 
-	# A hand-edited file is normalised on load rather than poisoning the session.
+	# A save that carries a garbage bookmark - a build that wrote one, or a payload
+	# a tool re-sealed with the game's own keys - is normalised on load rather than
+	# poisoning the session.
 	var bad: Dictionary = warband.to_dict()
 	bad["checkpoint"] = {"id": "x", "area": "everywhere", "position": "here"}
-	var bad_file := FileAccess.open(BAD_SAVE, FileAccess.WRITE)
-	bad_file.store_string(JSON.stringify(bad))
-	bad_file.close()
+	check(SaveFileScript.write(BAD_SAVE, bad), "a save with a garbage bookmark is written")
 	var previous_path: String = warband.save_path
 	warband.save_path = BAD_SAVE
 	check(warband.load_state(), "a file with a garbage bookmark still loads")
 	check(not warband.has_checkpoint(), "and drops the garbage")
 	warband.save_path = previous_path
 	warband.load_state()
+
+## The container's own check, and the whole point of the tag: a save whose bytes
+## changed after the game wrote it is refused **whole**. A purse, a key count or a
+## roster rewritten by a tool is not loaded "as far as it parses" - it is not
+## loaded at all, and the live warband is left exactly as it was.
+func check_tamper() -> void:
+	_seed_warband()
+	var before: int = warband.roster.count()
+	var source := FileAccess.open(WARBAND_SAVE, FileAccess.READ)
+	check(source != null, "the sealed save opens for the tamper check")
+	if source == null:
+		return
+	var raw := source.get_buffer(source.get_length())
+	source.close()
+	# One bit, inside the ciphertext: the frame is still well formed, so only the
+	# MAC can catch it.
+	var at := SaveFileScript.HEADER + SaveFileScript.NONCE_BYTES \
+		+ SaveFileScript.SIZE_BYTES + 8
+	raw[at] = raw[at] ^ 0x01
+	var out := FileAccess.open(TAMPERED_SAVE, FileAccess.WRITE)
+	check(out != null, "the edited copy is written")
+	if out == null:
+		return
+	out.store_buffer(raw)
+	out.close()
+	var problem := str(SaveFileScript.inspect(TAMPERED_SAVE).get("problem", ""))
+	check(problem == "tampered", "the container names the edit (%s)" % problem)
+	var previous: String = warband.save_path
+	warband.save_path = TAMPERED_SAVE
+	check(not warband.load_state(), "an edited save does not load")
+	check(warband.roster.count() == before,
+		"and the live warband is not half-replaced (%d)" % warband.roster.count())
+	warband.save_path = previous
+	check(warband.load_state(), "the untouched save still loads")
+	# The checks after this one restore from the trail bookmark, so hand it back
+	# exactly as `check_persistence` left it.
+	warband.save_checkpoint("trail_start", "trail", Vector3(4.5, 0.25, -90.0), "ON THE ROAD")
+	check(warband.checkpoint_id() == "trail_start", "and the trail bookmark is back")
 
 # --- the restore door ------------------------------------------------------
 
@@ -242,9 +282,12 @@ func check_world_resume() -> void:
 	check(game.squad.following, "the squad walks with the soul")
 	var anchor: Vector3 = warband.checkpoint_position()
 	for body in game.bodies:
-		check(is_instance_valid(body) and body.global_position.distance_to(anchor) < 8.0,
-			"a resumed body stands on the bookmark (%.1f m)" % (
-				body.global_position.distance_to(anchor) if is_instance_valid(body) else -1.0))
+		# A bookmark is a place on the ground: the world re-grounds the point it
+		# holds, so the body stands at the record's x/z and the terrain's height.
+		var flat := Vector2(body.global_position.x - anchor.x,
+			body.global_position.z - anchor.z).length() if is_instance_valid(body) else -1.0
+		check(is_instance_valid(body) and flat < 8.0,
+			"a resumed body stands on the bookmark (%.1f m)" % flat)
 	check(warband.checkpoint_id() == "trail_start", "the resumed trail does not rewrite its own bookmark")
 
 	# Walking into the square advances the bookmark to the town.

@@ -22,7 +22,7 @@ const Combat = preload("res://scripts/combat.gd")
 
 const RANGED := "ranged"
 const MELEE := "melee"
-const STARTER_RANGED := "bow_twig"
+const STARTER_RANGED := "bow_long"
 const STARTER_MELEE := "hatchet_makeshift"
 
 const RARITY_COMMON := "common"
@@ -35,13 +35,27 @@ const RARITY_LEGENDARY := "legendary"
 ## a piece whose whole purpose is a firing profile should be read in one place.
 const AUTHORED := {
 	STARTER_RANGED: {
-		"slot": RANGED, "item_kind": "bow", "item_index": 3, "archetype": "starter_bow",
+		# The war bow, free to every body that steps onto an island: the heaviest
+		# shaft in the armory on the slowest draw. `damage_mult` and `proc` are the
+		# longbow's own derived row, spelled out because a starter is authored.
+		"slot": RANGED, "item_kind": "bow", "item_index": 2, "archetype": "starter_bow",
+		"damage_mult": 1.36, "attack_mult": 1.0, "proc": 1.2, "pierce": 0,
+		"spread": 0.0, "projectile": "arrow", "homing": 0.0, "ricochet": 0,
+		"knockback": 1.0, "gore": 1.0, "throw_charges": 0, "throw_regen": 0.0,
+		"rarity": RARITY_EPIC, "unlock_cost": 0,
+		"description": "The bow a prisoner walks out of the wood with. A three-second " +
+"draw, the hardest shaft in the armory, and a 1.2x proc coefficient.",
+	},
+	# The sapling the warband used to wake with is the rack's cheapest bow now. It
+	# keeps the numbers it was fielded with while it was a starter.
+	"bow_twig": {
+		"slot": RANGED, "item_kind": "bow", "item_index": 3, "archetype": "twig_bow",
 		"damage_mult": 1.0, "attack_mult": 1.0, "proc": 1.0, "pierce": 0,
 		"spread": 0.0, "projectile": "arrow", "homing": 0.0, "ricochet": 0,
 		"knockback": 1.0, "gore": 1.0, "throw_charges": 0, "throw_regen": 0.0,
-		"rarity": RARITY_COMMON, "unlock_cost": 0,
-		"description": "The bow a prisoner whittles on the walk out. One shaft, " +
-"a clean line, and a 1.0x proc coefficient.",
+		"rarity": RARITY_COMMON, "unlock_cost": 2,
+		"description": "A green sapling and a length of cord. One shaft, a clean " +
+"line, and a 1.0x proc coefficient.",
 	},
 	STARTER_MELEE: {
 		"slot": MELEE, "item_kind": "sword", "item_index": 5, "archetype": "hatchet",
@@ -209,6 +223,61 @@ static func ids_for_slot(slot: String) -> Array[String]:
 		if cost_a == cost_b:
 			return a < b
 		return cost_a < cost_b)
+	return out
+
+
+## The two weapons a body's kit carries into a run, read straight off the
+## inventory: each weapon set offers its main hand, or its off hand when the main
+## is bare, and this registry's own slot decides which piece is the ranged hand.
+## There is no ledger and no default pair behind it - a body whose kit holds
+## nothing carries nothing - so the town's worn kit and the island's hands cannot
+## disagree. Answers `{ranged, melee}`, an item id per hand and "" for a bare one.
+static func hand_pair(roster, merc_id: int) -> Dictionary:
+	var out := {"ranged": "", "melee": ""}
+	if roster == null or merc_id <= 0:
+		return out
+	var sets: Array = []
+	for index in 2:
+		var pair: Dictionary = roster.weapon_set_pair(merc_id, index)
+		var carried: Array[String] = []
+		for slot in ["main", "off"]:
+			var id := str(pair.get(slot, ""))
+			if not id.is_empty() and has(id):
+				carried.append(id)
+		sets.append(carried)
+	var used: Dictionary = {}
+	# Each hand takes its own class from its own set first, so a kit with a bow in
+	# set 2 and a blade in set 1 still reads right.
+	for slot in ["ranged", "melee"]:
+		var order: Array = [0, 1] if slot == "ranged" else [1, 0]
+		for index in order:
+			var carried: Array = sets[index]
+			for position in carried.size():
+				var key := "%d:%d" % [index, position]
+				if used.has(key) or slot_of(str(carried[position])) != slot:
+					continue
+				out[slot] = str(carried[position])
+				used[key] = true
+				break
+			if not str(out[slot]).is_empty():
+				break
+	# A kit that does not fill both classes still carries what it has: the spare
+	# piece takes the empty hand rather than vanishing from the run.
+	for slot in ["ranged", "melee"]:
+		if not str(out[slot]).is_empty():
+			continue
+		var order: Array = [0, 1] if slot == "ranged" else [1, 0]
+		for index in order:
+			var carried: Array = sets[index]
+			for position in carried.size():
+				var key := "%d:%d" % [index, position]
+				if used.has(key):
+					continue
+				out[slot] = str(carried[position])
+				used[key] = true
+				break
+			if not str(out[slot]).is_empty():
+				break
 	return out
 
 

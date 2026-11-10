@@ -7,7 +7,7 @@ extends RefCounted
 ##   active    the skills a body fires from the hotbar (`ability_rules.gd`):
 ##             Barrage, Fireball, Dash, the shields, the wards, and the free
 ##             family starters (Snap Shot, Quick Cut, Heavy Swing, Quick Stab,
-##             Shield Shove, Focus, Charge). 35 rows.
+##             Shield Shove, Focus, Charge). 36 rows.
 ##   upgrade   the run's ability-upgrade rows (`mod_catalog.gd`, family
 ##             `ability`): the throw/roll/guard/parry verb upgrades plus the
 ##             weapon-family rows (Spiral Shot, Whirlwind, Guardian's Instinct...).
@@ -26,7 +26,7 @@ const KIND_ACTIVE := "active"
 const KIND_UPGRADE := "upgrade"
 
 
-## The 35 skills the Ability Book lists, in catalog order.
+## The 36 skills the Ability Book lists, in catalog order.
 static func active_entries() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for id in AbilityRules.catalog_ids():

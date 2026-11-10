@@ -139,27 +139,43 @@ func check_stash() -> void:
 
 	var merc_id: int = game.paperdoll.selected_merc
 	var worn_main := str(warband.roster.equipped_of(merc_id).get("main", ""))
-	# A free one-hander in the pool: pressing its row is the paperdoll's own path
-	# into `Warband.equip_merc`, so this measures the panel and not the roster.
-	var picked := -1
-	for index in game.paperdoll.stash_rows.size():
-		var row: Dictionary = game.paperdoll.stash_rows[index]
-		if int(row.get("pooled", 0)) <= 0:
-			continue
-		var item_id := str(row["item_id"])
-		if item_id == worn_main:
+	# The town hands over no spares any more, so the piece this check presses is
+	# one it puts in the pool itself: a free one-hander, offered by the gear page's
+	# own slot menu and worn through `Warband.equip_merc`. This measures the panel
+	# and not the roster - and it also proves the square starts with an empty
+	# stash, which is the rule the list of seeds used to break.
+	check(warband.stash.pooled_total() == 0,
+		"the town stocks no spares: a fresh stash is empty (%d pieces)"
+		% warband.stash.pooled_total())
+	# Seven worn rows and not one of them a neck or a ring: the page draws the
+	# vellum from the slot vocabulary, so this is the panel's own count.
+	var slot_ids: Array = []
+	for row in game.paperdoll.slot_rows.values():
+		slot_ids.append(str((row as Dictionary)["id"]))
+	check(slot_ids.size() == 7, "the paperdoll draws seven worn slots, got %s" % str(slot_ids))
+	for gone in ["neck", "ring1", "ring2"]:
+		check(not slot_ids.has(gone), "the page has no %s slot" % gone)
+	warband.stash.add("sword_short", 1)
+	game.paperdoll.refresh()
+	await process_frame
+	game.paperdoll.open_page("gear")
+	game.paperdoll._on_slot_pressed("main")
+	var swap_id := ""
+	var swap_button: Button = null
+	for child in game.paperdoll._menu_rows.get_children():
+		var item_id := str(child.get_meta("item_id", ""))
+		if item_id.is_empty() or item_id == worn_main:
 			continue
 		if str(State.ITEMS.get(item_id, {}).get("category", "")) == "1h":
-			picked = index
+			swap_id = item_id
+			swap_button = child
 			break
-	check(picked >= 0, "a free one-hander waits in the collective stash")
-	if picked < 0:
+	check(swap_button != null, "a free one-hander waits in the collective stash")
+	if swap_button == null:
 		return
-	var row: Dictionary = game.paperdoll.stash_rows[picked]
-	var swap_id := str(row["item_id"])
 	var swap_pool: int = warband.stash.pooled_count(swap_id)
 	var worn_pool: int = warband.stash.pooled_count(worn_main)
-	(row["button"] as Button).pressed.emit()
+	swap_button.pressed.emit()
 	var now_main := str(warband.roster.equipped_of(merc_id).get("main", ""))
 	check(now_main == swap_id, "the paperdoll wears the stashed piece (%s)" % now_main)
 	check(warband.stash.pooled_count(swap_id) == swap_pool - 1,

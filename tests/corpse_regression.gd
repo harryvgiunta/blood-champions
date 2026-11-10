@@ -282,9 +282,9 @@ func run() -> void:
 		var body = ForestMob.new()
 		body.mob_id = species
 		rest.append([species, body, Vector3(-24.0, 0.12, 22.0 + 3.0 * index)])
-	var watcher = CageWatcher.new()
-	watcher.mob_id = "hollow_warden"
-	rest.append(["cage_watcher", watcher, Vector3(-24.0, 0.12, 28.0)])
+	var watcher_body = CageWatcher.new()
+	watcher_body.mob_id = "hollow_warden"
+	rest.append(["cage_watcher", watcher_body, Vector3(-24.0, 0.12, 28.0)])
 	for entry in rest:
 		entry[1].position = entry[2]
 		fixture.add_child(entry[1])

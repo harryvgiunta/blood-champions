@@ -13,9 +13,11 @@ const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
-## Bow damage at full draw, in catalog `index` order: the three forged bows
-## and the twig bow a warband starts with.
-const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0, 45.0, 16.0]
+## Bow damage at full draw, in catalog `index` order: the three forged bows, the
+## twig bow and the arena's two crossbows. The scout bow is priced for a rapid
+## hand - almost a recurve's shaft (35) on a nock clock (`Archer.BOW_DATA`'s
+## `recover_seconds`) that runs at half a war bow's.
+const BASE_DAMAGE := [35.0, 38.0, 50.0, 10.0, 45.0, 16.0]
 ## How far from a body an aim point may lie and still be a place that body could
 ## be shooting at. The longest ray either mode casts is 120 m, so this is the
 ## sanity bound with room to spare, not a reach.
@@ -121,6 +123,9 @@ const MAX_CLEAVE_CONTACTS := 128
 const ONE_HAND_MAX_VICTIMS := 1
 const TWO_HAND_MAX_VICTIMS := 2
 const ABILITY_MAX_VICTIMS := 10
+## How far off a beam's own axis a body's aim point may sit and still count as
+## inside it: a body is a capsule, so the line's width is its radius plus this.
+const BEAM_BODY_MARGIN := 0.5
 ## A capped cut strikes bodies in the order it crosses them; bodies inside one
 ## degree of the sweep are crossed together, and the nearest of them goes first.
 const CLEAVE_ORDER_STEP := deg_to_rad(1.0)
@@ -382,17 +387,36 @@ func release_throw() -> void:
 	update_aim()
 	rig.release_throw()
 
-func start_block(forward: Vector3) -> bool:
+## A guard is a stance of the arm, not of the feet: it goes up standing, walking,
+## running, sliding or in the air, and a leap carries the one already raised. What
+## refuses it outright is the body rather than the ground - a stagger, a flip
+## already under way, no blade in hand - and the pool is the caller's rule
+## (`WarbandBody.set_block` and the squad ask it before they get here).
+##
+## `interrupt` is the player's own press, and it is the reflex action: the guard
+## takes the hands from whatever they were doing - a cut's recovery, a throw, a
+## skill, a drink - and the cut it interrupts deals no further blows. Left false
+## (the squad's and the clone's own decisions) a busy hand refuses the guard, so an
+## AI never cancels its own swing to answer one.
+func start_block(forward: Vector3, interrupt: bool = false) -> bool:
 	if blocking:
 		if rig.weapon == "dual":
 			stop_block()
 			return false
 		return true
-	if not grounded or stagger_time > 0.0 or rig.weapon not in ["sword","dagger"] \
-			or rig.phase != "READY" or rig._roll_progress >= 0.0:
+	if stagger_time > 0.0 or rig.weapon not in ["sword","dagger"] \
+			or rig._roll_progress >= 0.0:
 		return false
 	if is_instance_valid(actor) and actor.get("alive") == false:
 		return false
+	if interrupt and (rig.phase != "READY" or rig.is_melee() or rig.is_ability() \
+			or rig.is_consuming()):
+		# The player asked to defend while the arms were busy. `stop` ends the cut,
+		# the skill, the draw and the drink and clears the swing states with it, so
+		# the interrupted cut never delivers the blows it was still owed; the
+		# recovery tail of a released throw is closed by the rig.
+		stop()
+		rig.finish_recovery()
 	blocking = true
 	block_time = 0.0
 	_set_block_normal(forward)
@@ -407,14 +431,12 @@ func stop_block() -> void:
 	if is_instance_valid(rig):
 		rig.set_blocking(false)
 
-## A guard that actually took a blow is spent, not merely dented: the arm comes
-## down and the fighter has to raise it again. A guard is a press, not a state,
-## so a button held down holds nothing - the player clicks again for the next
-## blow, and a body in a crowd cannot lean on one raised guard. A parry (the
-## timed deflection inside `PARRY_WINDOW`) is not a block and keeps its guard,
-## and a shield is never spent at all: `WarbandBody.receive_melee` leaves it up
-## and charges the pool for the blow. This is the drop only - who it applies to
-## is the caller's rule.
+## Take a held guard down whatever the player is holding. No landed blow does
+## this: a raised blade meets every blow it can pay for, so the crowd is stood off
+## by the guard the player is holding rather than by clicking the button again
+## between blows. The callers are the forced drops - an empty pool
+## (`WarbandBody._resolve_motion`) and a stagger (`stagger`) - and who else it
+## applies to is the caller's rule.
 func break_guard() -> void:
 	stop_block()
 
@@ -621,14 +643,14 @@ func stop(keep_swings: bool = false) -> void:
 	_sync_display_progress()
 
 ## A leap takes the feet, not the hands. A body that jumps with a bow drawn, a
-## blade raised to throw, a cut already in the air or a skill under way keeps it:
-## the draw, its charge, the shafts it has pinched on the string, the swing's own
-## clock and the authored skill all survive the take-off. Only the guard and the
-## cover latch end with the leap, because neither can be held in the air. A
-## release that was waiting on a cover exposure is loosed on the plain line
-## instead of being swallowed by the jump, so jumping never costs a shot.
+## blade raised to throw, a cut already in the air, a skill under way or its guard
+## up keeps it: the draw, its charge, the shafts it has pinched on the string, the
+## swing's own clock, the authored skill and the raised blade all survive the
+## take-off. Only the cover latch ends with the leap - the lean belonged to a wall
+## that is no longer there. A release that was waiting on a cover exposure is
+## loosed on the plain line instead of being swallowed by the jump, so jumping
+## never costs a shot.
 func stop_for_airborne() -> void:
-	stop_block()
 	var held: bool = rig.phase in ["DRAWING","HOLDING","T_DRAW","T_HOLD"]
 	var pending_throw := _pending_throw
 	var pending := _release_pending
@@ -1229,6 +1251,81 @@ func ability_blast(centre: Vector3, radius: float, damage: float,
 	return struck
 
 
+## One tick of a held beam: every body whose aim point lies inside the line
+## `origin -> origin + direction * length`, within `radius` of it, takes this
+## tick's share of the damage. The road is the item skills' own contact path, so
+## a guard can turn it, armour reduces it and blood and damage numbers read it
+## like any other blow; sight is required, so a body behind a wall is not in the
+## beam however the line is drawn. Called every tick by `fire_ray.gd`, with a
+## fresh victim set each time: the same body is meant to burn for the whole cast.
+func ability_beam(origin: Vector3, direction: Vector3, length: float,
+		radius: float, damage: float, stagger_seconds: float = 0.0) -> int:
+	if not damage_enabled or not is_instance_valid(actor) \
+			or not is_instance_valid(rig) or actor.get("alive") == false:
+		return 0
+	if length <= 0.01 or radius <= 0.0:
+		return 0
+	var line := direction.normalized()
+	if line.length_squared() < 0.5:
+		return 0
+	var space := actor.get_world_3d().direct_space_state
+	if space == null:
+		return 0
+	var excluded: Array[RID] = [actor.get_rid()]
+	var centre := origin + line * (length * 0.5)
+	_blast_shape.radius = length * 0.5 + radius + BEAM_BODY_MARGIN
+	_blast_query.transform = Transform3D(Basis.IDENTITY, centre)
+	_blast_query.collision_mask = target_mask
+	_blast_query.exclude = excluded
+	var hits := space.intersect_shape(_blast_query, MAX_CLEAVE_CONTACTS)
+	if hits.size() > ABILITY_MAX_VICTIMS:
+		# A line that catches more than one skill beat may strike still spends
+		# its cap on the bodies nearest the caster.
+		hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return _distance_from(a, origin) < _distance_from(b, origin))
+	var victims: Dictionary = {}
+	var state := {
+		"active": true, "blocked": false, "weapon": rig.weapon,
+		"damage": damage, "diagonal": false, "reach": length,
+		"victims": victims, "exclude": excluded, "variant": "ability",
+		"force_origin": origin,
+	}
+	var struck := 0
+	for hit in hits:
+		if struck >= ABILITY_MAX_VICTIMS:
+			break
+		var unit = hit.get("collider")
+		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
+				or unit.get("alive") != true or unit.get_instance_id() == actor.get_instance_id():
+			continue
+		if victims.has(unit.get_instance_id()):
+			continue
+		var contact: Vector3 = unit.get_aim_position() if unit.has_method("get_aim_position") \
+			else unit.global_position
+		var along := (contact - origin).dot(line)
+		if along < -radius or along > length + radius:
+			continue
+		var closest := origin + line * clampf(along, 0.0, length)
+		if contact.distance_to(closest) > radius + BEAM_BODY_MARGIN:
+			continue
+		# Scenery only: a body on the far side of a wall is not in the beam.
+		_melee_sight_query.from = origin
+		_melee_sight_query.to = contact
+		_melee_sight_query.exclude = excluded
+		if not space.intersect_ray(_melee_sight_query).is_empty():
+			continue
+		state["force_origin"] = closest
+		var outcome := _resolve_melee_contact("right",state,unit,contact,false)
+		struck += 1
+		if outcome == DEFENSE_NONE and stagger_seconds > 0.0:
+			var target_combat = unit.get("combat")
+			if is_instance_valid(target_combat) and target_combat.has_method("stagger"):
+				target_combat.stagger(stagger_seconds)
+			elif unit.has_method("stagger"):
+				unit.stagger(stagger_seconds)
+	return struck
+
+
 ## The same radial beat against the bodies as their owner last saw them.
 func _lag_area_strike(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float, arc_degrees: float, ring: bool,
@@ -1509,6 +1606,8 @@ func _can_release_from_cover() -> bool:
 func get_attack_interval(hand: String = "") -> float:
 	if rig.weapon in ["sword","dagger","dual"] and rig.phase not in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
 		return rig.melee_seconds(hand)
+	if rig.weapon == "bow":
+		return Archer.RELEASE_SECONDS + rig.recover_seconds()
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:

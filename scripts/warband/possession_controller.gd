@@ -94,6 +94,11 @@ var transfer_requester: Callable = Callable()
 ## authority, so a guest's TAB or revive reaches the host's warband through the
 ## same intent channel as its swing.
 var world_action: Callable = Callable()
+## Answers "may this soul move into the next free body when its own dies?", as
+## `(peer_id, merc_id) -> bool`. Empty is the campaign's own rule: any free body
+## will do. A shared co-op warband sets it, so a guest's soul never inherits one
+## of the host's recruits.
+var cycle_on_death: Callable = Callable()
 ## The body the local soul's eye rides while it has none of its own: another
 ## soul's body. When every living body is taken, the soul that was inside the
 ## last one first keeps it, and everybody else watches it through this.
@@ -221,6 +226,9 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	actor.combat.damage_enabled = authoritative
 	actor.configure(0, label, spawn)
 	_apply_gear(actor, merc_id)
+	# A bought recruit's kit is locked and its death is final; both are the record's
+	# answer, read once here so the body, the wire and a guest's copy agree.
+	actor.permadeath = _warband.roster.is_recruit(merc_id)
 	actor.killed.connect(_on_actor_killed.bind(actor))
 	# The router is what decides who may be entered, so it has to hear about the
 	# lie as well as the death: a body on its chest is still the soul's (it crawls
@@ -271,12 +279,7 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 		"bow": bow_index,
 		"sword": sword_index,
 		"armor": ArmorData.pack(pieces),
-		"trinkets": {
-			"neck": str(gear.get("neck", "")),
-			"ring1": str(gear.get("ring1", "")),
-			"ring2": str(gear.get("ring2", "")),
-			"off": off_id,
-		},
+		"trinkets": {"off": off_id},
 	}
 	# The player's equipped ability list rides beside the kit. The rig filters it
 	# by the hands it is about to hold, so a stowed weapon's skills wait.
@@ -609,6 +612,16 @@ func _eject(peer_id: int, reason: String) -> void:
 	# A guest does not move souls: the host ejects every one of them and its
 	# ownership map says where each landed - or that one is watching now.
 	if not _authoritative:
+		return
+	# The scene's session decides whether a soul whose body died may take the next
+	# free one. A co-op host keeps a guest in the character it swore for them: the
+	# soul waits for that body instead of walking into a mercenary the recruiter
+	# hired for the host.
+	if cycle_on_death.is_valid() \
+			and not bool(cycle_on_death.call(peer_id, int(_last_merc.get(peer_id, -1)))):
+		if _warband != null:
+			_warband.souls.release_peer(peer_id, reason)
+		_release_peer(peer_id, reason)
 		return
 	var moved := cycle(peer_id, 1)
 	var body := body_for_peer(peer_id)
@@ -955,13 +968,14 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 				return false
 			return actor.try_consume(str(value))
 		"ability":
-			# The warband binds plain 1/2/3 to the actor's three skill slots. The
-			# runner owns eligibility, stamina and cooldown; the controller only
-			# keeps the wire honest about which slot was asked for.
+			# The warband binds the number row to the body's skill keys. The runner
+			# owns eligibility, stamina and cooldown; the controller only keeps the
+			# wire honest about which key was asked for, and a key the body's bar
+			# does not have is refused by the runner's own grant row.
 			if typeof(value) != TYPE_INT:
 				return false
 			var index := int(value)
-			if index < 0 or index >= AbilityRules.SLOT_COUNT:
+			if index < 0 or index >= AbilityRules.MAX_SLOT_COUNT:
 				return false
 			var outcome: Variant = actor.try_ability(index)
 			return typeof(outcome) == TYPE_DICTIONARY and bool(outcome.get("ok", false))
@@ -1136,17 +1150,18 @@ func _hotkey(keycode: int) -> bool:
 
 ## The possessed body's bindings. What a body carries is its gear, so there is no
 ## key that puts a weapon or a shield in its hands: `refresh_gear()` dresses the
-## body from its roster record and the paperdoll moves pieces in and out. The
-## number row is the ten-slot hotbar, so the consumables moved to Z and V.
+## body from its roster record and the character screen moves pieces in and out.
+## The number row is the skill bar (1..5, and 6..0 for the keys a run upgrade
+## buys); medicine has its own two keys, Z and V.
 func _command(event: InputEventKey) -> bool:
 	var actor := active_actor
 	var yaw := camera_rig.yaw if camera_rig != null else 0.0
 	var right := Vector3(cos(yaw), 0, -sin(yaw))
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
 	match event.keycode:
-		# The ten item skills sit on the number row, plain: a warband player
-		# never needs Shift to reach a skill, and Shift+1 is the same press.
-		# The tenth slot is the 0 key, labelled 10 on the hotbar.
+		# Every key of the bar sits on the number row, plain: a warband player
+		# never needs Shift to reach a skill. Key 0 is the tenth, so a bar bought
+		# to its ceiling still reaches every slot without a modifier.
 		KEY_1:
 			_act("ability", 0)
 		KEY_2:

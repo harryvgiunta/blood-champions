@@ -38,7 +38,7 @@ const MOD_CHANCE_STEP := 0.01
 const MOD_CHANCE_CAP := 0.35
 ## The second is rolled from level one at 25% and two points a level; the third
 ## only from level ten, on its own roll. Both are capped so a piece never
-## becomes a pedestal row.
+## becomes a card of its own.
 const SECOND_BASE := 0.25
 const SECOND_STEP := 0.02
 const THIRD_BASE := 0.08
@@ -52,12 +52,14 @@ const STEEL := Color(0.74, 0.78, 0.80)
 ## One piece, rolled for a body wearing `worn` (`{slot: set index}`). `exclude`
 ## is the rows already at their ceiling or already bought this chest, and
 ## `carrier_tags` is the hand families the body can use, so a piece never welds a
-## staff row onto a bow.
+## staff row onto a bow. `floor_add` raises the set floor by that many quality
+## ranks: a legendary Gear chest pays a set nobody would find on this island.
 static func roll(rng: RandomNumberGenerator, level: int, island: int,
 		worn: Dictionary = {}, luck: int = 0, exclude: Array = [],
-		carrier_tags: Array = []) -> Dictionary:
+		carrier_tags: Array = [], floor_add: int = 0) -> Dictionary:
 	var slot := str(ArmorData.SLOTS[rng.randi_range(0, ArmorData.SLOTS.size() - 1)])
-	var set_index := roll_set(rng, island, int(worn.get(slot, ArmorData.NONE)))
+	var set_index := roll_set(rng, island, int(worn.get(slot, ArmorData.NONE)),
+		floor_add)
 	var item_id := ArmorData.item_id(set_index, slot)
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	var piece := {
@@ -70,9 +72,8 @@ static func roll(rng: RandomNumberGenerator, level: int, island: int,
 	}
 	if rng.randf() >= mod_chance(level):
 		return piece
-	piece["mods"] = Mods.draft(rng, modifier_count(rng, level),
-		Mods.surface_tiers(Mods.SURFACE_PEDESTAL, island), luck, island,
-		exclude, carrier_tags)
+	piece["mods"] = Mods.roll_shelf(rng, Mods.SOURCE_WELD, island,
+		modifier_count(rng, level), luck, exclude, carrier_tags)
 	return piece
 
 
@@ -80,8 +81,9 @@ static func roll(rng: RandomNumberGenerator, level: int, island: int,
 ## filtered to the sets that clear the floor and rolled by weight; an island
 ## whose whole row sits below the floor answers the floor itself, so a plate body
 ## is handed plate rather than a downgrade it would have to refuse.
-static func roll_set(rng: RandomNumberGenerator, island: int, floor_set: int) -> int:
-	var floor_rank := quality_rank(floor_set)
+static func roll_set(rng: RandomNumberGenerator, island: int, floor_set: int,
+		floor_add: int = 0) -> int:
+	var floor_rank := quality_rank(floor_set) + maxi(0, floor_add)
 	var row: Dictionary = LADDER[clampi(island, 1, LADDER.size()) - 1]
 	var weights: Dictionary = {}
 	var total := 0.0
@@ -91,7 +93,10 @@ static func roll_set(rng: RandomNumberGenerator, island: int, floor_set: int) ->
 		weights[int(key)] = float(row[key])
 		total += float(row[key])
 	if weights.is_empty():
-		return clampi(floor_set, 0, ArmorData.SET_IDS.size() - 1)
+		# An island whose whole row sits under the floor answers the floor itself,
+		# which is the one piece this island could never have paid.
+		return _set_at_rank(floor_rank) if floor_add > 0 \
+			else clampi(floor_set, 0, ArmorData.SET_IDS.size() - 1)
 	var pick := rng.randf_range(0.0, total)
 	var walked := 0.0
 	var last := 0
@@ -101,6 +106,18 @@ static func roll_set(rng: RandomNumberGenerator, island: int, floor_set: int) ->
 		if pick <= walked:
 			return last
 	return last
+
+
+## The set that sits at one quality rank, clamped to the best there is.
+static func _set_at_rank(rank: int) -> int:
+	var best := 0
+	var best_rank := -2
+	for index in ArmorData.SET_IDS.size():
+		var held := quality_rank(index)
+		if held <= rank and held > best_rank:
+			best = index
+			best_rank = held
+	return best
 
 
 ## How good a set is, worst to best. `ArmorData.NONE` and anything outside the

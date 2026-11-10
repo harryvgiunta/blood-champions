@@ -56,6 +56,29 @@ const KEY_DISPOSITION := "disposition"
 ## does not erase the place the player gave it. `[]` means the bar is the starter
 ## spell, the consumables and nothing else.
 const KEY_HOTBAR := "hotbar_order"
+## True when this body is a *player's own character* rather than a name the
+## recruiter swore: a co-op guest brings one, and it is the soul's body for as
+## long as the two play together. The band's deployment cap counts the oaths the
+## recruiter takes, not the friends at the table, so a player never spends one.
+const KEY_PLAYER := "player"
+## True when this body was bought off a run's recruiter board rather than sworn at
+## the town's desk. A recruit is a hire with three differences, and all three are
+## this flag read once: it does not spend the band's deployment cap (it is bought
+## *for* a run, not oath'd into the warband), its kit is locked (`Warband.
+## is_gear_locked` - the gear it was sworn in is the gear it fights with), and a
+## lethal blow destroys it outright instead of laying it on its chest
+## (`WarbandBody.permadeath`). None of them is a new death path: the reap that
+## already erases a dead name is the whole of the permanence.
+const KEY_RECRUIT := "recruit"
+## True when the kit the desk sold the body in is the kit it fights in for good:
+## no paperdoll press, no pickup, no re-kit, no weapon-set swap, no new skill on
+## the bar and no new stance (`Warband.is_gear_locked` and the verbs it guards).
+## The town's desk and a run's board sell bodies the same way, so this is the
+## *kit's* rule and not the run's: `KEY_RECRUIT` above is what a run's board adds
+## - no deployment place and a blow that ends the body outright. A town oath is
+## gear-locked and otherwise the band's: it spends a place on the field and a
+## lethal blow puts it on its chest like any other name.
+const KEY_KIT_LOCK := "kit_locked"
 ## The slots the player filled by hand, in the order they did it. A pinned slot
 ## is the player's: the loot arming never fills it, the band's arming pass never
 ## takes the piece back, and no hand-off reaches into it for another body. The
@@ -92,6 +115,9 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_DISPOSITION: Contracts.DEFAULT_DISPOSITION,
 		KEY_HOTBAR: [],
 		KEY_MANUAL: [],
+		KEY_PLAYER: false,
+		KEY_RECRUIT: false,
+		KEY_KIT_LOCK: false,
 	}
 
 
@@ -110,23 +136,33 @@ static func sanitise_manual(value: Variant) -> Array[String]:
 	return out
 
 
-## A saved equipped list in the shape the game writes: real catalog ability ids,
-## each once, automatic ids and consumables dropped, capped at the seven keys a
-## body has beside the starter spell. A record from before the ability book has
-## none, and the bar falls back to the starter, which is what `[]` means.
+## A saved bar in the shape the game writes: one entry per key, real catalog
+## ability ids with the automatic ids and consumables dropped, capped at the ten
+## keys a bar can ever have. An empty entry is a key the player left empty and is
+## kept, because the *position* is the assignment: dropping a hole would slide
+## every skill behind it onto a key nobody chose. Trailing empties are not
+## written. A record from before the ability screen has none, and the bar falls
+## back to the starter, which is what `[]` means.
 static func sanitise_hotbar(value: Variant) -> Array[String]:
 	var out: Array[String] = []
 	if not value is Array:
 		return out
 	for item in value:
-		var id := str(item) if typeof(item) == TYPE_STRING else ""
-		if id.is_empty() or out.has(id) or AbilityRules.is_automatic(id):
+		if out.size() >= AbilityRules.MAX_SLOT_COUNT:
+			break
+		if typeof(item) != TYPE_STRING:
+			out.append("")
 			continue
-		if AbilityRules.by_id(id).is_empty():
+		var id := str(item)
+		if id.is_empty():
+			out.append("")
+			continue
+		if out.has(id) or AbilityRules.is_automatic(id) \
+				or AbilityRules.by_id(id).is_empty():
 			continue
 		out.append(id)
-		if out.size() >= AbilityRules.MAX_EQUIPPED:
-			break
+	while not out.is_empty() and str(out[out.size() - 1]).is_empty():
+		out.resize(out.size() - 1)
 	return out
 
 # --- reading ---------------------------------------------------------------
@@ -222,6 +258,42 @@ func disposition_of(merc_id: int) -> String:
 	return Contracts.disposition_id(find(merc_id).get(KEY_DISPOSITION, ""))
 
 ## Every living or downed mercenary with a place on the field, in roster order.
+## Whether this body belongs to a joining player's own character rather than to
+## the band the recruiter swears.
+func is_player(merc_id: int) -> bool:
+	return bool(find(merc_id).get(KEY_PLAYER, false))
+
+## Mark a body as a player's own (or hand it back to the band).
+func set_player(merc_id: int, own: bool) -> void:
+	var record := find(merc_id)
+	if not record.is_empty():
+		record[KEY_PLAYER] = own
+
+## Whether this body was bought off a run's recruiter board (`KEY_RECRUIT`).
+func is_recruit(merc_id: int) -> bool:
+	return bool(find(merc_id).get(KEY_RECRUIT, false))
+
+## Mark a body as a bought recruit (or hand it back to the band's oaths).
+func set_recruit(merc_id: int, bought: bool) -> void:
+	var record := find(merc_id)
+	if not record.is_empty():
+		record[KEY_RECRUIT] = bought
+
+## Whether this body's kit was bought whole with it and never changes
+## (`KEY_KIT_LOCK`). A recruit answers true without the flag: every body a run's
+## board ever sold was sworn in the kit on its card, so a record that predates the
+## flag says so by being a recruit.
+func is_kit_locked(merc_id: int) -> bool:
+	var record := find(merc_id)
+	return bool(record.get(KEY_KIT_LOCK, false)) or bool(record.get(KEY_RECRUIT, false))
+
+## Lock a bought body's kit (or hand it back to the arming).
+func set_kit_locked(merc_id: int, locked: bool) -> void:
+	var record := find(merc_id)
+	if not record.is_empty():
+		record[KEY_KIT_LOCK] = locked
+
+
 func field_ids() -> Array[int]:
 	var out: Array[int] = []
 	for merc in _mercs:
@@ -295,6 +367,12 @@ func add_record(record: Dictionary) -> int:
 	# A record written before the player could set a piece by hand carries no
 	# pins: every slot is the arming's, as it always was.
 	copy[KEY_MANUAL] = sanitise_manual(copy.get(KEY_MANUAL, []))
+	# A save written before co-op existed holds no player bodies: every name in it
+	# is the warband's own.
+	copy[KEY_PLAYER] = bool(copy.get(KEY_PLAYER, false))
+	# A body bought whole is locked whole. A file written before the kit lock
+	# existed carries recruits only, and a recruit was always locked.
+	copy[KEY_KIT_LOCK] = bool(copy.get(KEY_KIT_LOCK, copy.get(KEY_RECRUIT, false)))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
 	if saved_gear is Dictionary:
@@ -504,7 +582,7 @@ func restore_all() -> void:
 
 # --- gear ------------------------------------------------------------------
 
-## The ten slots of a mercenary's kit. The two hand slots are the pair the body
+## The seven slots of a mercenary's kit. The two hand slots are the pair the body
 ## is actually holding - the active weapon set - so every reader of `main`/`off`
 ## (the rig, the drop, the paperdoll, the squad's own hands) sees the set the
 ## player is wearing without knowing sets exist.
@@ -549,13 +627,25 @@ func swap_weapon_set(merc_id: int) -> Dictionary:
 	if not _pair_bound(sets[active]) and not _pair_bound(sets[target]):
 		return {"ok": false, "message": "Both weapon sets are empty. Put a weapon in a hand first.",
 			"set": active}
-	_store_hands(record)
-	record[KEY_ACTIVE_SET] = target
-	_sync_hands(record)
+	select_weapon_set(merc_id, target)
 	return {"ok": true, "set": target,
 		"message": "Set %d ready: %s." % [target + 1, hand_pair_label(
 			str((sets[target] as Dictionary).get("main", "")),
 			str((sets[target] as Dictionary).get("off", "")))]}
+
+## Put one named weapon set in the hands. `TAB` always reaches *the other* set
+## and refuses while both are empty; a caller that knows which pair it means - the
+## rack binding a hand - names it instead. The set being left keeps its pair.
+func select_weapon_set(merc_id: int, index: int) -> bool:
+	var record := find(merc_id)
+	if record.is_empty() or index < 0 or index >= WEAPON_SET_COUNT:
+		return false
+	if int(record.get(KEY_ACTIVE_SET, 0)) == index:
+		return true
+	_store_hands(record)
+	record[KEY_ACTIVE_SET] = index
+	_sync_hands(record)
+	return true
 
 ## Every piece a mercenary is actually wearing, as `{slot, item, set}` records.
 ## Armour and trinkets answer `set` -1; both weapon sets are listed, because the
@@ -723,7 +813,7 @@ func _store_hands(record: Dictionary) -> void:
 	sets[active] = {"main": str((gear as Dictionary).get("main", "")),
 		"off": str((gear as Dictionary).get("off", ""))}
 
-## Equip a catalog item into one of the ten slots. Legality is `EquipmentRules`',
+## Equip a catalog item into one of the seven slots. Legality is `EquipmentRules`',
 ## plus the two-handed rule (a 2H/bow/staff clears the off hand). Returns
 ## `{ok, message, displaced}` where `displaced` maps slot -> item id that came
 ## off the body into the shared stash.

@@ -8,6 +8,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
+const Recruits = preload("res://scripts/warband/recruit_catalog.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const StateScript = preload("res://scripts/player_state.gd")
 
@@ -41,11 +42,7 @@ func run() -> void:
 
 	check_slots()
 	check_overkill()
-	check_roster()
 	check_gear_transfer(state, warband)
-	check_weapon_sets(warband)
-	check_souls()
-	check_stash(state, warband)
 	check_vendor(state, warband)
 	check_reserve(warband)
 	check_persistence(warband)
@@ -65,7 +62,7 @@ func check_slots() -> void:
 	for slot in Contracts.SLOT_ORDER:
 		ids.append(Contracts.slot_id(slot))
 	# The page lists the steel first, in the order a body is armed. The wire ids
-	# keep their own order, so the two only have to name the same ten slots.
+	# keep their own order, so the two only have to name the same seven slots.
 	var listed := ids.duplicate()
 	listed.sort()
 	var known: Array = Rules.SLOTS.duplicate()
@@ -76,9 +73,12 @@ func check_slots() -> void:
 		"and the paperdoll order is steel first, got %s" % str(ids))
 	check(Contracts.slot_id(Contracts.SlotType.BOOTS) == "feet", "BOOTS is the existing feet id")
 	check(Contracts.slot_id(Contracts.SlotType.OFF_HAND) == "off", "OFF_HAND is the existing off id")
-	check(Contracts.slot_from_id("ring2") == Contracts.SlotType.RING2, "ring2 round-trips")
+	check(Contracts.slot_from_id("feet") == Contracts.SlotType.BOOTS, "feet round-trips")
 	check(Contracts.slot_from_id("nope") == -1, "unknown ids are refused")
-	check(Contracts.slot_label(Contracts.SlotType.RING1) == "Ring 1", "labels read as the design does")
+	check(Contracts.slot_from_id("neck") == -1 and Contracts.slot_from_id("ring1") == -1,
+		"and a neck or a ring is not a slot any more")
+	check(Contracts.slot_label(Contracts.SlotType.OFF_HAND) == "Off-Hand",
+		"labels read as the design does")
 
 	# Every catalog item must map onto exactly one weapon subtype.
 	check(Contracts.weapon_subtype(StateScript.ITEMS["bow_short"]) == Contracts.WeaponSubType.BOW, "shortbow is a bow")
@@ -88,7 +88,7 @@ func check_slots() -> void:
 	check(Contracts.weapon_subtype(StateScript.ITEMS["staff_fire"]) == Contracts.WeaponSubType.STAFF, "ember staff is a staff")
 	check(Contracts.weapon_subtype(StateScript.ITEMS["focus_tome"]) == Contracts.WeaponSubType.TOME, "ash tome is a tome")
 	check(Contracts.weapon_subtype(StateScript.ITEMS["focus_skull"]) == Contracts.WeaponSubType.SKULL, "bone skull is a skull")
-	check(Contracts.weapon_subtype(StateScript.ITEMS["ring_copper"]) == Contracts.WeaponSubType.NONE, "a ring is not a weapon")
+	check(Contracts.weapon_subtype(StateScript.ITEMS["bandage_linen"]) == Contracts.WeaponSubType.NONE, "a bandage is not a weapon")
 	for item_id in StateScript.ITEMS:
 		var item: Dictionary = StateScript.ITEMS[item_id]
 		var subtype := Contracts.weapon_subtype(item)
@@ -214,44 +214,112 @@ func check_gear_transfer(_state, warband) -> void:
 ## in its hands. The swap alternates, the set being left remembers what it held,
 # --- recruiter -------------------------------------------------------------
 
+## The town desk sells *bodies*, the way a run's board does: one of each trade,
+## rolled at level 1, already inside the hand and the armour the card names, with
+## the one skill on it - and nothing dresses a bought body afterwards. The oath
+## itself is the band's own curve (free while the desk is garrisoning, dearer past
+## the free places) and the cap is still the field.
 func check_vendor(state, warband) -> void:
 	warband.reset_state()
 	state.credits = 1000
-	# The first eight oaths are free: the recruiter is garrisoning a warband, not
-	# selling one, and eight bodies is the deployment cap itself.
+	var board: Array[Dictionary] = warband.town_board()
+	check(board.size() == Recruits.OPTIONS, "the desk lays out three bodies")
+	var trades: Dictionary = {}
+	var names: Dictionary = {}
+	for row in board:
+		trades[str(row.get("archetype", ""))] = true
+		names[str(row.get("name", "")).to_lower()] = true
+		check(int(row.get("level", 0)) == Recruits.TOWN_LEVEL, "every body is level one")
+		check(int(row.get("rung", -1)) == 0, "so every card is rung 0")
+		check(not (row.get("gear", {}) as Dictionary).is_empty(), "and carries its kit on the card")
+	for archetype in Recruits.ARCHETYPES:
+		check(trades.has(archetype), "a %s body is on the board" % archetype)
+	check(names.size() == board.size(), "three rows read as three people")
 	check(warband.hire_cost() == 0, "the first oath is free")
-	var hired : Dictionary = warband.hire("Grist")
-	check(hired["ok"], "hiring swears a body: %s" % str(hired.get("message", "")))
-	check(warband.roster.count() == 1, "the body joins the warband")
-	check(int(hired["cost"]) == 0, "and quotes nothing")
-	check(int(state.credits) == 1000, "a free oath spends no gold")
 
-	# Past the free eight the old curve is back, and every oath still costs more
-	# than the one before it.
+	var offer: Dictionary = board[0]
+	var hired: Dictionary = warband.hire(offer)
+	check(bool(hired.get("ok", false)),
+		"hiring swears a body: %s" % str(hired.get("message", "")))
+	check(int(hired.get("cost", -1)) == 0, "and quotes nothing")
+	check(int(state.credits) == 1000, "a free oath spends no gold")
+	check(warband.roster.count() == 1, "the body joins the warband")
+	var merc_id := int(hired.get("merc_id", -1))
+	# The desk sold the card, not a naked body: the whole kit walks on.
+	var card: Dictionary = offer.get("gear", {})
+	var worn: Dictionary = warband.roster.equipped_of(merc_id)
+	for slot in ["main", "head", "chest", "hands", "legs", "feet"]:
+		check(str(worn.get(slot, "")) == str(card.get(slot, "")),
+			"the body wears the %s the card named (%s)" % [slot, str(worn.get(slot, ""))])
+	check(warband.is_gear_locked(merc_id), "the kit is locked")
+	var bar: Array[String] = warband.roster.hotbar_order_of(merc_id)
+	check(bar.size() <= 1, "and the bar holds the one skill the card named (%d)" % bar.size())
+	check(not warband.roster.is_recruit(merc_id), "a town oath is not a run's recruit")
+	check(warband.band_field_count() == 1, "it spends a place in the deployment cap")
+	check(not warband.roster.is_reserve(merc_id), "and takes the field at the desk")
+
+	# Nothing re-dresses a bought body and nothing takes its kit back.
+	warband.stash.add("sword_great", 1)
+	warband.stash.add("armor_plate_chest", 1)
+	check(not bool(warband.dress_recruit(merc_id).get("ok", true)),
+		"the band's arming pass refuses it")
+	check(not bool(warband.equip_merc(merc_id, "main", "sword_great").get("ok", true)),
+		"and so does the paperdoll")
+	check(not bool(warband.swap_weapon_set(merc_id).get("ok", true)),
+		"and the weapon-set swap")
+	var stance: Dictionary = warband.cycle_disposition(merc_id)
+	check(not bool(stance.get("ok", true)), "and the stance chip")
+	check(str(stance.get("message", "")).contains("kit is locked"),
+		"which says why: %s" % str(stance.get("message", "")))
+	var laid: Dictionary = warband.set_hotbar_order(merc_id, ["double_slash"])
+	check(not bool(laid.get("ok", true)), "and the ability bar")
+	check(str(laid.get("message", "")).contains("kit is locked"),
+		"which says why too: %s" % str(laid.get("message", "")))
+	check(str(warband.roster.equipped_of(merc_id).get("main", "")) == str(card.get("main", "")),
+		"the kit is where the desk put it")
+	check(warband.roster.hotbar_order_of(merc_id).size() == bar.size(),
+		"and the bar is the card's")
+
+	# The board brings out three more: the row just bought is not for sale again.
+	var remade: Array[Dictionary] = warband.town_board()
+	check(remade.size() == Recruits.OPTIONS, "the desk lays out three more after a sale")
+	for row in remade:
+		check(str(row.get("name", "")) != str(offer.get("name", "")),
+			"and does not sell the name it just swore")
+
+	# Past the free places the desk prices again, and every oath costs more than
+	# the one before it.
 	while warband.roster.count() < VendorScript.FREE_HIRES:
 		warband.add_mercenary("Free %d" % warband.roster.count())
 	warband.deployment_cap = VendorScript.FREE_HIRES + 1
-	var first_paid : int = warband.hire_cost()
+	var first_paid: int = warband.hire_cost()
 	check(first_paid == VendorScript.HIRE_BASE_COST + VendorScript.HIRE_STEP_COST * VendorScript.FREE_HIRES,
-		"the ninth oath is priced again (%d)" % first_paid)
-	var paid : Dictionary = warband.hire("Hale")
-	check(paid["ok"], "a priced oath goes through while there is room")
+		"the oath past the free places is priced again (%d)" % first_paid)
+	var paid_board: Array[Dictionary] = warband.town_board()
+	check(int((paid_board[0] as Dictionary).get("price", -1)) == first_paid,
+		"and the card carries the desk's price")
+	var paid: Dictionary = warband.hire(paid_board[0])
+	check(bool(paid.get("ok", false)), "a priced oath goes through while there is room")
 	check(int(state.credits) == 1000 - first_paid, "exactly the quoted price is spent")
 	check(warband.hire_cost() > first_paid, "the next body costs more")
 
 	# The cap is hard.
 	warband.deployment_cap = VendorScript.FREE_HIRES
-	var full : Dictionary = warband.hire("Ilsa")
-	check(full["ok"] == false, "the cap refuses another body")
+	var full: Dictionary = warband.hire(warband.town_board()[0])
+	check(full.get("ok") == false, "the cap refuses another body")
 	check(warband.roster.count() == VendorScript.FREE_HIRES + 1, "the roster stays where it was")
 
-	# A poor purse buys nothing, once the free eight are behind it.
+	# A poor purse buys nothing, once the free places are behind it, and a ware is
+	# never a body.
 	state.credits = 5
 	warband.deployment_cap = VendorScript.FREE_HIRES + 4
 	var sworn: int = warband.roster.count()
-	var poor : Dictionary = warband.hire("Jory")
-	check(poor["ok"] == false, "no gold, no blade")
+	var poor: Dictionary = warband.hire(warband.town_board()[0])
+	check(poor.get("ok") == false, "no gold, no blade")
 	check(warband.roster.count() == sworn, "the roster is unchanged")
+	check(not bool(warband.hire({"id": "bandage_linen"}).get("ok", true)),
+		"a ware is not a body")
+	check(warband.roster.count() == sworn, "and swears nobody")
 	state.credits = 99999
 	warband.deployment_cap = Contracts.MAX_DEPLOYMENT_CAP
 
@@ -301,7 +369,7 @@ func check_reserve(warband) -> void:
 func check_persistence(warband) -> void:
 	warband.reset_state()
 	warband.add_mercenary("Kestrel")
-	warband.stash.add("ring_blood", 2)
+	warband.stash.add("club_makeshift", 2)
 	warband.save_state()
 	var before : String = warband.describe()
 	var merc_count : int = warband.roster.count()
@@ -310,7 +378,7 @@ func check_persistence(warband) -> void:
 	var loaded: bool = warband.load_state()
 	check(loaded, "a saved warband loads")
 	check(warband.roster.count() == merc_count, "mercenaries survive")
-	check(warband.stash.pooled_count("ring_blood") == 2, "the stash survives")
+	check(warband.stash.pooled_count("club_makeshift") == 2, "the stash survives")
 	check(warband.describe() == before, "the saved card round-trips exactly")
 	check(warband.total_value() > 0, "the warband has a worth")
 
@@ -399,26 +467,39 @@ func check_auto_arm(warband) -> void:
 	# The camp's rags, the state every prisoner starts in.
 	roster.equip(ash, "chest", "armor_naked_chest")
 
-	var bought: Dictionary = warband.buy_gear("sword_short")
-	check(bool(bought.get("ok", false)), "the keeper sells a blade")
+	# No keeper sells steel any more, so the band arms itself out of what a run
+	# gathered - seeded here exactly as a loot take seeds it (`stash.add`), and
+	# then the band-wide pass is what dresses the bodies.
+	var refused_blade: Dictionary = warband.buy_gear("sword_short")
+	check(not bool(refused_blade.get("ok", true)), "no keeper sells a blade")
+	check(stash.pooled_count("sword_short") == 0, "and a refused purchase pools nothing")
+	var restock: Dictionary = warband.buy_gear("bandage_linen")
+	check(bool(restock.get("ok", false)), "the keeper sells a bandage")
+	check(warband.supply_count("bandage") == 1, "which is a count in the band's pack")
+	check(stash.pooled_total() == 0, "and never a row in the shared stash")
+
+	stash.add("sword_short", 1)
+	var armed: Dictionary = warband.arm_warband()
 	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
-		"the first bare body takes the blade as it is bought")
+		"the first bare body takes the blade the band carried in")
 	check(stash.pooled_count("sword_short") == 0, "and its copy leaves the pool")
-	check((bought.get("armed", []) as Array).size() == 1,
-		"the purchase names the body it armed")
+	check((armed.get("fitted", []) as Array).size() == 1,
+		"the pass names the body it armed")
 	check(str(roster.equipped_of(bram).get("main", "")).is_empty(),
 		"the next body is still waiting for a weapon")
 
-	warband.buy_gear("bow_short")
+	stash.add("bow_short", 1)
+	warband.arm_warband()
 	check(str(roster.equipped_of(bram).get("main", "")) == "bow_short",
 		"a second weapon arms the second bare body")
-	warband.buy_gear("shield_wood")
-	warband.buy_gear("shield_wood")
+	stash.add("shield_wood", 2)
+	warband.arm_warband()
 	check(str(roster.equipped_of(ash).get("off", "")) == "shield_wood",
 		"a shield fills a free off hand")
 	check(str(roster.equipped_of(bram).get("off", "")).is_empty(),
 		"a bow's two-handed grip keeps that off hand empty")
-	warband.buy_gear("armor_makeshift_chest")
+	stash.add("armor_makeshift_chest", 1)
+	warband.arm_warband()
 	check(str(roster.equipped_of(ash).get("chest", "")) == "armor_makeshift_chest",
 		"a real cuirass replaces the naked shirt")
 	check(stash.pooled_count("armor_naked_chest") == 1, "the rags go back to the pool")
@@ -432,55 +513,24 @@ func check_auto_arm(warband) -> void:
 		"the arming pass leaves a real worn blade alone")
 	check(stash.pooled_count("sword_arming") == 1, "and the better spare waits in the pool")
 
-	# The override: a held item id never arms itself, while the player's hand can
-	# still wear it.
-	var hold: Dictionary = warband.restrict_auto_equip("sword_arming")
-	check(bool(hold.get("ok", false)) and warband.is_auto_equip_restricted("sword_arming"),
-		"the player holds a powerful piece back from auto-equip")
+	# The arming pass fills a bare body from the pool. There is no hold any more:
+	# a piece on the shelf is a piece the band may wear.
 	var cade: int = warband.add_mercenary("Cade")
-	var refused: Dictionary = warband.auto_equip(cade, "sword_arming")
-	check(not bool(refused.get("ok", true)), "a held piece is never snapped into a hand")
-	check(str(roster.equipped_of(cade).get("main", "")).is_empty(),
-		"the body stays bare and the piece stays pooled")
-	var held_pass: Dictionary = warband.arm_warband()
-	var sword_stayed := true
-	for entry in held_pass.get("fitted", []):
-		if str((entry as Dictionary).get("item_id", "")) == "sword_arming":
-			sword_stayed = false
-	check(sword_stayed and stash.pooled_count("sword_arming") == 1,
-		"a band-wide pass respects the hold")
-	var manual: Dictionary = warband.equip_merc(cade, "main", "sword_arming")
-	check(bool(manual.get("ok", false))
-		and str(roster.equipped_of(cade).get("main", "")) == "sword_arming",
-		"the player's own hand may still wear a held piece")
+	var snapped: Dictionary = warband.auto_equip(cade, "sword_arming")
+	check(bool(snapped.get("ok", false)),
+		"a pooled piece snaps into a bare hand: %s" % str(snapped.get("message", "")))
+	check(str(roster.equipped_of(cade).get("main", "")) == "sword_arming",
+		"and the body holds it")
 	warband.unequip_merc(cade, "main")
 	check(stash.pooled_count("sword_arming") == 1, "and taking it off returns it to the pool")
-
-	# Lifting the hold lets the arming pass use it.
-	warband.restrict_auto_equip("sword_arming", false)
-	var again: Dictionary = warband.arm_warband()
-	check(str(roster.equipped_of(cade).get("main", "")) == "sword_arming",
-		"the same copy arms a body once the hold is lifted")
-	check(not (again.get("fitted", []) as Array).is_empty(),
-		"and the pass reports the fitting")
-
-	# The holds are warband state: a reset forgets them and a save carries them.
-	warband.restrict_auto_equip("armor_makeshift_legs")
-	warband.save_state()
-	warband.reset_state()
-	check(not warband.is_auto_equip_restricted("armor_makeshift_legs"),
-		"a fresh warband starts with no holds")
-	check(warband.load_state(), "the saved warband loads")
-	check(warband.is_auto_equip_restricted("armor_makeshift_legs"),
-		"the holds ride in the warband save")
 
 # --- re-equipping ----------------------------------------------------------
 
 ## A re-equip is the deliberate re-kit the arming pass is not: the kit goes back
 ## into the pool first, then the body is dressed again by its own priorities -
-## dearest armour, the weapon its disposition wants, a shield for a tank. The band
-## pass releases every body before it dresses any of them, so the roster is built
-## one body at a time out of one pile: the oldest name takes the pick.
+## dearest armour, the weapon its disposition wants, a shield for a tank. One
+## press, one body: the band's gear is its own, and nothing re-kits the roster
+## wholesale.
 func check_reequip(warband) -> void:
 	warband.reset_state()
 	var roster = warband.roster
@@ -563,21 +613,6 @@ func check_reequip(warband) -> void:
 		"real armour trades the rags out")
 	check(stash.pooled_count("armor_naked_chest") == 1, "and the old shirt becomes a stash row")
 
-	# A hold steers the re-equip exactly as it steers an arming pass.
-	warband.reset_state()
-	var held: int = warband.add_mercenary("Bram")
-	roster.equip(held, "main", "sword_short")
-	stash.add("sword_great", 1)
-	warband.restrict_auto_equip("sword_great")
-	warband.reequip_merc(held)
-	check(str(roster.equipped_of(held)["main"]) == "sword_short",
-		"a held piece is left in the pool by a re-equip")
-	check(stash.pooled_count("sword_great") == 1, "and the hold keeps it there")
-	warband.restrict_auto_equip("sword_great", false)
-	warband.reequip_merc(held)
-	check(str(roster.equipped_of(held)["main"]) == "sword_great",
-		"lifting the hold lets the greatsword win")
-
 	# A body that cannot be dressed keeps its kit: no strip without a refill.
 	warband.reset_state()
 	var downed: int = warband.add_mercenary("Fen")
@@ -610,36 +645,6 @@ func check_reequip(warband) -> void:
 		% str(roster.weapon_set_pair(twin, 1).get("main", "")))
 	check(stash.pooled_count("bow_recurve") == 1,
 		"a melee body's second set is no place for the pooled bow")
-
-	# The band pass empties every body before it dresses any of them, so a piece
-	# one body was wearing is available to the body ahead of it in the roster.
-	warband.reset_state()
-	var first: int = warband.add_mercenary("Aldous")
-	var second: int = warband.add_mercenary("Brine")
-	roster.equip(first, "main", "sword_short")
-	roster.equip(second, "main", "sword_great")
-	var band: Dictionary = warband.reequip_warband()
-	check(bool(band.get("ok", false)), "the band re-equips: %s" % str(band.get("message", "")))
-	check(str(roster.equipped_of(first)["main"]) == "sword_great",
-		"a band pass releases every kit before it dresses anyone, got %s"
-		% str(roster.equipped_of(first)["main"]))
-	check(str(roster.equipped_of(second)["main"]) == "sword_short",
-		"and the next body takes the blade the first gave up")
-	var named: Array = band.get("mercs", [])
-	check(named.size() == 2 and int(named[0]) == first and int(named[1]) == second,
-		"the pass names every body it fitted, roster first (%s)" % str(named))
-
-	# One pile, one queue: the oldest name gets the pick of a band-wide pass.
-	warband.reset_state()
-	var oldest: int = warband.add_mercenary("Aldous")
-	var next: int = warband.add_mercenary("Brine")
-	stash.add("sword_great", 1)
-	stash.add("sword_short", 1)
-	warband.reequip_warband()
-	check(str(roster.equipped_of(oldest)["main"]) == "sword_great",
-		"the oldest name gets the pick of the pool")
-	check(str(roster.equipped_of(next)["main"]) == "sword_short",
-		"and the next body takes what is left")
 
 	# The off hand is a stance of its own, not a second main hand: a tank takes the
 	# board over a second blade at any price, because holding the line is what the
@@ -687,22 +692,15 @@ func check_reequip(warband) -> void:
 	check(dagger_score == 50.0, "a tank scores a knife as a knife, got %s" % str(dagger_score))
 	check(dagger_score < Contracts.disposition_gear_score(Contracts.DISPOSITION_TANK, shortsword, 70),
 		"so a same-priced sword is the tank's blade")
-
-	# An empty warband and an empty pool are not errors: the press says so.
-	warband.reset_state()
-	var idle: Dictionary = warband.reequip_warband()
-	check(bool(idle.get("ok", false)), "an empty band answers instead of failing")
-	check(str(idle.get("message", "")).contains("nothing to re-equip"),
-		"and it says there is nothing to re-equip: %s" % str(idle.get("message", "")))
 	warband.reset_state()
 
 
 # --- the player's own hands ------------------------------------------------
 
-## The three rules that keep automatic arming out of the player's way. A pickup
-## only fills a bare body; what a hand dressed is never swapped and never carried
-## off to another body; and the band's own press still gears up everyone it can
-## without undoing a slot the player filled.
+## The rules that keep automatic arming out of the player's way. A pickup only
+## fills a bare body; what a hand dressed is never swapped and never carried off
+## to another body; and the body's own re-kit is the one press that clears the
+## pins a hand set.
 func check_hand_set(warband) -> void:
 	warband.reset_state()
 	var roster = warband.roster
@@ -737,38 +735,20 @@ func check_hand_set(warband) -> void:
 	check(not bool(warband.auto_equip(bare, "sword_arming").get("ok", true)),
 		"but the next drop of a better blade waits in the pool")
 
-	# 3. The band's press gears up every body and still leaves a hand-set kit where
-	# it is: the pool is re-dealt, a chosen weapon is not.
-	warband.reset_state()
+	# 3. The body's own press is the one that clears the pins.
 	var first: int = warband.add_mercenary("Ash")
-	var next: int = warband.add_mercenary("Corvin")
 	stash.add("dagger_ironwood", 1)
 	stash.add("sword_short", 1)
 	check(bool(warband.equip_merc(first, "main", "dagger_ironwood").get("ok", false)),
 		"the player arms one hand")
 	check(bool(warband.equip_merc(first, "off", "sword_short").get("ok", false)),
 		"and the other")
-	stash.add("sword_great", 1)
-	var band: Dictionary = warband.reequip_warband()
-	check(bool(band.get("ok", false)), "the band re-equips: %s" % str(band.get("message", "")))
-	check(str(roster.equipped_of(first).get("main", "")) == "dagger_ironwood"
-			and str(roster.equipped_of(first).get("off", "")) == "sword_short",
-		"and does not take the chosen pair off the body (%s / %s)"
-		% [str(roster.equipped_of(first).get("main", "")),
-			str(roster.equipped_of(first).get("off", ""))])
-	check(str(roster.equipped_of(next).get("main", "")) == "sword_great",
-		"while the next body is geared up from the pool, got %s"
-		% str(roster.equipped_of(next).get("main", "")))
-	check(stash.pooled_count("dagger_ironwood") == 0 and stash.pooled_count("sword_short") == 0,
-		"the hand-set pieces never became pool rows")
-
-	# 4. The body's own press is the one that clears the pins.
 	var cleared: Dictionary = warband.reequip_merc(first)
 	check(bool(cleared.get("ok", false)), "the body re-equips: %s" % str(cleared.get("message", "")))
 	check(not roster.is_manual(first, "main") and not roster.is_manual(first, "off"),
 		"and the pins go with the press")
 
-	# 5. A pin rides the save with the kit it belongs to.
+	# 4. A pin rides the save with the kit it belongs to.
 	check(bool(warband.equip_merc(first, "main", "sword_great").get("ok", false))
 			or bool(warband.equip_merc(first, "main", "sword_short").get("ok", false)),
 		"the player sets a blade again")

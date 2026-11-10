@@ -48,6 +48,10 @@ const Perf = preload("res://scripts/perf_probe.gd")
 ## The arena loop: the director that runs a wave campaign and the plate it reads.
 const RogueliteDirectorScript = preload("res://scripts/roguelite/run_director.gd")
 const RogueliteHudScript = preload("res://scripts/roguelite/roguelite_hud.gd")
+## The host's debug console (`F9`): the arena's switches, the three catalogues and
+## the way between floors. Built with the plate so the world can answer a press
+## before the first run.
+const AdminConsoleScript = preload("res://scripts/roguelite/admin_console.gd")
 ## The thin bars over a wave's wounded bodies: one canvas item for the whole
 ## island, drawn only for hostiles that have taken damage.
 const MobBarsScript = preload("res://scripts/roguelite/mob_health_bars.gd")
@@ -208,6 +212,7 @@ var loot_feed
 ## Start Run Portal opens a run.
 var roguelite
 var roguelite_hud
+var admin_console
 var mob_bars
 ## The three areas. Each is the same script its standalone preview uses.
 var wood
@@ -251,10 +256,6 @@ var _watched_body = null
 var _guest_revive := 0.0
 ## What the heightfield was baked to: `{triangles, cell, min, max}`.
 var _terrain: Dictionary = {}
-## Bodies currently wearing the arena's dress because they stand in the square.
-## The campaign's gear is restored the moment one walks out of the walls.
-var _town_dressed: Dictionary = {}
-var _roguelite_was_running := false
 ## Where the town square stands, worked out before the ground so its pad can be
 ## cut into the field.
 var _town_at := Vector3.ZERO
@@ -442,7 +443,6 @@ func _step_world(delta: float) -> void:
 	Perf.begin("world.books")
 	_sync_roster(delta)
 	_sync_field()
-	_sync_town_dress()
 	Perf.end()
 	Perf.begin("world.prompts")
 	_update_prompt()
@@ -460,6 +460,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:
+		KEY_F9:
+			# The host's console. It is a debug door, so it opens on every machine
+			# and refuses a guest's presses rather than hiding a window that would
+			# read only.
+			if admin_console != null:
+				admin_console.toggle()
+				get_viewport().set_input_as_handled()
 		KEY_O:
 			if screen.is_open():
 				screen.close()
@@ -478,6 +485,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.open(_soul_merc())
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
+			if admin_console != null and admin_console.close_top():
+				get_viewport().set_input_as_handled()
+				return
 			if roguelite_hud != null and roguelite_hud.close_top():
 				get_viewport().set_input_as_handled()
 				return
@@ -625,7 +635,8 @@ func _build_ui() -> void:
 	paperdoll.configure(warband)
 	paperdoll.run_armour = Callable(self, "_run_armour_for")
 	paperdoll.hands_for = Callable(self, "_hands_for")
-	paperdoll.swap_hands = Callable(self, "_swap_run_hands")
+	paperdoll.slot_bonus = Callable(self, "_run_bar_keys_for")
+	paperdoll.run_upgrades = Callable(self, "_run_upgrades_for")
 	paperdoll.changed.connect(_on_paperdoll_changed)
 	tips = TipsScript.new()
 	tips.name = "Tips"
@@ -735,6 +746,10 @@ func _build_roguelite() -> void:
 	roguelite_hud.name = "RoguelitePlate"
 	add_child(roguelite_hud)
 	roguelite_hud.setup(self, roguelite)
+	admin_console = AdminConsoleScript.new()
+	admin_console.name = "AdminConsole"
+	add_child(admin_console)
+	admin_console.setup(self, roguelite)
 	mob_bars = MobBarsScript.new()
 	mob_bars.name = "HostileBars"
 	add_child(mob_bars)
@@ -768,7 +783,6 @@ func _seat_warband() -> void:
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
 		town.place_warband(bodies)
 	_adopt_bodies()
-	_sync_town_dress()
 	_on_possession_changed(controller.local_peer_id, _soul_merc())
 
 
@@ -818,13 +832,16 @@ func _checkpoint_ground() -> Vector3:
 
 
 ## A ring of standable posts around a point, so a resumed squad does not spawn
-## inside one body's capsule.
+## inside one body's capsule. `at` is already on the ground: `Terrain.grounded()`
+## *adds* the y it is handed, so a grounded point passed straight back in seats the
+## body a second terrain-height underground, where it falls out of the world. The
+## ring is read for its x and z and grounded once.
 func _spawn_ring(at: Vector3, count: int) -> Array[Vector3]:
 	var posts: Array[Vector3] = []
 	for index in count:
 		var angle := TAU * float(index) / float(maxi(1, count))
-		posts.append(TerrainScript.grounded(
-			at + Vector3(cos(angle) * 1.8, 0.0, sin(angle) * 1.8)))
+		var point := at + Vector3(cos(angle) * 1.8, 0.0, sin(angle) * 1.8)
+		posts.append(TerrainScript.grounded(Vector3(point.x, 0.0, point.z)))
 	if posts.is_empty():
 		posts.append(at)
 	return posts
@@ -912,6 +929,29 @@ func _seat_loose_soul() -> void:
 ## while the party is in the square, and beside the party anywhere else.
 var _muster_at: Dictionary = {}
 
+## Stand up every roster name that has no body yet, now rather than on the next
+## physics frame. The run's recruiter buys a body between two frames and wants its
+## runtime bound in the same press; everything else in the game can wait the frame
+## `_sync_field` would have taken anyway.
+func stand_up_field() -> void:
+	_sync_field()
+
+
+## Take a body off the field for good: a dismissed recruit's body leaves the tree,
+## so the controller forgets it (`_on_body_exiting`), the squad stops driving it
+## and no frame finds a name it cannot dress. True when a body was standing.
+func dismiss_body(merc_id: int) -> bool:
+	if controller == null:
+		return false
+	var actor = controller.body_of(merc_id)
+	if actor == null or not is_instance_valid(actor):
+		return false
+	bodies.erase(actor)
+	_squad_moved()
+	(actor as Node).queue_free()
+	return true
+
+
 func _sync_field() -> void:
 	if warband == null or controller == null:
 		return
@@ -941,6 +981,21 @@ func _sync_field() -> void:
 		var link := get_node_or_null("/root/GameFlow/WarbandLink")
 		if link != null and link.has_method("readopt_ownership"):
 			link.readopt_ownership()
+
+
+## The host's half of a friend joining: a character of their own, sworn into the
+## band under the name they joined with, and answered with its id. A name that has
+## played this campaign before gets back the body it left, so a rejoin does not
+## multiply the party.
+##
+## This is the rule that keeps the town's hires and the table's players apart: the
+## mercenaries the recruiter swears stay the host's AI allies, and a joining soul
+## never steps into one. The body stands up on the next frame (`_sync_field`), and
+## the session seats the soul in it once the router knows it.
+func enlist_player(peer_id: int, player_name: String) -> int:
+	if _client or warband == null or peer_id <= 0:
+		return -1
+	return warband.enlist_player(player_name)
 
 
 ## The reserve takes the field only in the town: while the party stands in the
@@ -1034,6 +1089,7 @@ func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: fl
 	arrow.shooter = actor
 	arrow.hit_mask = PROJECTILE_HIT_MASK
 	arrow.authoritative_damage = true
+	arrow.heal_on_hit = rig.bow_heal_on_hit()
 	_arm_projectile(arrow, actor)
 	add_child(arrow)
 	arrow.launch(origin, direction, speed, damage, _projectile_exclude(actor),
@@ -1252,11 +1308,12 @@ func _sync_watch() -> void:
 		hud.set_watching("")
 		return
 	var merc_name: String = warband.roster.name_of(controller.merc_of(watched))
-	hud.set_watching(merc_name, _soul_name(controller.watched_peer()))
+	hud.set_watching(merc_name, soul_name(controller.watched_peer()))
 	hud.set_status("No body is free. You watch %s until one is." % merc_name, 4.0)
 
-## The player name a peer joined with, or "".
-func _soul_name(peer_id: int) -> String:
+## The player name a peer joined with, or "". The run's chest plates read the
+## same name, so the box a soul walks up to says what the party calls them.
+func soul_name(peer_id: int) -> String:
 	if peer_id <= 0 or flow == null or flow.session == null:
 		return ""
 	return str(flow.session.name_of(peer_id))
@@ -1412,37 +1469,30 @@ func _run_armour_for(merc_id: int) -> Dictionary:
 
 
 ## The pair a body's hands are holding, for the paperdoll's two hand rows and its
-## stage: the run's own pair while a run owns the body, and the rack's piece while
-## the body stands inside the walls still holding the piece the square dressed it
-## in. `{}` when the wardrobe's kit is what it holds - the road, the Hollow, or a
-## square body the page has since dressed by hand. The page reads this over the
-## roster for the same reason it reads the run's armour: a hand the player fights
-## with is not the wardrobe's.
+## stage: while a run owns the body, the two pieces the island carries - read out
+## of the same inventory the page lists. `{}` outside a run, where the roster's
+## worn rows are the whole truth.
 func _hands_for(merc_id: int) -> Dictionary:
 	if roguelite == null:
 		return {}
-	var hands: Dictionary = roguelite.hands_for_merc(merc_id)
-	if not hands.is_empty():
-		return hands
-	if controller == null or town == null:
-		return {}
-	var body = controller.body_of(merc_id)
-	if body == null or not is_instance_valid(body) or not town.in_square(body):
-		return {}
-	var square: Dictionary = roguelite.square_hands()
-	if square.is_empty() or not roguelite.body_holds(body, str(square.get("main", ""))):
-		return {}
-	return square
+	return roguelite.hands_for_merc(merc_id)
 
 
-## The page's TAB, on the body it is showing: inside a run the pair's other hand
-## comes up exactly as the world's own TAB brings it. Returns `{ok, message}`.
-func _swap_run_hands(merc_id: int) -> Dictionary:
-	var run = roguelite.run_of_merc(merc_id) if roguelite != null else null
-	if run == null or run.body == null or not is_instance_valid(run.body):
-		return {"ok": false, "message": "The hands are not the run's to swap."}
-	roguelite.swap_hands(run.body)
-	return {"ok": true, "message": "The other hand comes up."}
+## The skill keys a live run's own upgrades have bought the body, for the
+## character screen's bar: 0 in the town and after the run, where the bar is the
+## five keys the game ships with.
+func _run_bar_keys_for(merc_id: int) -> int:
+	if roguelite == null or not roguelite.is_running():
+		return 0
+	return roguelite.bar_keys_for_merc(merc_id)
+
+
+## The upgrades a live run has taken on the body, for the SKILLS page's review
+## list. Empty outside a run, which is what the page says when no island is live.
+func _run_upgrades_for(merc_id: int) -> Array:
+	if roguelite == null or not roguelite.is_running():
+		return []
+	return roguelite.upgrades_for_merc(merc_id)
 
 
 # --- the fight the world keeps ---------------------------------------------
@@ -1635,11 +1685,23 @@ func _on_enemy_attack(attacker, amount: float, victim) -> void:
 ## not booked into the stash, it is lying beside the body, where a soul can take
 ## it back with `K` or an ally can pick it up - and where it stays if nobody does.
 func drop_merc_gear(actor, merc_id: int) -> void:
-	# The host strips the hands and announces the drop; a guest's roster hears it
+	_drop_from(actor, merc_id, GearDropScript.strip_hands(warband, merc_id))
+
+
+## A hireling's death: everything the roster had him dressed in, in the dirt where
+## he fell. His kit is half of what the band spent on him, so `Warband.reap_dead`
+## finds an empty record and nothing walks back into the shared stash. Beside a
+## corpse it is recoverable by the same `K` press anything else on the floor is -
+## a death moves the kit out of the pool of the band's worth and onto the ground.
+func drop_merc_kit(actor, merc_id: int) -> void:
+	_drop_from(actor, merc_id, GearDropScript.strip_kit(warband, merc_id))
+
+
+func _drop_from(actor, merc_id: int, ids: Array[String]) -> void:
+	# The host strips the kit and announces the drop; a guest's roster hears it
 	# in the host's next warband copy.
 	if _client or warband == null or merc_id <= 0 or not is_instance_valid(actor):
 		return
-	var ids: Array[String] = GearDropScript.strip_hands(warband, merc_id)
 	if ids.is_empty():
 		return
 	var point: Vector3 = (actor as Node3D).global_position
@@ -1650,11 +1712,23 @@ func drop_merc_gear(actor, merc_id: int) -> void:
 
 
 func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
+	# Who the fall belongs to, read once here and before either mode's early
+	# return: a body no soul is inside is the band's hireling and his ten seconds
+	# kill him for good (`WarbandBody.expendable`), on the island and in the square
+	# alike. A body with a peer inside keeps the campaign's own rule.
+	if actor != null and is_instance_valid(actor):
+		actor.expendable = warband != null and warband.souls.occupied_by(merc_id) == 0
 	# An arena run holds a downed body: its hands are the run's, and emptying the
 	# campaign's roster slots because a wave dropped it would take a body's kit
 	# away for a fight that is not the campaign's.
 	if roguelite != null and roguelite.is_running():
 		return
+	# Where the body fell decides whether the clock can kill it: on the square's
+	# ground it is the town's, and the town stands it back up (see
+	# `WarbandBody.home_ground`). A guest and the host are the same rule here; a
+	# hireling's ground is never the town's, because his clock is the band's bill.
+	if actor != null and is_instance_valid(actor) and town != null:
+		actor.home_ground = town.in_square(actor) and not actor.expendable
 	drop_merc_gear(actor, merc_id)
 	# The player's own body is a different lesson from a squadmate's: the revive
 	# tip is about somebody else, this one is about what the soul can still do.
@@ -1665,16 +1739,15 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	_push_revive_tip(actor)
 
 
-## A bare guard that stopped a blow comes down and stays down until the button is
-## pressed again (a shield block never comes down, so it never lands here). Only
-## the soul's own guard is called out: the band's bodies break and re-raise theirs
-## without an eye on them.
+## A held guard came down because the pool behind it ran out - a stopped blow
+## never does that. Only the soul's own guard is called out: the band's bodies
+## re-raise theirs without an eye on them.
 func _on_guard_broken(_slot: int, actor) -> void:
 	if hud == null or controller == null or actor == null or not is_instance_valid(actor):
 		return
 	if actor != _soul():
 		return
-	hud.set_status("GUARD BROKEN  -  CLICK RMB AGAIN", 1.6)
+	hud.set_status("GUARD DOWN  -  OUT OF WIND", 1.6)
 
 
 ## The first squadmate to go down near the player teaches the channel: a body on
@@ -1751,6 +1824,13 @@ func _hostile_near(at: Vector3, radius: float) -> bool:
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
+	# A hireling's death is the band's bill: the kit he was dressed in stays where
+	# he fell, so the reap that erases his name has nothing to hand back to the
+	# shared stash and a walk back to the body is the only way to a piece of it. A
+	# soul's body keeps the campaign's own rule.
+	if actor != null and is_instance_valid(actor) and bool(actor.get("expendable")):
+		drop_merc_kit(actor, merc_id)
+		return
 	if roguelite != null and roguelite.is_running():
 		return
 	drop_merc_gear(actor, merc_id)
@@ -1822,6 +1902,13 @@ func _check_wipe(delta: float) -> void:
 		_wipe_beat = -1.0
 		return
 	if not _all_bodies_out():
+		_wipe_beat = -1.0
+		return
+	# The square is where the band gets its feet back: a party knocked down in the
+	# town is not a wipe, and reloading a checkpoint under a scrap in the market
+	# would yank both players out of the lobby they are standing in.
+	var focus = controller.focus_body()
+	if town != null and focus != null and is_instance_valid(focus) and town.in_square(focus):
 		_wipe_beat = -1.0
 		return
 	# The beat starts once, on the frame the last body goes down, and is only
@@ -1955,50 +2042,6 @@ func _reload_checkpoint() -> bool:
 
 
 # --- interaction -----------------------------------------------------------
-
-## The square's own dress. A body inside the walls holds the rack's ranged piece;
-## a body that walks back out is re-dressed from the roster, so the campaign's
-## kit is exactly what it was before the player stepped inside. While a run is
-## live the island owns the hands and this does nothing.
-##
-## The dress is the square's presentation, not a lock: the page's own wardrobe
-## verbs and the campaign's TAB still dress a body inside the walls (a stashed
-## blade goes into a square hand, a test rig is dressed for its own mechanic),
-## and the page reads the rig back (`RunDirector.body_holds`) rather than
-## assuming the rack's piece is what is held.
-func _sync_town_dress() -> void:
-	if roguelite == null or controller == null or town == null:
-		return
-	var running := bool(roguelite.is_running())
-	if _roguelite_was_running and not running:
-		# The run let the bodies go back to the roster; the square may dress them
-		# again on this same frame.
-		_town_dressed.clear()
-	_roguelite_was_running = running
-	if running:
-		return
-	for body in bodies:
-		if not is_instance_valid(body):
-			continue
-		var inside: bool = bool(town.in_square(body))
-		if inside and not _town_dressed.has(body):
-			roguelite.dress_town_body(body)
-			_town_dressed[body] = true
-		elif not inside and _town_dressed.has(body):
-			_town_dressed.erase(body)
-			var merc: int = int(controller.merc_of(body))
-			if merc > 0:
-				controller.refresh_gear(merc)
-
-
-## The rack changed the pair: put every body in the square into the new piece on
-## this very frame, rather than waiting for one to walk out and in. The square's
-## dress is made once per body, so the bookkeeping has to be cleared for the new
-## piece to be seen at all.
-func refresh_town_dress() -> void:
-	_town_dressed.clear()
-	_sync_town_dress()
-
 
 ## The one `G`: a cage latch in the camp, a counter in the town, a corpse at your
 ## feet, or a piece of steel lying loose. The camp is asked first, because its
@@ -2384,7 +2427,10 @@ func _update_prompt() -> void:
 			line = "%s  ·  LEVEL %d  ·  ISLAND %d  ·  %d HOSTILES  ·  TAB swaps hands" % [
 				str(run_state.get("biome_name", "")), int(run_state.get("level", 0)),
 				int(run_state.get("island", 1)), int(run_state.get("living", 0))]
-			if bool(run_state.get("shop_level", false)):
+			if bool(run_state.get("market_level", false)):
+				line = "%s  ·  LEVEL %d  ·  MARKET" % [
+					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
+			elif bool(run_state.get("shop_level", false)):
 				line = "%s  ·  LEVEL %d  ·  SHOP BEFORE THE BOSS" % [
 					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
 			elif bool(run_state.get("cleared", false)):
@@ -2418,6 +2464,8 @@ func _hide_panels() -> void:
 		paperdoll.close()
 	if roguelite_hud != null:
 		roguelite_hud.close_all()
+	if admin_console != null:
+		admin_console.close()
 	if town != null:
 		town.close_panels()
 
@@ -2430,6 +2478,8 @@ func _panel_open() -> bool:
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
 		return true
 	if roguelite_hud != null and roguelite_hud.open_panels():
+		return true
+	if admin_console != null and admin_console.is_open():
 		return true
 	return town != null and town.panels_open()
 
@@ -2602,14 +2652,12 @@ func _wanted_start() -> String:
 
 
 ## Say what the world was built from, once, in one line: the start it opened on,
-## the bodies and hostiles it fields, the lane it grew and the ground under it. A
+## the bodies and hostiles it fields, the wood it grew and the ground under it. A
 ## harness reads this line back to prove the world it asked for is the one built.
 func _announce() -> void:
 	var readout: Dictionary = stats()
-	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f road=%.0fm torches=%d trees=%d nodes=%d draws=%d shapes=%d ground=%.1f..%.1fm/%d tris"
-		% [start_area, bodies.size(), guards.size(), float(readout["lane_length"]),
-			float(readout["camp_to_road"]), int(readout["torches"]),
-			int(readout["clearing_trees"]) + int(readout["town_wood"]),
+	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d trees=%d nodes=%d draws=%d shapes=%d ground=%.1f..%.1fm/%d tris"
+		% [start_area, bodies.size(), guards.size(), int(readout["town_wood"]),
 			int(readout["nodes"]), int(readout["draws"]), int(readout["shapes"]),
 			float(readout["height_min"]), float(readout["height_max"]),
 			int(readout["terrain_tris"])])

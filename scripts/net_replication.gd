@@ -225,11 +225,19 @@ class SnapshotTimeline:
 		_arrival = now
 		if not started:
 			started = true
+			# The first packet names the playout. Starting it at the bare
+			# `MIN_DELAY_TICKS` would put the clock on top of the newest snapshot
+			# and leave it ahead of the floor the caller asked for until the
+			# second packet arrives.
+			delay_ticks = maxf(delay_ticks, floor_delay_ticks)
 			playout = float(tick) - delay_ticks
 		return true
 
 	## Advances the playout clock by a render frame, easing toward the delay
-	## target instead of jumping when a packet arrives late or early.
+	## target instead of jumping when a packet arrives late or early. A clock
+	## ahead of the target has to be able to fall back: when jitter raises the
+	## delay, the playout starts out leading the buffer, and an easing that only
+	## slowed the clock down would leave it drawing the newest snapshot forever.
 	func advance(delta: float) -> void:
 		if not started or samples.is_empty():
 			return
@@ -238,7 +246,7 @@ class SnapshotTimeline:
 		if absf(error) > CATCHUP_TICKS:
 			playout = target
 			return
-		playout += (delta / tick_seconds) * (1.0 + clampf(error * 0.25, -0.25, 0.35))
+		playout += (delta / tick_seconds) * (1.0 + clampf(error * 0.25, -0.90, 0.35))
 
 	## The body's pose at the playout clock.
 	func sample() -> Dictionary:

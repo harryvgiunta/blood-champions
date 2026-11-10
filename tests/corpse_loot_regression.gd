@@ -303,14 +303,17 @@ func check_panel() -> void:
 	panel.close()
 	check(not panel.is_open(), "close() closes the screen")
 	check(not panel.showing_corpse(), "close() leaves the corpse")
-	check(panel.title_label.text == "PAPERDOLL", "the header goes back to the paperdoll")
+	check(not panel.title_label.text.contains("THE DEAD"),
+		"the header goes back to the body's own name, got %s" % panel.title_label.text)
 	check(not panel.open_corpse(_loot, corpse), "a stripped body opens no screen")
 
 	# One screen, both jobs: the same node still dresses the warband.
 	panel.open(-1)
 	check(panel.is_open() and not panel.showing_corpse(),
 		"the same screen opens the warband's gear")
-	check(panel.status_text().contains("Click a worn slot"), "the mercenary hint is back")
+	check(panel.current_page() == "gear", "and lands on the gear page")
+	check(panel._head_hint.text.contains("right-click"),
+		"the mercenary hint is back, got %s" % panel._head_hint.text)
 	panel.close()
 
 	var shirt_kit: Array[String] = [PANEL_SHIRT]

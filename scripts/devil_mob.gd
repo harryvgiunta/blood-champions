@@ -269,6 +269,7 @@ var _cast_facing := Vector3.FORWARD
 ## the air and the burning ground this body has. The body frees all three.
 var _cast_tell: Node3D
 var _cast_missile: Node3D
+var _cast_ray: Node3D
 var _hazard: Node3D
 ## The beat before a body's second and third spell are ready, so a meeting is
 ## answered with fire and not with the whole kit on one tick.
@@ -1003,9 +1004,34 @@ func _fire_kit() -> Array[String]:
 	return []
 
 
+## The family every wound this body's fire books. A goatman is the demon family
+## (93); the Hollow's watcher caster answers with the camp's own (90), so the
+## blow that lands on a ranger is recorded against the body that threw it.
+func fire_damage_source() -> int:
+	return DemonFireScript.DAMAGE_SOURCE
+
+
 ## The kit this body was born with.
 func fire_spells() -> Array[String]:
 	return _fire_spells.duplicate()
+
+
+## The beam this body's last cast left standing, for a scene or a regression.
+func cast_beam() -> Node3D:
+	return _cast_ray
+
+
+## Give the body one spell after `_ready` - what a wave spec does for a caster or
+## an archer that rolled a rite. The id must name a `DemonFire` row; the kit and
+## its clock are replaced, so the body will reach for that one spell next.
+func set_fire_spell(spell_id: String) -> bool:
+	if DemonFireScript.spell(spell_id).is_empty():
+		return false
+	_fire_spells.clear()
+	_fire_spells.append(spell_id)
+	_fire_cooldowns.clear()
+	_fire_cooldowns[spell_id] = 0.0
+	return true
 
 
 ## Seconds left on one spell's clock, 0 when it may be thrown.
@@ -1122,6 +1148,9 @@ func _resolve_cast(spell_id: String) -> void:
 		"hazard":
 			_hazard = DemonFireScript.ember_rain(parent, _cast_aim, row,
 				Callable(self, "_fire_burn"))
+		"beam":
+			_cast_ray = DemonFireScript.ray(parent, self, _throw_point(),
+				_cast_facing, row)
 
 
 ## A fireball arriving: the blast at the point it landed, out of this body's own
@@ -1157,6 +1186,9 @@ func _release_fire() -> void:
 	if is_instance_valid(_cast_missile):
 		_cast_missile.queue_free()
 	_cast_missile = null
+	if is_instance_valid(_cast_ray):
+		_cast_ray.queue_free()
+	_cast_ray = null
 	if is_instance_valid(_hazard):
 		_hazard.queue_free()
 	_hazard = null

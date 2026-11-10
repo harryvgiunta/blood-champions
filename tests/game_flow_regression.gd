@@ -49,7 +49,7 @@ func run() -> void:
 
 	# --- PLAY: Hearthstead, a fresh warband and a fresh purse -----------------
 	check(int(state.credits) > 0, "the purse starts with the new-game credits")
-	warband.hire("Old Hand")
+	warband.add_mercenary("Old Hand")
 	warband.add_mercenary("Survivor")
 	var stale: int = warband.roster.count()
 	check(stale == 2, "a warband stands before PLAY opens the world (%d)" % stale)

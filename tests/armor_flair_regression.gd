@@ -146,7 +146,7 @@ func check_distinct_liveries() -> void:
 
 func check_trophy_table() -> void:
 	var tables := {"head": Flair.HEAD_TROPHIES, "hip": Flair.HIP_TROPHIES,
-		"shoulder": Flair.SHOULDER_TROPHIES, "neck": Flair.NECK_TROPHIES,
+		"shoulder": Flair.SHOULDER_TROPHIES,
 		"wrist": Flair.WRIST_TROPHIES, "thigh": Flair.THIGH_TROPHIES,
 		"ankle": Flair.ANKLE_TROPHIES}
 	for group: String in tables:
@@ -154,7 +154,7 @@ func check_trophy_table() -> void:
 			check(kind in Trophies.KINDS, "the %s %s has a builder" % [group, kind])
 	# Every anchor a profile may name exists, and its part has a mirror.
 	var anchors := ArmorFlair.ANCHORS
-	for name in ["crown", "temple_l", "hip_l", "shoulder_l", "thigh_l", "neck", "wrist_l", "ankle_l"]:
+	for name in ["crown", "temple_l", "hip_l", "shoulder_l", "thigh_l", "wrist_l", "ankle_l"]:
 		check(anchors.has(name), "the %s anchor is written down" % name)
 	for name: String in anchors:
 		var spec: Dictionary = anchors[name]
@@ -442,16 +442,16 @@ func check_trophies() -> void:
 	if not placed.is_empty():
 		var origin: Vector3 = (placed["frame"] as Transform3D).origin
 		check(absf(origin.x) > 0.12, "the hip trophy sits outside the waist (%.2f m)" % absf(origin.x))
-	# A ring follows the cross-section: a neck is wider across than deep.
-	var neck := ArmorFlair.anchor_spec("neck")
-	var section: Dictionary = rig._flair._anchor_frame(neck, rig.armor_pieces)
-	check(not section.is_empty(), "the neck anchor measures a cross-section")
+	# A ring follows the cross-section: a wrist is wider across than deep.
+	var wrist := ArmorFlair.anchor_spec("wrist_l")
+	var section: Dictionary = rig._flair._anchor_frame(wrist, rig.armor_pieces)
+	check(not section.is_empty(), "the wrist anchor measures a cross-section")
 	if not section.is_empty():
 		var size: Vector2 = section["size"]
-		check(size.x > 0.10 and size.y > 0.08, "the necklace is a neck's size (%.2f x %.2f)"
+		check(size.x > 0.02 and size.y > 0.02, "the bracelet is a wrist's size (%.2f x %.2f)"
 			% [size.x, size.y])
-		check(absf(size.x - size.y) > 0.008, "the necklace follows an oval neck (%.3f x %.3f)"
-			% [size.x, size.y])
+	check(ArmorFlair.anchor_spec("neck").is_empty(),
+		"there is no neck anchor: nothing is worn or hung at the throat")
 	# The trophy geometry itself: a hanging trophy in its own frame, a ring round
 	# the measured cross-section.
 	var mats := Trophies.materials(rig.appearance["flair"])
@@ -461,8 +461,8 @@ func check_trophies() -> void:
 	var built: MeshInstance3D = merged.commit(host, "TrialSkull", false)
 	check(built != null and built.mesh.get_surface_count() >= 2,
 		"a skull is bone and cord on two surfaces")
-	var necklace = Trophies.build_necklace("teeth", mats, Vector2(0.11, 0.09))
-	check(not necklace.is_empty(), "a necklace builds round a measured neck")
+	var beads = Trophies.build("beads", mats, Vector2(0.05, 0.05))
+	check(not beads.is_empty(), "a ring trophy builds round a measured wrist")
 	# Every kind builds, at the sizes it is asked for.
 	for kind in Trophies.KINDS:
 		var size := Vector2(0.11, 0.09) if kind in ["beads", "rattles"] else Vector2.ZERO

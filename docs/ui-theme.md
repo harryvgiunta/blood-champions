@@ -110,12 +110,14 @@ numerals preferred: `I`, `III`). Body copy never sits in Pirata One.
 | Screen | Uses |
 | --- | --- |
 | Tutorial card | clamp 880 × 580, chapter name, drop-cap body, keycaps, chapter stamps, brass CONTINUE, step seal |
-| Warband (O) | ledger header (purse/worth), mercenary rows, state chips, brass CONTROL, recruiter rows |
+| Warband (O) | ledger header (purse/worth), mercenary rows, state chips, brass CONTROL, recruiter rows - name, trade, hands, armour and the one skill |
 | Gear (I) | the frontier equipment page in the new skin: warband tabs on top, ten worn slots left, live ranger stage centre, trinket rail + KIT column right, collective stash as the grid underneath |
 | Quick menu (ESC) | rubricated sections, resume primary, save/display secondary, two lacquer exits, last-writing block |
+| Settings (Esc) | ledger clamp, rubricated sections, SOUND / DISPLAY / KEYS, the shared sound page and the shared fullscreen row |
 | Title | wordmark, skull seal, plate stack, no clamp |
 | Quartermaster | narrow clamp, stock rows (mark, name, category, price, BUY), purse and held-count header |
 | Altar | wide clamp, three rubricated columns (unbind / distil / brand), spines with thorns, one brass BRAND |
+| Admin console (`F9`) | wide clamp, five plates as tabs (arena / upgrades / weapons / abilities / travel), a column of switches, catalogue rows written on the page (name, tier ink, family, stacks), a Pirata readout and one lacquer KILL EVERYTHING |
 | Lobby (next) | the same clamp and plates; no new furniture |
 
 ## Production status
@@ -126,11 +128,12 @@ Wired and verified in the running game:
 | --- | --- |
 | Tutorial card | `LedgerFrame` + plate rack + bone keycaps + chapter stamps + step seal |
 | Quick menu (Esc) | `LedgerFrame`, rubricated sections, brass resume, lacquer exits |
-| Warband (O) | `LedgerFrame`, Pirata names, chip textures, brass CONTROL, recruiter |
+| Warband (O) | `LedgerFrame`, Pirata names, chip textures, brass CONTROL, recruiter rows with the kit line |
 | Gear (I) | frontier layout in the new skin: tabs on top, worn slots with marks, live ranger preview stage, stash rows |
 | Battle readout (HUD) | the same materials in the corners: the soul's plate (bust in `clamp.png`, health over stamina, the skill row) bottom left and the band's plate (purse on the header `rail.png`, one row per body with its disposition medallion) top right |
 | Quartermaster | `LedgerFrame`, purse in Pirata, stock rows with BUY plates |
 | Sacrificial altar | `LedgerFrame`, tier rail, three ritual columns, brass BURN THE SIGIL |
+| Admin console (`F9`) | `LedgerFrame`, plate tabs, switch column (danger kill / brass god mode), page-ink catalogue rows with rarity tints, live readout of the run |
 | Title | concept layout: camp still, wax seal, Pirata wordmark, four centred plate doors (NEW CAMPAIGN, CAMPAIGNS, JOIN GAME, HOST GAME); the new-campaign form, the campaign list and the two co-op forms are iron panels over the same screen |
 | Co-op forms | the title's JOIN GAME and HOST GAME: iron slab, themed fields, brass JOIN / NEW GAME / FROM CHECKPOINT |
 

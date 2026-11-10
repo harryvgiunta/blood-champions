@@ -10,6 +10,7 @@ extends SceneTree
 
 const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
 const SaveSlotsScript = preload("res://scripts/warband/save_slots.gd")
+const SaveFileScript = preload("res://scripts/save_file.gd")
 
 const ROOT := "user://saves_regression"
 const LEGACY_WARBAND := "user://saves_regression_legacy_warband.json"
@@ -60,10 +61,10 @@ func _remove_tree(path: String) -> void:
 func _purse(path: String) -> int:
 	if not FileAccess.file_exists(path):
 		return -1
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
-	if not parsed is Dictionary:
+	var opened: Dictionary = SaveFileScript.inspect(path)
+	if not bool(opened.get("ok", false)):
 		return -1
-	return int((parsed as Dictionary).get("credits", -1))
+	return int((opened.get("data", {}) as Dictionary).get("credits", -1))
 
 
 func run() -> void:
@@ -102,6 +103,14 @@ func run() -> void:
 	var first_purse := str(slots.purse_path(first))
 	check(FileAccess.file_exists(first_warband), "the first campaign's warband is on disk")
 	check(_purse(first_purse) == 4321, "the first campaign's purse is on disk")
+	# The ledger and the campaign's files are sealed containers, not text: no
+	# campaign name, roster or purse is sitting in bytes a tool can rewrite.
+	check(str(SaveFileScript.inspect(str(slots.index_path())).get("format", ""))
+			== SaveFileScript.SEALED, "the ledger is sealed, not JSON")
+	check(str(SaveFileScript.inspect(first_warband).get("format", "")) == SaveFileScript.SEALED,
+		"and so is the campaign's warband")
+	check(not FileAccess.get_file_as_string(str(slots.index_path())).contains("Alex"),
+		"with no campaign name readable in the bytes")
 
 	# --- campaign two: a new game, and the first one untouched --------------
 	var second := str(slots.new_slot("Alex"))

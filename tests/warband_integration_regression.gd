@@ -127,9 +127,15 @@ func check_world_pieces() -> void:
 	check(bar != null, "the HUD carries a stamina bar")
 	if bar != null:
 		check(bar.max_value > 0.0, "the stamina bar has a real maximum (%.1f)" % bar.max_value)
-	check(game.hud.ability_tiles().size() == AbilityRules.SLOT_COUNT \
+	check(game.hud.ability_tiles().size() == AbilityRules.MAX_SLOT_COUNT \
 			and game.hud.ability_tiles().size() == 10,
-		"the HUD carries the ten-key hotbar (%d)" % game.hud.ability_tiles().size())
+		"the HUD builds the ten-key ceiling (%d)" % game.hud.ability_tiles().size())
+	var shown := 0
+	for tile in game.hud.ability_tiles():
+		if (tile as Control).visible:
+			shown += 1
+	check(shown >= AbilityRules.SLOT_COUNT,
+		"and draws at least the five keys the bar ships with (%d)" % shown)
 
 
 # --- the menu --------------------------------------------------------------

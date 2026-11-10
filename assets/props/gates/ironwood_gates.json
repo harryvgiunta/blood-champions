@@ -1,0 +1,200 @@
+{
+ "generator": "tools/prepare_gate_assets.py",
+ "builder": "python tools/build_gate_assets.py",
+ "blender": "5.1.2",
+ "seed": 9021,
+ "license": "CC BY-NC-SA 4.0 (LICENSE.md section 3); original geometry and bakes",
+ "conventions": {
+  "axes": "Godot +Y up; the gate faces -Z; stands on its origin",
+  "opening": "2.0 m wide, 2.9 m tall: the runtime lays the biome's sheet in it",
+  "albedo": "sRGB, pigment only (no baked lighting)",
+  "normal": "OpenGL tangent (+Y green up)",
+  "orm": "R occlusion, G roughness, B metallic (glTF metallicRoughness)"
+ },
+ "variants": {
+  "watchers": {
+   "node": "Gate_Watchers",
+   "triangles": 4044,
+   "materials": [
+    "Gate_Granite",
+    "Gate_Iron"
+   ],
+   "min": [
+    -1.66,
+    0.0,
+    -0.37
+   ],
+   "max": [
+    1.66,
+    3.66,
+    0.37
+   ]
+  },
+  "demons": {
+   "node": "Gate_Demons",
+   "triangles": 7736,
+   "materials": [
+    "Gate_Basalt",
+    "Gate_Bone",
+    "Gate_Iron"
+   ],
+   "min": [
+    -1.7147,
+    0.0,
+    -0.41
+   ],
+   "max": [
+    1.7,
+    3.76,
+    0.5623
+   ]
+  },
+  "clones": {
+   "node": "Gate_Clones",
+   "triangles": 7348,
+   "materials": [
+    "Gate_Bone",
+    "Gate_Flesh",
+    "Gate_Iron"
+   ],
+   "min": [
+    -1.645,
+    -0.105,
+    -0.34
+   ],
+   "max": [
+    1.645,
+    3.684,
+    0.5912
+   ]
+  }
+ },
+ "textures": {
+  "granite": {
+   "size": 2048,
+   "metallic": 0.0,
+   "bake_seconds": {
+    "color": 0.7,
+    "normal": 0.6,
+    "rough": 1.4,
+    "ao": 8.2
+   },
+   "files": {
+    "albedo": {
+     "file": "textures/gate_granite_albedo.png",
+     "sha256": "62f689848e7b2bf8252c8d5ff67f47fcdd101c634d4b502473070bfb54d7ed11"
+    },
+    "normal": {
+     "file": "textures/gate_granite_normal.png",
+     "sha256": "82a50b97bbe898ea5f8cfc1843e4d45522841f99eca3a6c947a0c26747e28f4e"
+    },
+    "orm": {
+     "file": "textures/gate_granite_orm.png",
+     "sha256": "d8a3abad69eb718cdf038fb967aa2a5681106cec73b1ada66773d22889b1dd5d"
+    }
+   }
+  },
+  "basalt": {
+   "size": 1024,
+   "metallic": 0.0,
+   "bake_seconds": {
+    "color": 0.2,
+    "normal": 0.2,
+    "rough": 0.3,
+    "ao": 1.7
+   },
+   "files": {
+    "albedo": {
+     "file": "textures/gate_basalt_albedo.png",
+     "sha256": "9498246a96245d42cceea69566a6fd841b08de3eaebda882576065c03fe985a5"
+    },
+    "normal": {
+     "file": "textures/gate_basalt_normal.png",
+     "sha256": "f14f8e1c21c7631a64ee561ce1958ff1f18fe399877ef4108fdd84e95953ab90"
+    },
+    "orm": {
+     "file": "textures/gate_basalt_orm.png",
+     "sha256": "d55e2c914757352e16ec2e71e44acfed0d55a753a1b15ec51f348624db09efd4"
+    }
+   }
+  },
+  "bone": {
+   "size": 1024,
+   "metallic": 0.0,
+   "bake_seconds": {
+    "color": 0.4,
+    "normal": 0.4,
+    "rough": 0.4,
+    "ao": 1.0
+   },
+   "files": {
+    "albedo": {
+     "file": "textures/gate_bone_albedo.png",
+     "sha256": "db7deb08b6dee65cd5a95e1bf3e840fd0cfb094537b95cd8a3fb65e622002d10"
+    },
+    "normal": {
+     "file": "textures/gate_bone_normal.png",
+     "sha256": "3ea3370b34e341277e8af7ada7267cdb4e3b5a3171fe3d8d15fd1705db320d92"
+    },
+    "orm": {
+     "file": "textures/gate_bone_orm.png",
+     "sha256": "9d80ea582f4aba2fee16cbd073318efc2a1a099d3b325b0893b86bea4ed422b0"
+    }
+   }
+  },
+  "flesh": {
+   "size": 1024,
+   "metallic": 0.0,
+   "bake_seconds": {
+    "color": 0.2,
+    "normal": 0.2,
+    "rough": 0.3,
+    "ao": 1.5
+   },
+   "files": {
+    "albedo": {
+     "file": "textures/gate_flesh_albedo.png",
+     "sha256": "4f8bd0cf8c907af0c7bebb0d2e9f4ee7d656f18d0a6a693dfbfc5b35bf1816b7"
+    },
+    "normal": {
+     "file": "textures/gate_flesh_normal.png",
+     "sha256": "7c98ce6a3be455612747a5ddef9ff836d21c6337489a19939becf9bcde97443e"
+    },
+    "orm": {
+     "file": "textures/gate_flesh_orm.png",
+     "sha256": "78e1502222ab6ff58cb66c0010cef5350a34a29d85c898d178b1ae8d5b011419"
+    }
+   }
+  },
+  "iron": {
+   "size": 1024,
+   "metallic": 0.55,
+   "bake_seconds": {
+    "color": 0.5,
+    "normal": 0.5,
+    "rough": 0.6,
+    "ao": 1.9
+   },
+   "files": {
+    "albedo": {
+     "file": "textures/gate_iron_albedo.png",
+     "sha256": "1347acaf37207237c8ca0f54550812ffca094113685a06563f4902f42ed3e20e"
+    },
+    "normal": {
+     "file": "textures/gate_iron_normal.png",
+     "sha256": "fa025303308ce7c607a054cf27b2307210fbf69870d1b1348cb1154266b6bedd"
+    },
+    "orm": {
+     "file": "textures/gate_iron_orm.png",
+     "sha256": "2ed381a327aeaa89ae9edb8879398eb68a786f905ebd5c5c06fc6dbea34783ad"
+    }
+   }
+  }
+ },
+ "file": {
+  "name": "ironwood_gates.glb",
+  "sha256": "6a224e607d478dd096ccea921df3a2ae308e596475d085011aa777bda1e810f4",
+  "bytes": 13360592
+ },
+ "build_seconds": 67.3
+}

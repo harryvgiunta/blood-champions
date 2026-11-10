@@ -11,7 +11,7 @@ One manager, three buses, two beds of music and one table of one-shots.
 | `scripts/audio/voice_emitter.gd` | one body's clock, rolls and cooldowns: the difference between "a wolf growls" and "a wolf growls sometimes" |
 | `scripts/audio/voice.gd` | the one call a scene makes (`Voice.say`), and the kill credit (`Voice.kill_quip`) |
 | `scripts/ui/sound_settings_page.gd` | the sound page itself: a level and a mute for each bus, read from and written to `Audio` |
-| `scripts/ui/settings_menu.gd` | the Escape window in the campaign, the title and the sandbox: an index and the SOUND page |
+| `scripts/ui/settings_menu.gd` | the Escape window in the campaign, the title and the sandbox: an index, the SOUND page, a DISPLAY page and the KEYS sheet |
 | `tools/slice_game_audio.py` | the one place that says which window of which recording became which file |
 
 ## Mix

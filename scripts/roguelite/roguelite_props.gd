@@ -1,7 +1,7 @@
 class_name RogueliteProps
 extends RefCounted
-## The interactive furniture of an island: reward chests, mod pedestals, Greed
-## Totems, the shop and the biome portals.
+## The interactive furniture of an island: reward chests, the shop and the biome
+## portals.
 ##
 ## Every prop is procedural (`Geo` primitives), carries its own `Label3D` so a
 ## player never has to read the HUD to know what they are walking up to, and
@@ -11,6 +11,12 @@ extends RefCounted
 
 const Geo = preload("res://scripts/geo.gd")
 const Mods = preload("res://scripts/roguelite/mod_catalog.gd")
+const CardArt = preload("res://scripts/roguelite/card_art.gd")
+const ChestVisual = preload("res://scripts/roguelite/chest_visual.gd")
+const GateVisual = preload("res://scripts/roguelite/gate_visual.gd")
+## The plaque's name is set in the ledger's display face, like every other
+## heading in the game.
+const DISPLAY_FONT: FontFile = preload("res://assets/ui/fonts/PirataOne-Regular.ttf")
 
 const META := "roguelite_prop"
 
@@ -39,9 +45,20 @@ static func payload_of(node) -> Dictionary:
 
 # --- chest -----------------------------------------------------------------
 
-## A reward chest. `tier` is `"chest"` for the island's own, `"mini"` for the
-## extra one a Buried Cache pays for, and `"elite"` for the one a boss leaves.
-static func chest(parent: Node3D, at: Vector3, tier: String = "chest",
+## A reward chest. `style` is the prop's own build: `"chest"` for the island's
+## own, `"mini"` for a cache a Buried Cache or a kill pays for, and `"elite"` for
+## the box a boss leaves.
+##
+## What the chest *promises* rides the payload (`surface`, `tier`), and the lid
+## glows the tier's own colour, so a legendary promise is readable from the entry
+## line. A chest stood with an `offers` table opens a draft of three for the body
+## it was stood for, exactly as it opens its lid.
+##
+## A co-op level stands one chest a player, so the payload also names its owner
+## (`owner_name`, `owner_colour`) and the box wears that name over the promise: a
+## party has to be able to tell whose box it is walking up to from the entry
+## line, without reading the HUD.
+static func chest(parent: Node3D, at: Vector3, style: String = "chest",
 		payload: Dictionary = {}) -> Node3D:
 	var root := Node3D.new()
 	root.name = "RewardChest"
@@ -49,94 +66,40 @@ static func chest(parent: Node3D, at: Vector3, tier: String = "chest",
 	# Props are handed a world point and stand on it: the island they hang from
 	# has its own transform, so a local assignment would double it.
 	root.global_position = at
-	var wood := Geo.material(Color(0.30, 0.20, 0.13), 0.0, 0.86)
-	var iron := Geo.material(Color(0.20, 0.20, 0.21), 0.6, 0.42)
-	var glow := Color(0.95, 0.74, 0.34) if tier == "chest" else Color(0.84, 0.40, 0.28)
-	if tier == "elite":
+	var tier := str(payload.get("tier", ""))
+	var glow := Color(0.95, 0.74, 0.34)
+	if style == "mini":
+		glow = Color(0.84, 0.40, 0.28)
+	elif style == "elite":
 		glow = Color(0.95, 0.35, 0.28)
-	var trim := Geo.material(glow, 0.35, 0.35)
-	trim.emission_enabled = true
-	trim.emission = glow
-	trim.emission_energy_multiplier = 0.6
-	var size := 1.0 if tier != "mini" else 0.66
-	Geo.box(root, Vector3(1.2, 0.62, 0.78) * size, Vector3(0.0, 0.31 * size, 0.0), wood)
-	Geo.box(root, Vector3(1.28, 0.20, 0.84) * size, Vector3(0.0, 0.66 * size, 0.0), wood)
-	for x in [-0.45, 0.45]:
-		Geo.box(root, Vector3(0.09, 0.66, 0.82) * size,
-			Vector3(float(x) * size, 0.34 * size, 0.0), iron)
-	Geo.box(root, Vector3(1.34, 0.08, 0.88) * size, Vector3(0.0, 0.55 * size, 0.0), trim)
-	Geo.box(root, Vector3(0.18, 0.22, 0.08) * size, Vector3(0.0, 0.46 * size, 0.42 * size), trim)
-	var light := OmniLight3D.new()
-	light.light_color = glow
-	light.light_energy = 1.1 if tier != "mini" else 0.6
-	light.omni_range = 5.0
-	light.position = Vector3(0.0, 0.9 * size, 0.0)
-	root.add_child(light)
-	var text := "REWARD CHEST"
-	if tier == "mini":
-		text = "CACHE"
-	elif tier == "elite":
-		text = "WARDEN'S HOARD"
-	_label(root, text, Vector3(0.0, 1.35 * size, 0.0), glow, 40)
-	tag_prop(root, "chest", payload.merged({"tier": tier}, true))
-	return root
-
-
-# --- pedestal --------------------------------------------------------------
-
-## An item pedestal and the three choices standing over it. `offers` is the local
-## body's own row; the payload may carry the whole party's table, which is what
-## every machine reads its row from.
-static func pedestal(parent: Node3D, at: Vector3, offers: Array,
-		payload: Dictionary = {}) -> Node3D:
-	var root := Node3D.new()
-	root.name = "ModPedestal"
-	parent.add_child(root)
-	# Props are handed a world point and stand on it: the island they hang from
-	# has its own transform, so a local assignment would double it.
-	root.global_position = at
-	var stone := Geo.material(Color(0.28, 0.26, 0.23), 0.0, 0.9)
-	var gold := Geo.material(Color(0.86, 0.70, 0.35), 0.55, 0.35)
-	Geo.cylinder(root, 0.62, 0.48, 0.9, Vector3(0.0, 0.45, 0.0), stone, 8)
-	Geo.cylinder(root, 0.70, 0.70, 0.10, Vector3(0.0, 0.94, 0.0), gold, 8)
-	# A slow ring of light: the pedestal is the one thing on the island that wants
-	# a player to walk to it.
-	var halo := OmniLight3D.new()
-	halo.light_color = Color(0.78, 0.86, 1.0)
-	halo.light_energy = 1.0
-	halo.omni_range = 6.0
-	halo.position = Vector3(0.0, 1.5, 0.0)
-	root.add_child(halo)
-	for index in offers.size():
-		var mod_id := str(offers[index])
-		var colour := Color(0.86, 0.90, 0.82)
-		var display := mod_id
-		var row := Mods.get_mod(mod_id)
-		if not row.is_empty():
-			colour = _rarity_colour(str(row.get("rarity", "common")))
-			display = str(row.get("name", mod_id))
-		var angle := -0.7 + 1.4 * (float(index) / float(maxi(1, offers.size() - 1)))
-		var card := Node3D.new()
-		card.name = "Offer%d" % index
-		card.position = Vector3(sin(angle) * 1.45, 1.45 + float(index % 2) * 0.18,
-			cos(angle) * 1.45)
-		root.add_child(card)
-		var plate := Geo.box(card, Vector3(0.62, 0.9, 0.05), Vector3.ZERO,
-			Geo.material(Color(0.07, 0.07, 0.08), 0.0, 0.6))
-		plate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var edge := Geo.box(card, Vector3(0.68, 0.96, 0.03), Vector3(0.0, 0.0, -0.02),
-			Geo.material(colour, 0.4, 0.3))
-		edge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_label(card, display, Vector3(0.0, 0.16, 0.06), colour, 28, 0.004)
-		_label(card, str(row.get("rarity", "")).to_upper(), Vector3(0.0, -0.2, 0.06),
-			Color(0.85, 0.82, 0.74), 22, 0.004)
-	# The payload is the wire's: a director hands the whole party's draft table
-	# here and the cards above are only the local body's row. A caller with no
-	# table to give still gets the three it drew stamped on the prop.
-	var wire := payload
-	if not wire.has("offers"):
-		wire = wire.merged({"offers": offers.duplicate()}, true)
-	tag_prop(root, "pedestal", wire)
+	elif Mods.RARITY_COLOUR.has(tier):
+		glow = Mods.RARITY_COLOUR[tier]
+	# The prop itself: an authored, Cycles-textured chest, one of three.
+	var model: Node3D = ChestVisual.new()
+	model.name = "Model"
+	root.add_child(model)
+	model.setup(style, glow)
+	var text := str(payload.get("label", ""))
+	if text.is_empty():
+		text = "REWARD CHEST"
+		if style == "mini":
+			text = "CACHE"
+		elif style == "elite":
+			text = "WARDEN'S HOARD"
+	var top := float(ChestVisual.TOPS.get(style, 0.91))
+	# The plate is a little wider than the box it names, not wider than the
+	# player: a sign that eats the screen is not a sign.
+	var plate: float = {"mini": 1.15, "elite": 2.00}.get(style, 1.70)
+	_plaque(root, text, Vector3(0.0, top + 0.42, 0.0), glow, tier, plate)
+	# Whose box it is, on its own plate above the promise. Only a chest stood for
+	# a name wears one: the mini caches a kill drops belong to whoever reaches
+	# them.
+	var owner := str(payload.get("owner_name", ""))
+	if not owner.is_empty():
+		var ink: Variant = payload.get("owner_colour", INK)
+		_plaque(root, owner.to_upper(), Vector3(0.0, top + 1.02, 0.0),
+			ink if ink is Color else INK, "", 1.10)
+	tag_prop(root, "chest", payload.merged({"style": style}, true))
 	return root
 
 
@@ -172,7 +135,8 @@ static func greed_totem(parent: Node3D, at: Vector3, payload: Dictionary = {}) -
 	light.omni_range = 7.5
 	light.position = Vector3(0.0, 2.9, 0.0)
 	root.add_child(light)
-	_label(root, "GREED TOTEM", Vector3(0.0, 3.5, 0.0), Color(0.94, 0.36, 0.28), 38)
+	_plaque(root, "GREED TOTEM", Vector3(0.0, 3.50, 0.0), Color(0.94, 0.36, 0.28),
+		Mods.RARITY_GREED, 1.70)
 	tag_prop(root, "greed", payload)
 	return root
 
@@ -203,10 +167,53 @@ static func shop(parent: Node3D, at: Vector3, wares: Array, payload: Dictionary 
 		var x := (float(index) - float(maxi(1, wares.size()) - 1) * 0.5) * 0.72
 		var colour := _rarity_colour(str(ware.get("rarity", "common")))
 		Geo.sphere(root, 0.16, Vector3(x, 1.26, 0.0), Geo.material(colour, 0.3, 0.3))
-		_label(root, "%s  ·  %d" % [str(ware.get("name", "?")),
-			int(ware.get("price", 0))], Vector3(x, 1.62, 0.0), colour, 26, 0.004)
-	_label(root, "THE SHOP ISLAND", Vector3(0.0, 2.55, 0.0), Color(0.86, 0.70, 0.35), 38)
+		# The name only: the price is on the card the stall opens, and a plate
+		# narrow enough to stand clear of its neighbour cannot hold both.
+		_plaque(root, str(ware.get("name", "?")), Vector3(x, 1.66, 0.0), colour,
+			str(ware.get("rarity", "common")), 1.10)
+	_plaque(root, str(payload.get("label", "THE SHOP ISLAND")).to_upper(),
+		Vector3(0.0, 2.58, 0.0), Color(0.86, 0.70, 0.35),
+		Mods.RARITY_LEGENDARY, 2.00)
 	tag_prop(root, "shop", payload.merged({"wares": wares.duplicate(true)}, true))
+	return root
+
+
+# --- recruiter -------------------------------------------------------------
+
+## The recruiter's desk: the town's counter, standing on a shop level, with one
+## board per body for sale - the name over it and the archetype and price cut
+## under it. The prop kind is `recruiter`; its payload carries the board the panel
+## reads, so a guest renders the same three bodies the host is selling.
+static func recruiter(parent: Node3D, at: Vector3, hires: Array,
+		payload: Dictionary = {}) -> Node3D:
+	var root := Node3D.new()
+	root.name = "RecruiterDesk"
+	parent.add_child(root)
+	root.global_position = at
+	var wood := Geo.material(Color(0.26, 0.18, 0.12), 0.0, 0.9)
+	var iron := Geo.material(Color(0.34, 0.33, 0.31), 0.5, 0.45)
+	var ink := Color(0.52, 0.10, 0.10)
+	var brass := Color(0.86, 0.70, 0.35)
+	# The counter a body walks up to: the same trestle the square's desk is, so a
+	# player who has hired in town reads this one at a glance.
+	Geo.box(root, Vector3(2.2, 0.16, 0.8), Vector3(0.0, 1.02, 0.0), wood)
+	for side in [-1.0, 1.0]:
+		Geo.cylinder(root, 0.09, 0.09, 1.02, Vector3(float(side) * 0.92, 0.51, 0.0),
+			wood, 6)
+	for index in hires.size():
+		var offer: Dictionary = hires[index]
+		var x := (float(index) - float(maxi(1, hires.size()) - 1) * 0.5) * 0.68
+		# A board leaning on the counter, the man's name above it and the price
+		# under it: what is for sale, at what, in one read.
+		Geo.box(root, Vector3(0.44, 0.46, 0.04), Vector3(x, 1.40, 0.12), iron)
+		_plaque(root, str(offer.get("name", "?")).to_upper(), Vector3(x, 1.80, 0.12),
+			brass, Mods.RARITY_LEGENDARY, 1.0)
+		_plaque(root, "%s  ·  %d GOLD" % [str(offer.get("archetype_label", "")),
+			int(offer.get("price", 0))], Vector3(x, 1.26, 0.12), ink,
+			Mods.RARITY_GREED, 0.72)
+	_plaque(root, str(payload.get("label", "THE RECRUITER")).to_upper(),
+		Vector3(0.0, 2.40, 0.0), brass, Mods.RARITY_LEGENDARY, 1.8)
+	tag_prop(root, "recruiter", payload.merged({"hires": hires.duplicate(true)}, true))
 	return root
 
 
@@ -233,7 +240,8 @@ static func rack(parent: Node3D, at: Vector3, payload: Dictionary = {}) -> Node3
 		var blade := Geo.box(root, Vector3(0.11, 0.5, 0.03),
 			Vector3(x, 2.18, 0.12), steel if index != 1 else iron)
 		blade.rotation.z = 0.12 if index == 0 else (-0.1 if index == 2 else 0.0)
-	_label(root, "WEAPON RACK", Vector3(0.0, 2.95, 0.0), Color(0.92, 0.86, 0.68), 38)
+	_plaque(root, "WEAPON RACK", Vector3(0.0, 2.98, 0.0), Color(0.92, 0.86, 0.68),
+		Mods.RARITY_LEGENDARY, 1.70)
 	tag_prop(root, "rack", payload)
 	return root
 
@@ -254,14 +262,22 @@ static func portal(parent: Node3D, at: Vector3, biome_id: String,
 	# Props are handed a world point and stand on it: the island they hang from
 	# has its own transform, so a local assignment would double it.
 	root.global_position = at
-	match biome_id:
-		"caves":
-			_gate_demons(root)
-		"arena":
-			_gate_clones(root)
-		_:
-			_gate_watchers(root)
-	_label(root, biome_name, Vector3(0.0, 4.05, 0.0), gate_glow(biome_id), 40)
+	# A chamber's gate turns to face the party's line; an island's payload says 0.
+	root.rotation.y = float(payload.get("yaw", 0.0))
+	# The door itself: coursed granite, black rock hung with bone, or a body
+	# turned inside out, with the promise's sheet standing in its opening.
+	var model: Node3D = GateVisual.new()
+	model.name = "Model"
+	root.add_child(model)
+	model.setup(biome_id, gate_glow(biome_id))
+	# The plates hang clear above the lintel: a sign through a beam is a sign no
+	# one reads.
+	_plaque(root, biome_name, Vector3(0.0, 4.58, 0.0), gate_glow(biome_id),
+		Mods.RARITY_EPIC, 1.70)
+	var contract_label := str(payload.get("label", ""))
+	if not contract_label.is_empty():
+		_plaque(root, contract_label, Vector3(0.0, 4.10, 0.0),
+			gate_glow(biome_id), Mods.RARITY_COMMON, 2.20)
 	tag_prop(root, "portal", payload.merged({"biome": biome_id}, true))
 	return root
 
@@ -276,129 +292,42 @@ static func gate_glow(biome_id: String) -> Color:
 	return Color(0.48, 0.78, 0.52)
 
 
-## The posts, the lintel and the sheet every gate is built on. A faction dresses
-## around it; none of them rewrites it, so the three stay one family of door.
-static func _gate_frame(root: Node3D, stone: Material, sheet: Material,
-		glow: Color, energy: float = 1.2) -> void:
-	for side in [-1.0, 1.0]:
-		Geo.box(root, Vector3(0.44, 3.3, 0.5), Vector3(float(side) * 1.3, 1.65, 0.0), stone)
-	Geo.box(root, Vector3(3.1, 0.5, 0.56), Vector3(0.0, 3.42, 0.0), stone)
-	Geo.box(root, Vector3(2.2, 2.9, 0.06), Vector3(0.0, 1.6, 0.02), sheet)
-	var light := OmniLight3D.new()
-	light.light_color = glow
-	light.light_energy = 2.0
-	light.omni_range = 10.0
-	light.position = Vector3(0.0, 1.7, 0.6)
-	root.add_child(light)
-	if energy > 0.0:
-		(sheet as StandardMaterial3D).emission_energy_multiplier = energy
-
-
-static func _glow_material(colour: Color, energy: float) -> StandardMaterial3D:
-	var mat := Geo.material(colour, 0.4, 0.3)
-	mat.emission_enabled = true
-	mat.emission = colour
-	mat.emission_energy_multiplier = energy
-	return mat
-
-
-## Watchers: the wood's own door - grey stone, a green sheet, two thin posts of
-## light. It is the gate the run has always opened on.
-static func _gate_watchers(root: Node3D) -> void:
-	var glow := gate_glow("wilderness")
-	var stone := Geo.material(Color(0.26, 0.25, 0.23), 0.0, 0.9)
-	var trim := _glow_material(glow, 1.2)
-	_gate_frame(root, stone, trim, glow)
-	for side in [-1.0, 1.0]:
-		Geo.box(root, Vector3(0.10, 3.0, 0.10), Vector3(float(side) * 1.12, 1.6, 0.06), trim)
-
-
-## Demons: black rock hung with bone. Skulls watch from both posts, ribs of bone
-## climb the lintel, and the sheet burns the colour of a forge mouth.
-static func _gate_demons(root: Node3D) -> void:
-	var glow := gate_glow("caves")
-	var rock := Geo.material(Color(0.05, 0.045, 0.05), 0.05, 0.95)
-	var core := _glow_material(Color(0.42, 0.06, 0.04), 0.5)
-	var bone := Geo.material(Color(0.84, 0.81, 0.70), 0.0, 0.55)
-	var dark := Geo.material(Color(0.03, 0.02, 0.02), 0.0, 0.9)
-	_gate_frame(root, rock, core, glow, 0.55)
-	# The sheet is a mouth in the dark rock, not a sheet of light: one ember line
-	# down its middle reads as the far side of the fire.
-	Geo.box(root, Vector3(0.14, 2.7, 0.09), Vector3(0.0, 1.6, 0.05), _glow_material(glow, 1.9))
-	for side in [-1.0, 1.0]:
-		var x := float(side) * 1.3
-		for step in 3:
-			var y := 1.05 + 0.95 * float(step)
-			# A skull: a cranium, a jaw under it, and the two holes it looks out of.
-			Geo.sphere(root, 0.17, Vector3(x, y, 0.34), bone)
-			Geo.box(root, Vector3(0.17, 0.07, 0.14), Vector3(x, y - 0.16, 0.34), bone)
-			for eye in [-1.0, 1.0]:
-				Geo.box(root, Vector3(0.05, 0.06, 0.05),
-					Vector3(x + float(eye) * 0.06, y + 0.02, 0.47), dark)
-		# Bone spurs jutting out of the post's back.
-		for step in 2:
-			var spur := Geo.cylinder(root, 0.035, 0.0, 0.5,
-				Vector3(x + float(side) * 0.3, 2.2 + 0.5 * float(step), -0.12), bone, 6)
-			spur.rotation.z = float(side) * 0.9
-	# Ribs of bone along the lintel, caught between the posts.
-	for step in 5:
-		var rib := Geo.cylinder(root, 0.04, 0.05, 0.62,
-			Vector3(-0.9 + 0.45 * float(step), 3.72, 0.0), bone, 6)
-		rib.rotation.x = 0.35
-	Geo.sphere(root, 0.2, Vector3(0.0, 3.36, 0.34), bone)
-
-
-## Blood clones: a body turned inside out. Dark maroon flesh for stone, a bright
-## blood sheet, ribs standing proud of both posts and a heart hanging off the
-## lintel with its veins drawn over the flesh.
-static func _gate_clones(root: Node3D) -> void:
-	var glow := gate_glow("arena")
-	var flesh := Geo.material(Color(0.26, 0.03, 0.04), 0.0, 0.55)
-	var sinew := Geo.material(Color(0.70, 0.26, 0.28), 0.0, 0.35)
-	var core := _glow_material(Color(0.62, 0.04, 0.05), 1.1)
-	var blood := _glow_material(glow, 1.8)
-	_gate_frame(root, flesh, core, glow, 1.1)
-	# Ribs: pale sinew over the dark flesh, six a side, each a step further out.
-	for side in [-1.0, 1.0]:
-		var x := float(side) * 1.3
-		for step in 6:
-			var y := 0.62 + 0.52 * float(step)
-			var rib := Geo.sphere(root, 0.115, Vector3(x, y, 0.30), sinew,
-				Vector3(1.7, 0.55, 1.2))
-			rib.rotation.z = 0.12 * float(side) * float(step) - 0.1 * float(side)
-		# The muscle the ribs are set in, a shade lighter than the frame.
-		Geo.box(root, Vector3(0.12, 2.9, 0.16), Vector3(x + float(side) * 0.16, 1.6, 0.22), sinew)
-	# The heart: out in front of the lintel where it can be read from the ground.
-	var heart := Geo.sphere(root, 0.24, Vector3(0.0, 3.30, 0.44), blood,
-		Vector3(1.0, 1.15, 0.85))
-	heart.rotation.z = 0.3
-	Geo.sphere(root, 0.11, Vector3(0.17, 3.48, 0.42), blood)
-	Geo.beam(root, Vector3(-0.05, 3.18, 0.40), Vector3(-1.22, 2.30, 0.34), 0.05, sinew)
-	Geo.beam(root, Vector3(0.05, 3.18, 0.40), Vector3(1.22, 2.30, 0.34), 0.05, sinew)
-	Geo.beam(root, Vector3(0.0, 3.52, 0.40), Vector3(0.0, 3.68, 0.20), 0.045, sinew)
-	# A seam of blood down the sheet: the body is open, and something is behind it.
-	Geo.box(root, Vector3(0.10, 2.6, 0.09), Vector3(0.0, 1.65, 0.06), blood)
-	for step in 4:
-		Geo.box(root, Vector3(0.34, 0.06, 0.07),
-			Vector3(-0.5 + 0.34 * float(step), 2.35 - 0.3 * float(step), 0.06), blood)
-
-
 # --- helpers ---------------------------------------------------------------
 
-static func _label(parent: Node3D, text: String, at: Vector3, colour: Color,
-		size: int = 36, pixel: float = 0.006) -> Label3D:
+## The plate a prop hangs its name on: the tier's rendered plaque standing as a
+## camera billboard, with the words laid over it in the display face. `width` is
+## the plate's width in metres; the type is scaled to fit inside it, so a long
+## contract line and a two-word name both sit on their plate.
+static func _plaque(parent: Node3D, text: String, at: Vector3, colour: Color,
+		rarity: String = "", width: float = 2.2) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Plaque"
+	root.position = at
+	parent.add_child(root)
+	var plate := Sprite3D.new()
+	plate.texture = CardArt.plaque(rarity)
+	plate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	plate.no_depth_test = true
+	plate.render_priority = 2
+	plate.pixel_size = width / 1024.0
+	root.add_child(plate)
 	var label := Label3D.new()
 	label.text = text
-	label.font_size = size
-	label.pixel_size = pixel
-	label.modulate = colour
-	label.outline_modulate = Color(0.03, 0.03, 0.04, 0.9)
-	label.outline_size = 12
-	label.position = at
+	label.font = DISPLAY_FONT
+	label.font_size = 64
+	# PirataOne advances about 0.46 em. The plate keeps two fifths of its width
+	# clear as margin, so the name sits *on* a sign rather than filling it.
+	var advance := 0.46 * 64.0
+	var fitting := width * 0.60 / maxf(1.0, float(text.length()) * advance)
+	label.pixel_size = clampf(fitting, 0.0008, 0.0024)
+	label.modulate = colour.lightened(0.35)
+	label.outline_modulate = Color(0.02, 0.02, 0.03, 0.62)
+	label.outline_size = 8
+	label.render_priority = 3
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
-	parent.add_child(label)
-	return label
+	root.add_child(label)
+	return root
 
 
 static func _rarity_colour(rarity: String) -> Color:

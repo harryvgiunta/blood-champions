@@ -1,0 +1,35 @@
+IRONWOOD GATE - LICENSE AND PROVENANCE
+
+Everything under this directory (assets/props/gates/) is built by one command:
+
+    python tools/build_gate_assets.py
+
+which runs Blender 5.1 in background mode on tools/prepare_gate_assets.py.
+ironwood_gates.json records the Blender version, the seed, the digest of every
+output and every texture map, and the measured bounds of the three doors. No
+downloaded model, scan or texture is used: the geometry, the analytic surface
+fields and the Cycles bakes are authored by that script from nothing.
+
+WHAT IS HERE
+
+  ironwood_gates.glb          Gate_Watchers, Gate_Demons, Gate_Clones
+  ironwood_gates.json         the build record
+  textures/gate_<group>_*.png the shipped maps, one set per material:
+                              granite (2048), basalt, bone, flesh and iron (1024
+                              each). Albedo is sRGB pigment only, the normal is
+                              OpenGL tangent space, and ORM is R occlusion,
+                              G roughness, B metallic.
+
+CONVENTIONS
+
+  axes      Godot +Y up; every gate stands on its origin and faces -Z
+  opening   2.2 m wide by 2.9 m tall - the runtime lays the biome's sheet in it
+  albedo    pigment only - no light, shadow or glare is baked into a map
+
+The glowing sheet is not in this asset: its colour is the biome's promise, so
+scripts/roguelite/gate_visual.gd draws it and owns the lamp.
+
+LICENCE
+
+Original work made for this project: CC BY-NC-SA 4.0, section 3 of LICENSE.md.
+The upstream-generic CC0 dedication does not apply to these files.

@@ -47,14 +47,17 @@ static func revive_health(max_health: float, fraction: float = Contracts.REVIVE_
 	return clampf(ceiling * clampf(fraction, 0.0, 1.0), 1.0, ceiling)
 
 ## True once a downed body has been on the ground long enough to bleed out.
-static func bled_out(seconds: float) -> bool:
-	return seconds >= Contracts.DOWNED_BLEED_SECONDS - CLOCK_SLACK
+## `limit` is the body's own clock - a hireling's ten seconds, a soul's thirty -
+## so the arithmetic and the death are always the same number.
+static func bled_out(seconds: float, limit: float = Contracts.DOWNED_BLEED_SECONDS) -> bool:
+	return seconds >= maxf(limit, 0.0) - CLOCK_SLACK
 
 ## How far through the bleed clock a body is: 0 when it just fell, 1 on the frame
 ## it dies. The body writes this onto the rig so the drip and any future
-## presentation read the same number as the clock that kills it.
-static func bleed_fraction(seconds: float) -> float:
-	return clampf(seconds / Contracts.DOWNED_BLEED_SECONDS, 0.0, 1.0)
+## presentation read the same number as the clock that kills it, which is why the
+## limit travels with the question: a hireling's drip quickens over his ten.
+static func bleed_fraction(seconds: float, limit: float = Contracts.DOWNED_BLEED_SECONDS) -> float:
+	return clampf(seconds / maxf(limit, 0.001), 0.0, 1.0)
 
 ## Seconds between two drips. Slow while the body still has time, fast once the
 ## clock is nearly out: the quickening is the only in-world sign of a timer the

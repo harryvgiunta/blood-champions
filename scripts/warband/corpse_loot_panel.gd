@@ -1,14 +1,16 @@
 class_name CorpseLootPanel
 extends WarbandPaperdoll
-## The dead body's screen: the same paperdoll renderer and the same shared stash,
-## pointed at a corpse instead of a mercenary.
+## The dead body's screen: the character screen, pointed at a corpse instead of a
+## mercenary.
 ##
 ## It is a class of its own so a scene can own one screen layer: build a
 ## `CorpseLootPanel` where it would build a `WarbandPaperdoll`, and `open()` still
 ## dresses the warband while `open_corpse()` searches the body at the player's
-## feet. The two modes are never shown at once, and both land on the same booking
-## path - a piece taken off a corpse is a `WarbandStash` row the instant it is
-## taken, so there is no second inventory to reconcile.
+## feet. The two modes are never shown at once: corpse mode hides the tabs and the
+## portrait, turns the worn rows into the kit the body still carries and the right
+## column into its pockets. Both land on the same booking path - a piece taken off
+## a corpse is a `WarbandStash` row the instant it is taken, so there is no second
+## inventory to reconcile.
 ##
 ## Looting a body is a click, not an aim, so opening this screen takes the mouse
 ## pointer and closing it hands back the mode the scene had, as far as

@@ -47,7 +47,7 @@ static func _material(tone: String, metallic: float, roughness: float) -> Standa
 
 ## One trophy as a merged mesh, in its own frame (origin on the garment, +Y up,
 ## +Z away from the body). `size` is the measured cross-section a ring trophy
-## (necklace, bracelet, rattles) goes round - half width along X and half depth
+## (a bracelet, the rattles) goes round - half width along X and half depth
 ## along Z - and is ignored by a hanging trophy. `side` is +1 for the body's left.
 static func build(kind: String, mats: Dictionary, size: Vector2 = Vector2.ZERO,
 		side: float = 1.0) -> CampKit.Merged:
@@ -146,30 +146,6 @@ static func build(kind: String, mats: Dictionary, size: Vector2 = Vector2.ZERO,
 				CampKit.add_beam(m, root, mid, 0.017, mats["horn"], 6, 0.014)
 				CampKit.add_beam(m, mid, bend, 0.014, mats["horn"], 6, 0.009)
 				CampKit.add_beam(m, bend, tip, 0.009, mats["horn"], 5, 0.0015)
-	return m
-
-
-## Necklaces circle a measured neck; what hangs on them hangs at the front.
-static func build_necklace(kind: String, mats: Dictionary, size: Vector2) -> CampKit.Merged:
-	var m := CampKit.Merged.new()
-	_cord_ring(m, mats, size)
-	var count := 7 if kind == "teeth" else 5
-	for i in count:
-		var angle := PI * 0.5 + (float(i) - float(count - 1) * 0.5) * 0.24
-		var at := _on_ring(size, angle, 0.004)
-		var outward := _on_ring(size, angle, 0.0).normalized()
-		match kind:
-			"teeth":
-				_fang(m, mats, at, (Vector3(0.0, -1.0, 0.0) + outward * 0.25).normalized(),
-					0.024 + 0.008 * float(i % 2))
-			"claws":
-				_claw(m, mats, at, 0.03)
-			_:
-				if i == count / 2:
-					_skull(m, mats, at + Vector3(0.0, -0.04, 0.0) + outward * 0.012, 0.62)
-					CampKit.add_beam(m, at, at + Vector3(0.0, -0.016, 0.0), 0.0022, mats["cord"], 3)
-				else:
-					_phalanx(m, mats, at, 0.024)
 	return m
 
 

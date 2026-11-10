@@ -19,6 +19,9 @@ var cooldown_left := 0.0
 ## cinder devils configure a shorter, quicker step.
 var travel := TRAVEL
 var duration := DURATION
+## A run's `step_recovery` cuts this: 1.0 is the printed cooldown, 0.85 is one
+## Speed card's 15% off it. Floored by the body that hands it over.
+var recovery := 1.0
 
 func can_step(grounded: bool, rolling: bool) -> bool:
 	return grounded and not rolling and not active and cooldown_left <= 0.0
@@ -32,7 +35,7 @@ func try_step(planar: Vector3, grounded: bool, rolling: bool) -> bool:
 	direction = flat.normalized()
 	active = true
 	progress = 0.0
-	cooldown_left = COOLDOWN + duration
+	cooldown_left = (COOLDOWN + duration) * recovery
 	return true
 
 func advance(delta: float, grounded: bool) -> void:

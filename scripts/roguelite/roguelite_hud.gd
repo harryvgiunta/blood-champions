@@ -14,17 +14,19 @@ extends CanvasLayer
 const Ledger = preload("res://scripts/ui/ledger_theme.gd")
 const Mods = preload("res://scripts/roguelite/mod_catalog.gd")
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 const LAYER := 7
 ## How many carried upgrades the plate lists before it says "and more".
 const MOD_ROWS_SHOWN := 12
-## The draft card: one column of three, or two abreast past four offers. The card
-## wraps its own description, so the height is the row and not the panel.
-const CARD_HEIGHT := 108
-const CARD_WIDTH := 322
-const PANEL_SINGLE := 660.0
-const PANEL_GRID := 720.0
+## The draft and the shop are a row of three cards, wrapping onto a second row
+## past that. The card owns its own size (`RogueliteRewardCard`), so the panel is
+## measured from the grid and not from a row height.
+const CARD_COLUMNS := 3
+const CARD_GAP := 14
+const PANEL_CARDS := 1160.0
+const Card = preload("res://scripts/roguelite/reward_card.gd")
 const INK := Color(0.94, 0.88, 0.72)
 const MUTED := Color(0.70, 0.64, 0.52)
 const BRASS := Color(0.85, 0.72, 0.42)
@@ -135,12 +137,9 @@ func _build() -> void:
 	panel.offset_right = 310
 	panel.offset_top = -170
 	panel.offset_bottom = 170
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.07, 0.065, 0.06, 1.0)
-	style.border_color = Color(0.55, 0.45, 0.28)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(4)
-	panel.add_theme_stylebox_override("panel", style)
+	# The window wears the same rendered iron plate every other panel in the game
+	# does; a flat rectangle behind a set of textured cards reads as a debug box.
+	panel.add_theme_stylebox_override("panel", _panel_skin())
 	_overlay.add_child(panel)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 10)
@@ -158,6 +157,22 @@ func _build() -> void:
 	_overlay_hint.add_theme_color_override("font_color", MUTED)
 	_overlay_hint.add_theme_font_size_override("font_size", 15)
 	column.add_child(_overlay_hint)
+
+
+## The draft's backdrop: the ledger's iron nine-slice, with room inside its rim
+## for the title, the card board and the hint line.
+func _panel_skin() -> StyleBoxTexture:
+	var box := StyleBoxTexture.new()
+	box.texture = Ledger.plate_texture("iron", "idle")
+	box.texture_margin_left = Ledger.PLATE_MARGIN.x
+	box.texture_margin_right = Ledger.PLATE_MARGIN.x
+	box.texture_margin_top = Ledger.PLATE_MARGIN.y
+	box.texture_margin_bottom = Ledger.PLATE_MARGIN.y
+	box.content_margin_left = 22
+	box.content_margin_right = 22
+	box.content_margin_top = 16
+	box.content_margin_bottom = 14
+	return box
 
 
 func _top_label(text: String, size: int, colour: Color) -> Label:
@@ -193,10 +208,20 @@ func _refresh() -> void:
 	var island := int(state.get("island", 1))
 	_island_label.text = str(state.get("biome_name", ""))
 	var tag := ""
-	if bool(state.get("shop_level", false)):
+	if bool(state.get("market_level", false)):
+		tag = "   ·   MARKET"
+	elif bool(state.get("shop_level", false)):
 		tag = "   ·   SHOP BEFORE THE BOSS"
 	elif bool(state.get("boss_level", false)):
 		tag = "   ·   BOSS"
+	var contract: Variant = state.get("contract", {})
+	if contract is Dictionary and not (contract as Dictionary).is_empty():
+		var trial := str((contract as Dictionary).get("trial", ""))
+		if trial != "" and trial != "open":
+			tag += "   ·   " + trial.to_upper()
+		var chest: Variant = (contract as Dictionary).get("chest", {})
+		if chest is Dictionary and int((chest as Dictionary).get("mult", 1)) > 1:
+			tag += "   ·   2X"
 	_wave_label.text = "LEVEL %d   ·   ISLAND %d%s" % [level, island, tag]
 	_party_label.text = "ALIVE %d  ·  HOSTILES %d" % [
 		int(state.get("party", 1)) - _downed_count(), int(state.get("living", 0))]
@@ -309,64 +334,79 @@ func _write_mods(run) -> void:
 
 # --- the draft and the shop -------------------------------------------------
 
-func open_draft(serial: int, offers: Array) -> void:
+func open_draft(serial: int, offers: Array, title: String = "CHOOSE AN UPGRADE",
+		hint: String = "The chest offers one upgrade for this run. " +
+		"Choose with the mouse or Escape to step away.",
+		kind: String = "mod", tier: String = "") -> void:
 	_clear_overlay()
 	_overlay_serial = serial
-	_overlay_title.text = "CHOOSE AN UPGRADE"
+	_overlay_title.text = title
 	var local = _local_player()
-	# Seven offers is the ceiling (three, Big Chests' two and luck's two) and seven
-	# 64-pixel rows would run off the panel: past four, the cards go two abreast.
-	var grid: Container = null
-	if offers.size() > 4:
-		grid = GridContainer.new()
-		grid.columns = 2
-		grid.add_theme_constant_override("h_separation", 8)
-		grid.add_theme_constant_override("v_separation", 8)
-		_overlay_body.add_child(grid)
+	var grid := _card_grid()
 	for index in offers.size():
-		var mod_id := str(offers[index])
-		var row: Dictionary = Mods.get_mod(mod_id)
-		var carried := 0
-		if local != null and is_instance_valid(local):
-			carried = int(local.engine.stacks_of(mod_id))
-		var badge := "    ×%d" % carried if carried > 0 else ""
-		# The tier is the colour, the family is the line under the name: 161 rows
-		# is why the card has to say which hand a name belongs to.
-		var button := Button.new()
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = "%s%s\n%s  ·  %s\n%s" % [
-			str(row.get("name", mod_id)), badge,
-			Mods.family_label_of(mod_id), Mods.rarity_of(mod_id).to_upper(),
-			str(row.get("description", ""))]
-		button.add_theme_color_override("font_color",
-			Mods.RARITY_COLOUR.get(str(row.get("rarity", "common")), INK))
-		button.add_theme_font_size_override("font_size", 17)
-		# 161 rows means descriptions long enough to run off a card: every card
-		# wraps, and the panel is sized to the grid rather than to the text.
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.custom_minimum_size = Vector2(CARD_WIDTH if grid != null else 0,
-			CARD_HEIGHT)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.pressed.connect(_on_draft_pressed.bind(index))
-		if grid != null:
-			grid.add_child(button)
+		var id := str(offers[index])
+		var card = Card.new()
+		if kind == "skill":
+			# An ABILITY chest's card is a skill, not a row: it is the player's
+			# from the pick onward, so the plate is the promise's tier and the
+			# emblem is the ability sigil every skill shares.
+			var definition: Dictionary = AbilityRules.by_id(id)
+			var on_bar := false
+			if local != null and is_instance_valid(local) and world != null \
+					and world.get("warband") != null:
+				on_bar = world.warband.roster.hotbar_order_of(
+					int(local.merc_id)).has(id)
+			card.compose(str(definition.get("name", id)).capitalize(),
+				"%s  ·  SKILL" % AbilityRules.family_label(definition),
+				str(definition.get("description", "")),
+				tier if not tier.is_empty() else Mods.RARITY_COMMON,
+				"ability", "ON THE BAR" if on_bar else "UNLOCK")
 		else:
-			_overlay_body.add_child(button)
-		_draft_buttons.append(button)
-	var rows := ceili(float(offers.size()) / 2.0) if grid != null else offers.size()
-	_resize_overlay(maxf(1, rows) * (CARD_HEIGHT + 8), PANEL_GRID if grid != null
-		else PANEL_SINGLE)
-	_overlay_hint.text = "The pedestal offers one upgrade for this run. Choose with the mouse or Escape to step away."
+			var row: Dictionary = Mods.get_mod(id)
+			var carried := 0
+			if local != null and is_instance_valid(local):
+				carried = int(local.engine.stacks_of(id))
+			# The tier is the plate's metal and the name's ink; the family is the
+			# emblem and the line under the name. 161 rows is why a card says which
+			# hand a name belongs to without being read as a sentence.
+			card.compose(str(row.get("name", id)),
+				"%s  ·  %s" % [Mods.family_label_of(id),
+					Mods.rarity_of(id).to_upper()],
+				str(row.get("description", "")), Mods.rarity_of(id),
+				Mods.family_of(id), "", carried)
+		card.pressed.connect(_on_draft_pressed.bind(index))
+		grid.add_child(card)
+		_draft_buttons.append(card)
+	_resize_overlay(_grid_height(offers.size()), PANEL_CARDS)
+	_overlay_hint.text = hint
 	_overlay.visible = true
 
 
-## The panel grows with its cards instead of clipping them: three is the old
-## height and anything past it is the card's own row plus the panel's padding.
+## The board the cards are laid on. One container for both windows, so the draft
+## and the shop stand in the same places on screen.
+func _card_grid() -> GridContainer:
+	var grid := GridContainer.new()
+	grid.name = "Cards"
+	grid.columns = CARD_COLUMNS
+	grid.add_theme_constant_override("h_separation", CARD_GAP)
+	grid.add_theme_constant_override("v_separation", CARD_GAP)
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_overlay_body.add_child(grid)
+	return grid
+
+
+func _grid_height(count: int) -> float:
+	var rows := maxi(1, ceili(float(count) / float(CARD_COLUMNS)))
+	return float(rows) * Card.HEIGHT + float(rows - 1) * CARD_GAP
+
+
+## The panel grows with its cards instead of clipping them: three is one row,
+## and anything past it is another card's height plus the gap.
 func _resize_overlay(body_height: float, width: float) -> void:
 	var panel = _overlay.get_node_or_null("DraftPanel")
 	if panel == null:
 		return
-	var height := clampf(maxf(340.0, body_height + 150.0), 340.0, 760.0)
+	var height := clampf(maxf(330.0, body_height + 172.0), 330.0, 900.0)
 	panel.custom_minimum_size = Vector2(width, height)
 	panel.offset_left = -width * 0.5
 	panel.offset_right = width * 0.5
@@ -387,25 +427,27 @@ func _on_draft_pressed(index: int) -> void:
 func open_shop(serial: int, wares: Array) -> void:
 	_clear_overlay()
 	_overlay_serial = serial
-	_overlay_title.text = "THE SHOP  ·  %d GOLD" % int(
-		director.state().get("gold", 0) if director != null else 0)
+	var market := bool(director.state().get("market_level", false)) if director != null else false
+	_overlay_title.text = "%s  ·  %d GOLD" % [
+		"THE MARKET" if market else "THE SHOP",
+		int(director.state().get("gold", 0) if director != null else 0)]
+	var grid := _card_grid()
 	for index in wares.size():
 		var ware: Dictionary = wares[index]
-		var button := Button.new()
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = "%s  ·  %d gold" % [str(ware.get("name", "?")),
-			int(ware.get("price", 0))]
-		button.add_theme_color_override("font_color",
-			Mods.RARITY_COLOUR.get(str(ware.get("rarity", "common")), INK))
-		button.add_theme_font_size_override("font_size", 18)
-		button.custom_minimum_size = Vector2(0, 44)
-		if bool(ware.get("sold", false)):
-			button.disabled = true
-			button.text += "  ·  SOLD"
-		button.pressed.connect(_on_shop_pressed.bind(index))
-		_overlay_body.add_child(button)
-		_shop_buttons.append(button)
-	_resize_overlay(maxf(1, wares.size()) * 52, PANEL_SINGLE)
+		var mod_id := str(ware.get("id", ""))
+		var row: Dictionary = Mods.get_mod(mod_id)
+		var sold := bool(ware.get("sold", false))
+		var card = Card.new()
+		card.compose(str(ware.get("name", "?")),
+			"%s  ·  %s" % [Mods.family_label_of(mod_id),
+				Mods.rarity_of(mod_id).to_upper()],
+			str(row.get("description", "")), Mods.rarity_of(mod_id),
+			Mods.family_of(mod_id), "SOLD" if sold else "%d GOLD" % int(ware.get("price", 0)))
+		card.set_spent(sold)
+		card.pressed.connect(_on_shop_pressed.bind(index))
+		grid.add_child(card)
+		_shop_buttons.append(card)
+	_resize_overlay(_grid_height(wares.size()), PANEL_CARDS)
 	_overlay_hint.text = "The party's gold buys the wares; the rack beside the stall takes the boss keys. Escape steps away."
 	_overlay.visible = true
 
@@ -417,6 +459,86 @@ func _on_shop_pressed(index: int) -> void:
 	if world != null and world.get("controller") != null:
 		peer = int(world.controller.local_peer_id)
 	director.buy(_overlay_serial, index, peer)
+	close_all()
+
+
+## The recruiter's board: three bodies for sale, one card each. The card carries
+## the man's name, his archetype, the kit he is sworn in, the one skill he will
+## fire and his price - everything the gold buys, because a hire is not a card the
+## player will read twice.
+func open_recruiter(serial: int, hires: Array) -> void:
+	_clear_overlay()
+	_overlay_serial = serial
+	_overlay_title.text = "THE RECRUITER  ·  %d GOLD" % int(
+		director.state().get("gold", 0) if director != null else 0)
+	var grid := _card_grid()
+	for index in hires.size():
+		var offer: Dictionary = hires[index]
+		var sold := bool(offer.get("sold", false))
+		var rung := int(offer.get("rung", 0))
+		var card = Card.new()
+		card.compose(str(offer.get("name", "?")).to_upper(),
+			"%s  ·  %s" % [str(offer.get("archetype_label", "FIGHTER")),
+				str(offer.get("armor_set", "")).to_upper()],
+			str(offer.get("body", "")), _hire_rarity(rung),
+			"shot" if str(offer.get("archetype", "")) == "ranged" else "hand",
+			"SOLD" if sold else "%d GOLD" % int(offer.get("price", 0)))
+		card.set_spent(sold)
+		card.pressed.connect(_on_recruit_pressed.bind(index))
+		grid.add_child(card)
+		_shop_buttons.append(card)
+	# The party's own recruits stand under the board, each with the press that pays
+	# him off: a body bought for a run is the run's to release, and the desk that
+	# sold him is where he is released.
+	var roster = world.get("warband").roster if world != null and world.get("warband") != null else null
+	if roster != null:
+		for raw_id in roster.ids():
+			var merc_id := int(raw_id)
+			if not roster.is_recruit(merc_id):
+				continue
+			var release := Button.new()
+			release.focus_mode = Control.FOCUS_NONE
+			release.text = "PAY OFF  ·  %s" % str(roster.name_of(merc_id)).to_upper()
+			release.tooltip_text = "Dismiss this recruit for good. His kit is his own and leaves with him; the place he stood is free for the next hire."
+			release.pressed.connect(_on_dismiss_pressed.bind(merc_id))
+			grid.add_child(release)
+			_shop_buttons.append(release)
+	_resize_overlay(_grid_height(maxi(hires.size(), 1)), PANEL_CARDS)
+	_overlay_hint.text = "A recruit is a body for the run: it fights with the band, it costs no place in the cap, and it does not come back. Its kit is the kit it was sworn in. PAY OFF dismisses one for good."
+	_overlay.visible = true
+
+
+## Pay a recruit off from the board that sold him. The panel closes on the press:
+## the board the desk reopens is the party's own, with the man gone from it.
+func _on_dismiss_pressed(merc_id: int) -> void:
+	if director == null:
+		return
+	var result: Dictionary = director.dismiss(merc_id)
+	if not bool(result.get("ok", true)):
+		# A refusal keeps the board up and says why (a soul inside the body, a body
+		# that was never a recruit); the run's notice event says the rest.
+		_overlay_hint.text = str(result.get("message", ""))
+		return
+	close_all()
+
+
+## What a rung reads as on the card's frame: the salvage tier is a plain card, the
+## plate-and-greatsword tier is the one worth a legend's frame.
+static func _hire_rarity(rung: int) -> String:
+	if rung >= 4:
+		return Mods.RARITY_LEGENDARY
+	if rung >= 2:
+		return Mods.RARITY_EPIC
+	return Mods.RARITY_COMMON
+
+
+func _on_recruit_pressed(index: int) -> void:
+	if director == null:
+		return
+	var peer := 1
+	if world != null and world.get("controller") != null:
+		peer = int(world.controller.local_peer_id)
+	director.hire(_overlay_serial, index, peer)
 	close_all()
 
 

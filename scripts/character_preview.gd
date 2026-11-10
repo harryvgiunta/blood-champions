@@ -5,7 +5,6 @@ extends SubViewportContainer
 ## collision or network state.
 
 const Archer = preload("res://scripts/archer.gd")
-const TrinketArt = preload("res://scripts/trinket_art.gd")
 
 const RIM_COLOR := Color("e9bf76")
 ## Where the portrait camera aims when the rig cannot answer: a standing ranger's
@@ -24,6 +23,15 @@ const BUST_DROP := 0.55
 ## three-quarter view and not a profile.
 const BUST_YAW := 16.0
 
+## Where the standing shot's camera sits, and how much of the box the body fills.
+## The portrait is a tall, narrow box: with `KEEP_WIDTH` the vertical field of view
+## widens with the box's aspect and the ranger shrinks to a distant figure. The
+## standing camera therefore keeps the *height* and stands back by the figure's
+## own measure, so a 210 x 430 portrait frames the same man a wide stage would.
+const FULL_BODY_HEIGHT := 2.0
+const FULL_BODY_FILL := 0.88
+const FULL_BODY_FOV := 26.0
+
 var rig
 var viewport: SubViewport
 var camera: Camera3D
@@ -37,7 +45,6 @@ var _active := false
 ## The kit and the look the stage is showing, kept so a rig rebuilt for a new
 ## body can be dressed with the same gear it was already wearing.
 var _loadout: Dictionary = {}
-var _trinkets: Dictionary = {}
 var _appearance: Dictionary = {}
 ## the same worked steel the body in the world does.
 
@@ -140,13 +147,11 @@ func _add_stage() -> void:
 	viewport.add_child(platform)
 
 
-func apply_kit(loadout: Dictionary, trinkets: Dictionary) -> void:
+func apply_kit(loadout: Dictionary) -> void:
 	if not _built:
 		return
 	_loadout = loadout
-	_trinkets = trinkets
 	rig.apply_loadout(loadout)
-	TrinketArt.apply(rig.skeleton,trinkets)
 	_frame_camera()
 
 
@@ -165,7 +170,7 @@ func set_appearance(profile: Dictionary) -> void:
 	viewport.add_child(rig)
 	rig.set_physics_process(false)
 	if not _loadout.is_empty():
-		apply_kit(_loadout, _trinkets)
+		apply_kit(_loadout)
 	_frame_camera()
 
 
@@ -203,8 +208,12 @@ func _frame_camera() -> void:
 		# belongs to the standing figure on the gear page.
 		platform.visible = not _bust
 	if not _bust:
-		camera.fov = 28.0
-		camera.look_at_from_position(Vector3(0.52,1.14,-4.02),Vector3(0.0,1.03,0.0),Vector3.UP)
+		camera.keep_aspect = Camera3D.KEEP_HEIGHT
+		camera.fov = FULL_BODY_FOV
+		var half := deg_to_rad(FULL_BODY_FOV) * 0.5
+		var distance: float = (FULL_BODY_HEIGHT * 0.5) / (FULL_BODY_FILL * tan(half))
+		camera.look_at_from_position(Vector3(0.16, 1.02, -distance),
+			Vector3(0.0, 0.97, 0.0), Vector3.UP)
 		return
 	var head := _head_centre()
 	var half_height: float = maxf(_head_half_height(), 0.08)
@@ -213,6 +222,7 @@ func _frame_camera() -> void:
 	var distance: float = half_height * BUST_STANDOFF
 	var yaw := deg_to_rad(BUST_YAW)
 	var stand := Vector3(sin(yaw), 0.0, -cos(yaw)) * distance
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	camera.fov = 34.0
 	camera.look_at_from_position(head + Vector3(0.0, half_height * BUST_LIFT, 0.0) + stand,
 		head + Vector3(0.0, -half_height * BUST_DROP, 0.0), Vector3.UP)

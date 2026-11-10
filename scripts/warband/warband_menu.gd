@@ -10,9 +10,9 @@ extends Control
 ## does the pausing of input; this file never touches `get_tree().paused`.
 ##
 ## One LedgerFrame, one column of rows, and settings one page in: the sound page
-## is the shared `SoundSettingsPage`, the same one the campaign's Escape window
-## and the frontier's quick menu show, plus the windowed/fullscreen row that
-## reads the window's real mode instead of remembering what it asked for.
+## is the shared `SoundSettingsPage` and the display row the shared
+## `DisplaySettingsButton`, the same ones the campaign's Escape window shows.
+## The row asks the `Settings` autoload, which remembers the mode on disk.
 
 signal resumed
 signal load_requested
@@ -24,6 +24,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
+const DisplayButtonScript = preload("res://scripts/ui/display_settings_button.gd")
 const KeybindPageScript = preload("res://scripts/ui/keybind_page.gd")
 const PointerGate = preload("res://scripts/pointer_gate.gd")
 
@@ -55,7 +56,8 @@ var settings_button: Button
 var keys_button: Button
 var exit_button: Button
 var quit_button: Button
-## The windowed/fullscreen row on the settings page.
+## The windowed/fullscreen row on the settings page, and the shared row itself.
+var display_page
 var display_button: Button
 var back_button: Button
 ## The shared mixer page; it owns every level and mute, this menu owns none.
@@ -297,16 +299,6 @@ func set_party_mode(mode: String) -> bool:
 	return ok
 
 
-func is_fullscreen() -> bool:
-	if not is_inside_tree():
-		return false
-	var window := get_window()
-	if window == null:
-		return false
-	return window.mode == Window.MODE_FULLSCREEN \
-		or window.mode == Window.MODE_EXCLUSIVE_FULLSCREEN
-
-
 # --- build -----------------------------------------------------------------
 
 func _build() -> void:
@@ -437,9 +429,11 @@ func _build() -> void:
 	sound_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_sound_layer.add_child(sound_spacer)
 
-	display_button = _button("", "", 46)
-	display_button.pressed.connect(_toggle_display)
-	_sound_layer.add_child(display_button)
+	display_page = DisplayButtonScript.new()
+	display_page.name = "Display"
+	display_page.changed.connect(_on_display_changed)
+	_sound_layer.add_child(display_page)
+	display_button = display_page
 	back_button = _button("BACK", "", 46)
 	back_button.pressed.connect(show_page.bind(PAGE_MENU))
 	_sound_layer.add_child(back_button)
@@ -499,26 +493,15 @@ func _refresh_load() -> void:
 
 
 func _refresh_display() -> void:
-	if display_button == null:
-		return
-	# The window is the authority: report the mode it is in, not the one the
-	# button last asked for (a headless run or a compositor may refuse).
-	display_button.text = "DISPLAY:  FULLSCREEN" if is_fullscreen() else "DISPLAY:  WINDOWED"
+	if display_page != null:
+		display_page.refresh()
 
 
-func _toggle_display() -> void:
-	if not is_inside_tree():
-		return
-	var window := get_window()
-	if window == null:
-		return
-	if is_fullscreen():
-		window.mode = Window.MODE_WINDOWED
-	else:
-		window.mode = Window.MODE_FULLSCREEN
-	_refresh_display()
-	_note("display", {"mode": window.mode, "fullscreen": is_fullscreen()})
-	if is_fullscreen():
+## The shared row already wrote the mode through `Settings`; this menu only says
+## what happened, on the line it uses for every other move.
+func _on_display_changed() -> void:
+	var full := display_page != null and bool(display_page.is_fullscreen())
+	if full:
 		set_status("Fullscreen. The ledger stays one page deep.")
 	else:
 		set_status("Windowed. Drag the border to resize.")

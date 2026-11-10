@@ -2,21 +2,23 @@ class_name RogueliteStage
 extends Node3D
 ## One bounded island: the ground a run is fought on.
 ##
-## The three biomes are the campaign's own art, recycled: the wood's trees out of
-## `TreeKit` and `WorldStyle`, the cave floor's dripstone and glow out of
-## `CaveKit`, the ring's dressed stone out of `RockKit` and primitives. Nothing
-## here is a new asset pipeline, and nothing here touches the terrain heightfield:
-## the island stands off the field at its own height (`LIFT`), exactly the way the
-## arena ring and the delve already stand away from it.
+## Two of the three biomes are islands in the open: the wood's trees out of
+## `TreeKit` and `WorldStyle`, the pit's dressed stone out of `RockKit` and
+## primitives. The third, the Hollow Beneath, is not an island at all - it is one
+## chamber of the Weeping Hollow's authored floor plan (`cave_room.gd`), cut out,
+## roofed and sealed, so the run fights in the real cave rather than in a painted
+## ring. Nothing here is a new asset pipeline, and nothing here touches the terrain
+## heightfield: every stage stands off the field at its own height (`LIFT`).
 ##
-## What makes it an island rather than a scene is its bound. The fight ring is
-## `radius`; past it the ground runs on for `OUTER_DEPTH` as a darker band with a
-## treeline planted in it, and the fog is three veils deep, so the edge reads as
-## the edge of the world before a body ever reaches it. Walking out is allowed -
-## the run warns, then puts the body back in the middle of the map at a price
-## (`RunDirector._tick_bounds`) - and the solid wall stands at the far side of the
-## band, inside the fog, only so that nothing walks off into the sky. It has no
-## gate: the run's own portals are the way on.
+## What makes an open island an island rather than a scene is its bound. The fight
+## ring is `radius`; past it the ground runs on for `OUTER_DEPTH` as a darker band
+## with a treeline planted in it, and the fog is three veils deep, so the edge
+## reads as the edge of the world before a body ever reaches it. Walking out is
+## allowed - the run warns, then puts the body back in the middle of the map at a
+## price (`RunDirector._tick_bounds`) - and the solid wall stands at the far side
+## of the band, inside the fog, only so that nothing walks off into the sky. It
+## has no gate: the run's own portals are the way on. The chamber needs none of
+## that: its walls are the Hollow's own rock, and a body walks into them.
 
 const Geo = preload("res://scripts/geo.gd")
 const RockKit = preload("res://scripts/world/rock_kit.gd")
@@ -28,10 +30,11 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const WorldScatter = preload("res://scripts/world/scatter.gd")
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 const WorldStyleScript = preload("res://scripts/world/world_style.gd")
+const CaveRoomScript = preload("res://scripts/roguelite/cave_room.gd")
 
-## Out of sight above the campaign and clear of the arena's chamber (260) and the
-## delve (1100 in z). Each stage takes its own height so the corpse and prop of
-## the last island can never be found on the next.
+## Out of sight above the campaign: each stage takes its own height so the corpse
+## and prop of the last island can never be found on the next. The Hollow's
+## chamber stands wholly on the lift, floor and roof alike.
 const LIFT := 620.0
 const STAGE_SPACING := 210.0
 ## How far the island's ground runs past its own turf. The fight ring is `radius`;
@@ -57,11 +60,7 @@ const BIOMES := [
 	},
 	{
 		"id": "caves", "name": "THE HOLLOW BENEATH", "subtitle": "CAVES  ·  DEMONS",
-		"radius": 30.0, "wall_height": 8.0,
-		"earth": Color(0.17, 0.14, 0.12), "sky": Color(0.05, 0.05, 0.06),
-		"fog": Color(0.22, 0.13, 0.09, 0.34), "light": Color(1.0, 0.55, 0.30),
 		"faction": "demons",
-		"grass": 0.05, "ferns": 0.02,
 	},
 	{
 		"id": "arena", "name": "THE BLOOD PIT", "subtitle": "ARENA  ·  BLOOD CLONES",
@@ -86,6 +85,16 @@ var _floor_phase := Vector3.ZERO
 ## The ground grade of each biome, cached per stage: `TextureLibrary` keys a
 ## terrain material on its style's id, so the three islands share three materials.
 var _floor_styles: Dictionary = {}
+## The chamber the Hollow Beneath is fought in (`cave_room.gd`), or null on the
+## two open islands.
+var _cave = null
+## Every point the chamber has handed out for a prop this level, so no two pieces
+## of reward furniture stand in each other.
+var _cave_taken: Array[Vector2] = []
+## `slot|of|reach -> point` for the level's reward cluster, and `slot -> point`
+## for its gates: a repeated ask is the same point, not a second ring.
+var _cave_rewards: Dictionary = {}
+var _cave_gates: Dictionary = {}
 
 
 static func biome(biome_key: String) -> Dictionary:
@@ -106,7 +115,7 @@ func build(biome_key: String, run_seed: int, index: int) -> void:
 	stage_index = maxi(0, index)
 	seed_value = run_seed
 	var data := biome(biome_key)
-	radius = float(data.radius)
+	radius = float(data.get("radius", 34.0))
 	_rng.seed = int(run_seed) + stage_index * 7919 + str(biome_key).hash()
 	_floor_phase = Vector3(_rng.randf_range(0.0, TAU), _rng.randf_range(0.0, TAU),
 		_rng.randf_range(0.0, TAU))
@@ -120,18 +129,42 @@ func build(biome_key: String, run_seed: int, index: int) -> void:
 	_dressing = Node3D.new()
 	_dressing.name = "Dressing"
 	add_child(_dressing)
+	_cave = null
+	_cave_taken.clear()
+	_cave_rewards.clear()
+	_cave_gates.clear()
+	# The Hollow Beneath is not a ring of turf under a lid: it is one room of the
+	# Weeping Hollow's own floor plan, cut out and shut (`cave_room.gd`). It brings
+	# its own ground, rock, roof, lights and props, so the island's floor, treeline
+	# and ground cover belong to the two open islands only.
+	if biome_key == "caves":
+		_build_cave_room()
+		return
 	_build_floor(data)
 	_build_boundary(data)
 	_build_light(data)
 	match biome_key:
-		"caves":
-			_build_cave(data)
 		"arena":
 			_build_pit(data)
 		_:
 			_build_wood(data)
 	_build_litter(data)
 	_scatter_ground_cover(data)
+
+
+## One authored chamber of the Hollow, stood as the island: every way on shut, so
+## the run fights in a room of the real cave rather than in a painted ring.
+func _build_cave_room() -> void:
+	var room = CaveRoomScript.new()
+	room.name = "CaveChamber"
+	_dressing.add_child(room)
+	var picked := CaveRoomScript.pick_room(_rng)
+	if picked.is_empty():
+		push_error("cave island: the plan has no room to fight in")
+		return
+	room.build(picked)
+	_cave = room
+	radius = room.play_radius()
 
 
 ## A body is placed on an island by this, never by the heightfield: the island's
@@ -143,14 +176,27 @@ func _position_on_lift() -> void:
 
 
 func floor_point(local: Vector2) -> Vector3:
+	if _cave != null:
+		return global_position + Vector3(local.x, _cave.height_at(local.x, local.y), local.y)
 	return global_position + Vector3(local.x, 0.05, local.y)
 
 
 ## The ring a run's bodies are meant to fight in. Past it the ground still runs
 ## (`OUTER_DEPTH` of band and a treeline), which is exactly the state the run's
-## out-of-bounds guard watches for.
+## out-of-bounds guard watches for. The chamber is its own room: its reach is the
+## shortest way from its middle to a wall.
 func play_radius() -> float:
+	if _cave != null:
+		return _cave.play_radius()
 	return radius
+
+
+## Whether a world point is still inside the fight: the ring on an island, the
+## room's own rectangle in the Hollow.
+func contains(point: Vector3) -> bool:
+	if _cave != null:
+		return _cave.contains(point)
+	return Vector2(point.x - global_position.x, point.z - global_position.z).length() <= radius
 
 
 ## The middle of the island: where a body that strayed is put back.
@@ -159,6 +205,8 @@ func middle() -> Vector3:
 
 
 func random_point(rng: RandomNumberGenerator, margin: float = 4.0) -> Vector3:
+	if _cave != null:
+		return floor_point(_cave.random_local(rng, margin))
 	var reach := maxf(1.0, radius - margin)
 	for _attempt in 24:
 		var angle := rng.randf_range(0.0, TAU)
@@ -167,20 +215,11 @@ func random_point(rng: RandomNumberGenerator, margin: float = 4.0) -> Vector3:
 	return floor_point(Vector2.ZERO)
 
 
-## Where a wave comes in: the rim, spread around the circle. The angle is jittered
-## so two waves of the same count never stand in the same ring.
-func spawn_points(count: int, rng: RandomNumberGenerator = null) -> Array[Vector3]:
-	var out: Array[Vector3] = []
-	var die := rng if rng != null else _rng
-	for index in count:
-		var angle := TAU * (float(index) / float(maxi(1, count))) + die.randf_range(-0.18, 0.18)
-		var distance := radius * die.randf_range(0.62, 0.84)
-		out.append(floor_point(Vector2(cos(angle) * distance, sin(angle) * distance)))
-	return out
-
-
-## Where the party stands when the portal drops them on a fresh island.
+## Where the party stands when the portal drops them on a fresh island: a line on
+## the entry side, or the chamber's own party line.
 func entry_posts(count: int) -> Array[Vector3]:
+	if _cave != null:
+		return _cave.party_posts(count)
 	var out: Array[Vector3] = []
 	for index in count:
 		var spread := (float(index) - float(maxi(1, count) - 1) * 0.5) * 2.0
@@ -188,24 +227,78 @@ func entry_posts(count: int) -> Array[Vector3]:
 	return out
 
 
+## The yaw a body lands facing: into the room in the Hollow, and the open island's
+## own default.
+func entry_yaw() -> float:
+	return _cave.entry_yaw() if _cave != null else 0.0
+
+
 ## The ring a cleared level's rewards stand on. Its anchor sits on the island's
 ## party side, a walk in from the entry line, and its slots are evenly spaced so
-## a level's chest, the pedestal it is a step from and the portal the pair unseals
-## are one cluster a party can clear in a few paces - instead of three props
-## spread across the whole rim. `reach` widens the ring for a fixture that needs
-## room of its own (the shop's stall); the slot order is the caller's.
+## a level's chests, the totem and the portals they unseal are one cluster a party
+## can clear in a few paces - instead of props spread across the whole rim.
+## `reach` widens the ring for a fixture that needs room of its own (the shop's
+## stall); the slot order is the caller's. In the Hollow the room places them, and
+## a repeated ask for the same slot is the same point.
 func reward_point(slot: int, of: int = 3, reach: float = 2.5) -> Vector3:
+	if _cave != null:
+		var key := "%d|%d|%.2f" % [slot, of, reach]
+		if _cave_rewards.has(key):
+			return _cave_rewards[key]
+		var placed := floor_point(_cave.reward_local(slot, of, reach, _cave_taken))
+		_cave_rewards[key] = placed
+		return placed
 	var anchor := floor_point(Vector2(0.0, radius * 0.34))
 	var angle := PI * 0.5 + TAU * float(slot) / float(maxi(1, of))
 	return anchor + Vector3(cos(angle) * reach, 0.0, sin(angle) * reach)
 
 
 ## The island's rim, for portals, chests and the shop: evenly spaced around the
-## back half so nothing lands on the party's own entry line.
+## back half so nothing lands on the party's own entry line. In the Hollow it is
+## the party half of the room, placed by the room.
 func rim_point(index: int, count: int, inset: float = 3.2) -> Vector3:
+	if _cave != null:
+		return floor_point(_cave.rim_local(index, count, inset))
 	var angle := PI * (0.15 + 0.7 * (float(index) + 0.5) / float(maxi(1, count)))
 	var distance := maxf(1.0, radius - inset)
 	return floor_point(Vector2(cos(angle) * distance, sin(angle) * distance))
+
+
+## Where the gate at `slot` stands. On an island it is the fan past the reward
+## anchor the portals have always stood on; in the Hollow it is one of the three
+## doors round the party's own line. `fan` and `reach` are the island's constants.
+func gate_point(slot: int, fan: float, reach: float) -> Vector3:
+	if _cave != null:
+		if _cave_gates.has(slot):
+			return _cave_gates[slot]
+		var placed := floor_point(_cave.gate_local(slot, _cave_taken))
+		_cave_gates[slot] = placed
+		return placed
+	var anchor := reward_point(0)
+	var angle := PI * 0.5 + fan * (float(slot) - 1.0)
+	return Vector3(anchor.x + cos(angle) * reach, anchor.y, anchor.z + sin(angle) * reach)
+
+
+## The yaw a gate is turned to: into the room in the Hollow, and the island's own
+## unturned frame elsewhere.
+func gate_yaw(slot: int) -> float:
+	return _cave.gate_yaw(slot) if _cave != null else 0.0
+
+
+## What the eye is inside on this island: the chamber's own air, or nothing (the
+## world's sky) on the two open ones.
+func air() -> Environment:
+	return _cave.environment if _cave != null else null
+
+
+## What the chamber is called ("THE OSSUARY"), or "" on an open island.
+func room_label() -> String:
+	return _cave.room_label() if _cave != null else ""
+
+
+## Whether this stage is the Hollow's chamber rather than an open island.
+func is_chamber() -> bool:
+	return _cave != null
 
 
 # --- ground ----------------------------------------------------------------
@@ -378,18 +471,13 @@ func _band_mesh(outer: float) -> ArrayMesh:
 
 
 ## How worn the ground is where feet have been. The wood keeps its litter and is
-## trodden bare around the middle, where every wave lands; the cave's silt is
-## churned and the pit is packed sand over stone. Everything between is the
-## shader's own noise, so the wear reads as patches and not as a gradient.
+## trodden bare around the middle, where every wave lands; the pit is packed sand
+## over stone. Everything between is the shader's own noise, so the wear reads as
+## patches and not as a gradient.
 func _floor_wear(data: Dictionary, x: float, z: float) -> float:
 	var coarse := _floor_noise(x, z, 0.045)
 	var fine := _floor_noise(x * 1.7 + 31.0, z * 1.7 - 17.0, 0.11)
 	match str(data.get("id", "wilderness")):
-		"caves":
-			# Churned silt: the hollow's floor is earth and broken stone with the
-			# moss that survives underground only where nothing walks, so the
-			# ground here is mostly worn and the green is the exception.
-			return clampf(0.58 + 0.30 * coarse + 0.08 * fine, 0.0, 1.0)
 		"arena":
 			return clampf(0.54 + 0.32 * coarse + 0.12 * fine, 0.0, 1.0)
 	# The wood keeps its litter: the leaves and the grass are the floor, and the
@@ -423,19 +511,6 @@ func _floor_style(data: Dictionary) -> WorldStyle:
 	style.id = key
 	var ground: Dictionary = style.ground.duplicate()
 	match str(data.get("id", "wilderness")):
-		"caves":
-			# Churned silt and wet stone: the cave's floor is mostly earth, with
-			# the moss that survives underground as its grass.
-			ground["grass_tint"] = Color(0.31, 0.36, 0.28)
-			ground["grass_dry_tint"] = Color(0.36, 0.35, 0.27)
-			ground["litter_tint"] = Color(0.42, 0.36, 0.30)
-			ground["dirt_tint"] = Color(0.44, 0.38, 0.31)
-			ground["rock_tint"] = Color(0.40, 0.38, 0.35)
-			ground["litter_cover"] = 0.18
-			ground["dry_cover"] = 0.42
-			ground["tile"] = 3.2
-			ground["dirt_tile"] = 3.4
-			ground["detail_strength"] = 0.8
 		"arena":
 			# The pit is packed sand and straw over broken stone.
 			ground["grass_tint"] = Color(0.66, 0.57, 0.40)
@@ -506,7 +581,7 @@ func _scatter_ground_cover(data: Dictionary) -> void:
 ## `RunDirector` is what answers for it: a warning, then the middle of the map and
 ## a share of the body's life.
 func _build_boundary(data: Dictionary) -> void:
-	_plant_bounds(data)
+	_plant_bounds()
 	var solid := StaticBody3D.new()
 	solid.name = "IslandWall"
 	add_child(solid)
@@ -558,20 +633,17 @@ func _fog_veil(at_radius: float, data: Dictionary, strength: float) -> void:
 	add_child(fog)
 
 
-## The island's bound, planted. Trees in the wood and around the pit, broken rock
-## below it: either way a line of solid shapes standing in the band past the turf,
-## with gaps wide enough to walk out through - which is the point, because what
-## happens out there is the run's business and not an invisible wall's.
-func _plant_bounds(data: Dictionary) -> void:
+## The island's bound, planted. A line of solid trees standing in the band past
+## the turf, with gaps wide enough to walk out through - which is the point,
+## because what happens out there is the run's business and not an invisible
+## wall's.
+func _plant_bounds() -> void:
 	var solid := StaticBody3D.new()
 	solid.name = "BoundsSolids"
 	solid.collision_layer = 1
 	solid.collision_mask = 0
 	add_child(solid)
-	if str(data.get("id", "wilderness")) == "caves":
-		_plant_bounds_stone(solid)
-	else:
-		_plant_bounds_wood(solid)
+	_plant_bounds_wood(solid)
 
 
 ## The wood's line: dead snags and briar pines, the two species that read as a
@@ -614,56 +686,18 @@ func _plant_bounds_wood(solid: StaticBody3D) -> void:
 			planted += 1
 
 
-## The hollow's line: the same stalagmites and columns the floor already uses,
-## stood shoulder to shoulder out in the fog.
-func _plant_bounds_stone(solid: StaticBody3D) -> void:
-	var material := CaveKit.formation_material("gallery")
-	for piece in ["StalagmiteTall", "Column", "StalagmiteSquat"]:
-		var mesh: Mesh = CaveKit.formation(str(piece))
-		if mesh == null:
-			continue
-		var instances: Array[Dictionary] = []
-		for _index in 16:
-			var angle := _rng.randf_range(0.0, TAU)
-			var distance := radius + _rng.randf_range(1.0, OUTER_DEPTH - 2.0)
-			var scale_at := _rng.randf_range(1.0, 1.8)
-			var at := Vector3(cos(angle) * distance, 0.0, sin(angle) * distance)
-			instances.append({"transform": Transform3D(
-				Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale_at), at)})
-			# A column of rock is a column of collision; the line is something a
-			# body walks around, not a line it walks through.
-			var shape := CylinderShape3D.new()
-			shape.radius = 0.55 * scale_at
-			shape.height = 3.2 * scale_at
-			var collision := CollisionShape3D.new()
-			collision.shape = shape
-			collision.position = at + Vector3(0.0, shape.height * 0.5 - 0.2, 0.0)
-			solid.add_child(collision)
-		WorldScatter.batch(_dressing, "Bounds_%s" % piece, mesh, material, instances, 20.0)
-
-
 func _build_light(data: Dictionary) -> void:
 	var sun := OmniLight3D.new()
 	sun.name = "IslandLight"
 	sun.light_color = data.light
-	sun.light_energy = 2.2 if biome_id == "caves" else 1.5
+	sun.light_energy = 1.5
 	sun.omni_range = radius * 2.4
 	sun.position = Vector3(0.0, float(data.wall_height) - 1.0, 0.0)
 	sun.shadow_enabled = false
 	add_child(sun)
-	if biome_id == "caves":
-		# A floor glow under the island so the rim is not a black hole.
-		var glow := OmniLight3D.new()
-		glow.light_color = Color(1.0, 0.42, 0.18)
-		glow.light_energy = 0.9
-		glow.omni_range = radius * 1.4
-		glow.position = Vector3(0.0, 0.6, 0.0)
-		add_child(glow)
 
 
-
-
-# --- the three biomes ------------------------------------------------------
+# --- the two open biomes ---------------------------------------------------
 
 func _build_wood(_data: Dictionary) -> void:
 	var style: WorldStyle = WorldStyleScript.night()
@@ -716,70 +750,11 @@ func _build_wood(_data: Dictionary) -> void:
 	_scatter_rocks("boulder", 10, 0.8, 1.7)
 
 
-func _build_cave(_data: Dictionary) -> void:
-	_build_shell(Color(0.16, 0.13, 0.11), 11.0, true)
-	var formation_material := CaveKit.formation_material("strata")
-	var glow_material := CaveKit.glow_material(Color(1.0, 0.42, 0.22))
-	# Floor pieces: stalagmites and columns, batched where the kit has them.
-	for piece in ["StalagmiteTall", "StalagmiteSquat", "Column", "BoulderA"]:
-		var mesh: Mesh = CaveKit.formation(str(piece))
-		if mesh == null:
-			continue
-		var instances: Array[Dictionary] = []
-		var copies := 5 if piece != "Column" else 3
-		for _index in copies:
-			var angle := _rng.randf_range(0.0, TAU)
-			var distance := _rng.randf_range(radius * 0.45, radius - 4.0)
-			var scale_at := _rng.randf_range(0.8, 1.6)
-			instances.append({"transform": Transform3D(
-				Basis(Vector3.UP, _rng.randf_range(0.0, TAU)) .scaled(Vector3.ONE * scale_at),
-				Vector3(cos(angle) * distance, 0.0, sin(angle) * distance))})
-		WorldScatter.batch(_dressing, "Cave_%s" % piece, mesh, formation_material,
-			instances, 20.0)
-	# Roof pieces hang from the fog's top: the island is a room with a lid.
-	for piece in ["StalactiteCarrot", "StalactiteRibbed"]:
-		var mesh: Mesh = CaveKit.formation(str(piece))
-		if mesh == null:
-			continue
-		var instances: Array[Dictionary] = []
-		for _index in 7:
-			var angle := _rng.randf_range(0.0, TAU)
-			var distance := _rng.randf_range(radius * 0.25, radius - 3.0)
-			instances.append({"transform": Transform3D(
-				Basis(Vector3.UP, _rng.randf_range(0.0, TAU)),
-				Vector3(cos(angle) * distance, 9.0, sin(angle) * distance))})
-		WorldScatter.batch(_dressing, "Roof_%s" % piece, mesh, formation_material,
-			instances, 20.0)
-	# Glow caps: the hollow's own light, four clumps of fungus and crystal.
-	for _index in 6:
-		var angle := _rng.randf_range(0.0, TAU)
-		var distance := _rng.randf_range(radius * 0.35, radius - 5.0)
-		var cap: Mesh = CaveKit.flora("CapCluster")
-		if cap == null:
-			cap = CaveKit.flora("CapGiant")
-		if cap == null:
-			continue
-		var node := MeshInstance3D.new()
-		node.mesh = cap
-		node.material_override = glow_material
-		node.position = Vector3(cos(angle) * distance, 0.0, sin(angle) * distance)
-		node.scale = Vector3.ONE * _rng.randf_range(0.7, 1.2)
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_dressing.add_child(node)
-		var glow := OmniLight3D.new()
-		glow.light_color = Color(1.0, 0.45, 0.24)
-		glow.light_energy = 1.4
-		glow.omni_range = 7.0
-		glow.position = Vector3(cos(angle) * distance, 1.1, sin(angle) * distance)
-		_dressing.add_child(glow)
-	_scatter_rocks("spire", 6, 1.2, 2.2)
-
-
 func _build_pit(_data: Dictionary) -> void:
 	# A low stone rim before the fog. It used to be a chamber wall as tall as a
 	# house, which hid the treeline standing behind it: the pit's horizon is the
 	# bound of the island, and the bound is trees.
-	_build_shell(Color(0.20, 0.18, 0.16), 1.9, false)
+	_build_shell(Color(0.20, 0.18, 0.16), 1.9)
 	var stone := Geo.material(Color(0.33, 0.31, 0.28), 0.0, 0.9)
 	var iron := Geo.material(Color(0.22, 0.21, 0.20), 0.55, 0.5)
 	# The ring of dressed stone the pit is fought in: a colonnade, then braziers
@@ -1013,10 +988,9 @@ func _scatter_rocks(kind: String, copies: int, min_scale: float, max_scale: floa
 	WorldScatter.batch(_dressing, "Rocks_%s" % kind, mesh, stone, instances, 20.0)
 
 
-## The chamber's shell: a wall just behind the fog sheet and, for a cave, a roof
-## that closes the sky. An island is a piece of the world, not a slice of it, and
-## a demon floor under an open blue sky read as a stage set.
-func _build_shell(colour: Color, height: float, roofed: bool) -> void:
+## The pit's low rim: a wall just behind the fog sheet, so the horizon is the
+## island's bound and the treeline behind it reads as the edge of the world.
+func _build_shell(colour: Color, height: float) -> void:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = colour
 	material.roughness = 0.96
@@ -1036,21 +1010,6 @@ func _build_shell(colour: Color, height: float, roofed: bool) -> void:
 	wall.position = Vector3(0.0, wall_mesh.height * 0.5, 0.0)
 	wall.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(wall)
-	if not roofed:
-		return
-	var roof_mesh := CylinderMesh.new()
-	roof_mesh.top_radius = radius + 1.5
-	roof_mesh.bottom_radius = radius + 1.5
-	roof_mesh.height = 1.2
-	roof_mesh.radial_segments = 56
-	roof_mesh.rings = 2
-	var roof := MeshInstance3D.new()
-	roof.name = "ChamberRoof"
-	roof.mesh = roof_mesh
-	roof.material_override = material
-	roof.position = Vector3(0.0, wall_mesh.height + 0.6, 0.0)
-	roof.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(roof)
 
 
 func _build_litter(data: Dictionary) -> void:

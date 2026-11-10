@@ -1,9 +1,10 @@
 class_name QuartermasterMenu
 extends CanvasLayer
-## The keeper who sells plain steel. Gold is the town's sink for hiring and for
-## base gear; this panel is the second half of that, and it is deliberately
-## separate from the ranger's old keeper counters: what you buy here lands in the
-## warband's collective stash, where the paperdoll can put it on any mercenary.
+## The keeper who sells the band's medicine. Steel is not for sale in the town
+## any more - a piece comes off the Weapon Rack's unlocks or out of a run's chests
+## - so this counter is the healer's: bandages and draughts, bought out of the
+## shared purse and pressed into the warband's own stock (`Warband.supplies`),
+## where key 9 and key 0 spend them.
 
 signal changed
 ## A keeper actually took the coin (see `VendorMenu.purchased`).
@@ -19,17 +20,10 @@ const INK := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
 const BLOOD := LedgerThemeScript.BLOOD
 
-## Base stock: the makeshift tier a prisoner actually carries, the naked set a
-## body starts in, then one legal piece for every kind of hand plus the cheapest
-## armour and rings, so a fresh warband can be armed without a single lucky drop.
-const STOCK := [
-	"dagger_ironwood", "club_makeshift", "axe_makeshift", "bow_twig", "branch_heavy", "shield_wood",
-	"armor_naked_head", "armor_naked_chest", "armor_naked_hands",
-	"armor_naked_legs", "armor_naked_feet",
-	"sword_short", "dagger_iron", "bow_short", "shield_buckler",
-	"armor_leather_head", "armor_leather_chest", "armor_mail_chest",
-	"ring_copper", "ring_health", "focus_tome", "torch_hand",
-]
+## The whole counter: the two things a body can buy to stay standing. There is
+## no gear row here by design - the only way a piece of steel reaches a hand is a
+## key spent at the rack or a chest opened in a run.
+const STOCK := ["bandage_linen", "healing_potion"]
 
 const PANEL_SIZE := Vector2(640, 680)
 
@@ -38,6 +32,9 @@ var _open := false
 var _built := false
 var _list: VBoxContainer
 var _purse: Label
+## What the band is carrying, repainted with the purse: the count is the whole
+## point of the counter, because a dressing nobody holds closes nothing.
+var _stock_line: Label
 var _status: Label
 var _rows: Dictionary = {}   # item_id -> {root, button, price_label}
 
@@ -69,6 +66,12 @@ func is_open() -> bool:
 func status_text() -> String:
 	return str(_status.text) if _status != null else ""
 
+## The band's medicine as one line: what a press of BUY is actually adding to.
+func carried_line() -> String:
+	var bandages := int(_warband.supply_count("bandage")) if _warband != null else 0
+	var potions := int(_warband.supply_count("potion")) if _warband != null else 0
+	return "YOU CARRY  ·  BANDAGES %d  ·  POTIONS %d" % [bandages, potions]
+
 ## The stock with the price the shop will charge and whether the purse covers it.
 ## `price` is one purchase: a piece sold by the bunch (ammunition) prices the whole
 ## `bundle`, exactly what `Warband.buy_gear` takes for it.
@@ -87,11 +90,24 @@ func stock_rows() -> Array[Dictionary]:
 			"price": price, "affordable": gold >= price, "bundle": bundle})
 	return rows
 
-## Buy one piece into the shared stash. Everything about the transaction -
-## the price, the purse, the stash row - belongs to `Warband.buy_gear`.
+## Buy one dose into the band's stock. Everything about the transaction - the
+## price, the purse, the count - belongs to `Warband.buy_gear`.
 func buy(item_id: String) -> Dictionary:
 	if _warband == null:
 		return {"ok": false, "message": "The keeper is not here.", "item_id": item_id, "cost": 0}
+	# Only what is on this board: a press can never walk the whole catalogue
+	# through a counter that does not stock it.
+	var stocked := false
+	for row in stock_rows():
+		if str(row["item_id"]) == item_id:
+			stocked = true
+			break
+	if not stocked:
+		var refusal := {"ok": false, "message": "%s does not stock that." % "The quartermaster",
+			"item_id": item_id, "cost": 0}
+		if _status != null:
+			_status.text = str(refusal["message"])
+		return refusal
 	var result: Dictionary = _warband.buy_gear(item_id)
 	if _status != null:
 		_status.text = str(result.get("message", ""))
@@ -105,6 +121,7 @@ func refresh() -> void:
 		return
 	var gold: int = _warband.gold() if _warband != null else 0
 	_purse.text = "%d G" % gold
+	_stock_line.text = carried_line()
 	for item_id in _rows:
 		var row: Dictionary = _rows[item_id]
 		var price := int(row.get("price", 0))
@@ -146,13 +163,14 @@ func _build() -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 10)
 	column.add_child(head)
-	_label(head, "THE TOWN  \u00b7  SHARED STASH", 10, MUTED)
+	_label(head, "THE TOWN  \u00b7  MEDICINE", 10, MUTED)
 	_purse = _label(column, "", 22, INK)
 	_purse.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_purse.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var blurb := _label(column, "Plain steel, bought into the shared stash.", 13, MUTED)
+	var blurb := _label(column, "Dressings and draughts, into the band's own pack.", 13, MUTED)
 	blurb.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
+	_stock_line = _label(column, "", 12, MUTED)
 
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 330)

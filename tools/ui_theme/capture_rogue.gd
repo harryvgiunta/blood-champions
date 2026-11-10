@@ -74,32 +74,47 @@ func _run(scene: Node) -> void:
 		# flesh and ribs.
 		run.stage_index = 0
 		run.biome_id = "wilderness"
+		# A combat clear, so the three doors carry promise cards rather than the
+		# boss's hoard: level 12 stands the gates to level 13.
+		run.level = 12
+		run.wave = 3
+		run.boss_level = false
+		run.shop_level = false
+		run.market_level = false
+		run.active_contract = run._starter_contract()
 		run._build_stage()
 		run._clear_stage_props()
 		run.level_cleared = true
 		run._clear_level()
 		if scene.get("bodies").size() > 0:
 			var viewer = scene.get("bodies")[0]
-			viewer.global_position = run._gate_point(1) + Vector3(0.0, 0.0, 6.6)
+			# Framed from the middle gate's own lintel, wherever the island put it.
+			var gate_at := Vector3.ZERO
+			for prop in run._props:
+				if is_instance_valid(prop) \
+						and str(prop.get_meta("roguelite_prop", "")) == "portal":
+					gate_at = (prop as Node3D).global_position
+					break
+			viewer.global_position = gate_at + Vector3(0.0, 0.0, 6.6)
 			viewer.rotation.y = 0.0
 		for _frame in 45:
 			await process_frame
 		_capture("res://.runtime/capture_rogue_gates.png")
 		# The island's furniture and the draft window: clear the last island,
-		# walk the body to the pedestal and open the board it offers.
+		# walk the body to the chest and open the board it offers.
 		run.level_cleared = true
 		run._clear_level()
 		for _frame in 30:
 			await process_frame
-		var pedestal = null
+		var chest = null
 		for prop in run._props:
-			if is_instance_valid(prop) and str(prop.get_meta("roguelite_prop", "")) == "pedestal":
-				pedestal = prop
+			if is_instance_valid(prop) and str(prop.get_meta("roguelite_prop", "")) == "chest":
+				chest = prop
 				break
-		if pedestal != null and scene.get("bodies").size() > 0:
+		if chest != null and scene.get("bodies").size() > 0:
 			var player_body = scene.get("bodies")[0]
-			player_body.global_position = pedestal.global_position + Vector3(0.0, 0.0, 2.6)
-			run._open_draft(int(pedestal.get_meta("serial")), player_body)
+			player_body.global_position = chest.global_position + Vector3(0.0, 0.0, 2.6)
+			run._open_chest(int(chest.get_meta("serial")), player_body)
 			for _frame in 20:
 				await process_frame
 			_capture("res://.runtime/capture_rogue_draft.png")

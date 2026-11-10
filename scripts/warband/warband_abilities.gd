@@ -19,6 +19,7 @@ const AbilitySignatures = preload("res://scripts/ability_signatures.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const SpellProjectile = preload("res://scripts/spell_projectile.gd")
+const FireRay = preload("res://scripts/fire_ray.gd")
 const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 
 ## World plus bodies: a shot stops on terrain and on the wood's mobs, the same
@@ -30,6 +31,9 @@ const BACKSTAB_RANGE := 8.0
 ## Missiles are real damage nodes owned by the authority. The cap is a leak
 ## guard, not a gameplay limit: the oldest shot goes before the tree grows.
 const MAX_MISSILES := 32
+## Held beams are counted separately: one cast may stand two (Echo Cast), and a
+## beam outlives the cue that made it for the length of the cast.
+const MAX_BEAMS := 8
 ## Cold steel, one shade brighter than a plain cut: the necklace's waves and the
 ## glow they leave on both blades.
 const WAVE_TINT := Color("eef5ff")
@@ -45,6 +49,9 @@ var _world: Node3D
 var _controller
 var _bodies: Array = []
 var _missiles: Array = []
+## Standing rays, `fire_ray.gd`: their own clock and the caster's ability state
+## end them, so this list is only what the scene and its regression can see.
+var _beams: Array = []
 ## Laid doses: `{target, dps, left, clock, source, run}`. One per body, refreshed
 ## rather than stacked, and ticked by this node so a dose outlives the
 ## activation that laid it.
@@ -95,6 +102,12 @@ func missiles() -> Array:
 	return _missiles.duplicate()
 
 
+## The held rays still burning, for tests and for a scene's cleanup.
+func beams() -> Array:
+	_prune_beams()
+	return _beams.duplicate()
+
+
 # --- cues ------------------------------------------------------------------
 
 ## One performed beat. The definition is re-read from the runner every cue so a
@@ -133,6 +146,8 @@ func _on_cue(id: String, cue: String, index: int, actor) -> void:
 			_fire_arrows(actor, runner, definition, index, damage)
 		"projectile":
 			_launch_spell(actor, runner, definition, damage)
+		"beam":
+			_open_beam(actor, runner, definition, damage)
 		"backstab":
 			_backstab(actor, runner, cue, damage)
 		"melee_arc", "melee_ring":
@@ -249,6 +264,9 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 		arrow.shooter = actor
 		arrow.hit_mask = TARGET_MASK
 		arrow.authoritative_damage = true
+		# A bow skill looses the bow's shafts, so the bow's own health-on-hit
+		# rides them too: one rule for every shaft the hand lets go.
+		arrow.heal_on_hit = rig.bow_heal_on_hit()
 		arrow.crit = bool(plan.get("crit", false))
 		arrow.proc_coeff = float(plan.get("proc", 1.0))
 		arrow.bounces = bounces
@@ -337,6 +355,40 @@ func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref
 		return
 	combat_ref.ability_blast(centre, spell.blast_radius, spell.damage,
 		float(spell.get_meta("stagger", 0.0)))
+
+
+## Fire Ray: a held beam rather than a shot. The node re-reads the staff head and
+## the live crosshair every frame, stops at terrain, and pays its damage on the
+## authored tick until the cast's own clock runs out. The run's spell plan is
+## rolled once here - one crit decision for the whole ray instead of a fresh one
+## per tick - and a recast stands a second ray down the same line.
+func _open_beam(actor, runner, definition: Dictionary, damage: float) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = actor.rig
+	var body_combat = actor.combat
+	if rig == null or not is_instance_valid(rig) or body_combat == null \
+			or not is_instance_valid(body_combat):
+		return
+	var family := AbilityRules.type_of(definition)
+	var run = actor.get("roguelite")
+	var dps := damage
+	var radius := float(effect.get("radius", 0.55))
+	var plan: Dictionary = {}
+	if run != null:
+		plan = run.spell_plan(dps, family)
+		dps = float(plan.get("damage", dps))
+		radius += float(plan.get("radius", 0.0))
+	var copies := 1 + (1 if runner.take_recast() else 0)
+	var life := maxf(float(definition.get("duration", 1.2)) - runner.elapsed, 0.05)
+	for _copy in copies:
+		var ray := FireRay.new()
+		ray.name = "FireRay"
+		add_child(ray)
+		ray.launch(actor, body_combat, rig, dps, life,
+			float(effect.get("tick_seconds", 0.2)),
+			float(effect.get("range", 16.0)), maxf(radius, 0.05),
+			float(effect.get("stagger", 0.0)))
+		_track_beam(ray)
 
 
 # --- backstab --------------------------------------------------------------
@@ -629,6 +681,23 @@ func _prune_missiles() -> void:
 	for index in range(_missiles.size() - 1, -1, -1):
 		if not is_instance_valid(_missiles[index]):
 			_missiles.remove_at(index)
+
+
+## Keep the beam list valid and bounded the same way the missile list is: a ray
+## that spent its cast (or its caster) has already freed itself.
+func _track_beam(ray: Node) -> void:
+	_prune_beams()
+	_beams.append(ray)
+	while _beams.size() > MAX_BEAMS:
+		var oldest = _beams.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
+
+
+func _prune_beams() -> void:
+	for index in range(_beams.size() - 1, -1, -1):
+		if not is_instance_valid(_beams[index]):
+			_beams.remove_at(index)
 
 
 func _prune_bodies() -> void:
