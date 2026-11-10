@@ -3208,7 +3208,7 @@ func _archery_weight() -> float:
 		var clock := _bow_shot_clock()
 		if clock.x < 0.5:
 			return _release_raise
-		return _release_raise*(1.0-smoothstep(0.18,0.72,clock.y))
+		return _release_raise*(1.0-smoothstep(recover_beat(0.18),recover_beat(0.72),clock.y))
 	if phase == "DRAWING":
 		return smoothstep(0.0,RAISE_SECONDS,_phase_time)
 	if phase == "HOLDING":
@@ -3216,7 +3216,11 @@ func _archery_weight() -> float:
 	if phase == "RELEASE":
 		return _release_raise
 	if phase == "RECOVER":
-		return _release_raise*(1.0-smoothstep(0.18,0.72,_phase_time))
+		# The stance comes down on the bow's own recovery clock, not on raw
+		# seconds: a bow that re-nocks in half the time - or a Magical Nock bow,
+		# which only settles - has to be out of the archery stance by the frame it
+		# hands back to READY.
+		return _release_raise*(1.0-smoothstep(recover_beat(0.18),recover_beat(0.72),_phase_time))
 	return 0.0
 
 func _sample_clip(clip: String, time: float) -> void:
@@ -4514,13 +4518,13 @@ func _update_bow_pose(drawing: bool, shot_phase := "", shot_time := 0.0, shot_dr
 			contact = to_global(_release_contact)+global_basis*Basis(_release_bow_rotation).z*(0.12*follow*_release_raise*_release_charge)
 			if pose_phase == "RECOVER":
 				if bow_no_nock:
-					# Magical Nock: the hand comes off the follow-through straight
-					# onto the string - no trip to the quiver, no fetched shaft -
-					# and unwinds to the carry with the bow.
-					var clock := recover_seconds()
-					var settle := smoothstep(0.0,clock*0.45,pose_time)
-					var unwind := smoothstep(clock*0.50,clock,pose_time)
-					contact = contact.lerp(active_bow.get_nock_position(),settle).lerp(carry_contact,unwind)
+					# Magical Nock: nothing is fetched from the quiver and nothing is
+					# nocked by hand. The drawing hand falls out of its own
+					# follow-through into the carry while the bow settles back onto
+					# the aim with the next shaft already on the string.
+					var unwind := smoothstep(recover_seconds()*0.50,recover_seconds(),pose_time)
+					var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
+					contact = _hand_arc(contact,hip_gate,hip_gate,carry_contact,unwind)
 					right_basis = right_basis.slerp(right.basis.orthonormalized(),unwind)
 				else:
 					var quiver_top := _quiver.to_global(Vector3(0,0.29,0))

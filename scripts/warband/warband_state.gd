@@ -1318,8 +1318,9 @@ func hire_cost() -> int:
 ## board's own (it rises with the run's level, not with the roster), and the body
 ## does not spend a deployment place - a recruit is bought *for* the run, so it
 ## takes the field however full the band is, and it never rolls into the reserve.
-## It also dies for good (see `dismiss_recruit` and `WarbandBody.permadeath`),
-## where a town oath goes down on its chest.
+## It also dies for good (see `dismiss_recruit` and `WarbandBody.expendable`): a
+## lethal blow puts it on its chest for the hireling's ten seconds and then takes
+## it, on the square and on the island alike.
 ##
 ## Returns `{ok, merc_id, price, message}`; a refused hire spends nothing.
 func hire_recruit(offer: Dictionary) -> Dictionary:

@@ -1715,9 +1715,11 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	# Who the fall belongs to, read once here and before either mode's early
 	# return: a body no soul is inside is the band's hireling and his ten seconds
 	# kill him for good (`WarbandBody.expendable`), on the island and in the square
-	# alike. A body with a peer inside keeps the campaign's own rule.
+	# alike. A bought recruit is the board's whatever soul rides him. A body with a
+	# player's own character inside it keeps the campaign's own, longer rule.
 	if actor != null and is_instance_valid(actor):
-		actor.expendable = warband != null and warband.souls.occupied_by(merc_id) == 0
+		actor.expendable = warband != null and (warband.roster.is_recruit(merc_id)
+			or warband.souls.occupied_by(merc_id) == 0)
 	# An arena run holds a downed body: its hands are the run's, and emptying the
 	# campaign's roster slots because a wave dropped it would take a body's kit
 	# away for a fight that is not the campaign's.
@@ -1729,6 +1731,10 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	# hireling's ground is never the town's, because his clock is the band's bill.
 	if actor != null and is_instance_valid(actor) and town != null:
 		actor.home_ground = town.in_square(actor) and not actor.expendable
+	# A bought recruit's kit is locked to him: a fall does not disarm him, because
+	# nothing in the game may put a piece back in his hands.
+	if warband != null and warband.roster.is_recruit(merc_id):
+		return
 	drop_merc_gear(actor, merc_id)
 	# The player's own body is a different lesson from a squadmate's: the revive
 	# tip is about somebody else, this one is about what the soul can still do.
@@ -1824,11 +1830,19 @@ func _hostile_near(at: Vector3, radius: float) -> bool:
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
-	# A hireling's death is the band's bill: the kit he was dressed in stays where
-	# he fell, so the reap that erases his name has nothing to hand back to the
-	# shared stash and a walk back to the body is the only way to a piece of it. A
-	# soul's body keeps the campaign's own rule.
+	# A hireling's death is the band's bill. A sworn mercenary's kit falls where he
+	# fell, so it is his grave's until somebody walks back to it: the reap that
+	# erases the name then finds an empty record and nothing walks into the shared
+	# stash. A bought recruit's kit was sold with him and locked to him, so it
+	# leaves the field with the body instead - a piece looted off his corpse would
+	# be steel bought for a recruit's price. A soul's body keeps the campaign's own
+	# rule.
 	if actor != null and is_instance_valid(actor) and bool(actor.get("expendable")):
+		if _client or warband == null:
+			return
+		if warband.roster.is_recruit(merc_id):
+			GearDropScript.strip_kit(warband, merc_id)
+			return
 		drop_merc_kit(actor, merc_id)
 		return
 	if roguelite != null and roguelite.is_running():

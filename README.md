@@ -77,12 +77,16 @@ are one duellist in two colours. Every market and shop level also stands a
 re-rolled per level, kit and all - bought for gold, sworn in the gear the board
 sold them and with one rolled skill. A bought body spends no place in the
 deployment cap, adds nothing to the waves' pools, cannot be re-dressed, and does
-not come back when it falls. **Hearthstead stands the same desk**, at level one:
+not come back when it falls: ten seconds on its chest to be picked up, a second
+blow or the clock ending it for good, and the kit it was sold in leaving the field
+with it. **Hearthstead stands the same desk**, at level one:
 three bodies in rung-0 kit (a twig bow, makeshift steel, bark and rags), bought
 whole and locked whole, on the same card and the same one rolled skill. A town
 oath is not a run's hire, though - it takes a place on the field and goes down on
-its chest like any other name - and nothing but a better hire ever changes the
-kit it was sworn in. There is no
+its chest like any other name - and neither comes back once the ten seconds run
+out: the man is gone and the desk is the way to field another. A sworn body's kit
+is the band's, so it falls where he fell and is only a walk back to the corpse
+away; nothing but a better hire ever changes the kit a body was sworn in. There is no
 final level: a wipe ends the run and banks its deepest level on the player's
 ledger.
 
@@ -259,6 +263,13 @@ down on town ground is not finished, does not bleed out, and stands back up when
 the clock runs out - or after the other soul's five seconds - for host and guest
 alike. On the island a downed body waits for the level's chest, and a soul whose
 character has fallen watches the party until the run is over.
+
+**A hireling gets none of that.** A body nobody's soul is inside - the band's AI
+ally - lies for ten seconds wherever it fell, the square included, and any second
+blow on it there finishes it. When the ten seconds run out it is dead for good:
+no chest, no clear and no square stands it back up, the roster reaps the name, and
+the desk is the way to field another. A sworn body's kit is left where he fell; a
+bought recruit's kit leaves the field with him.
 
 ## Verifying
 

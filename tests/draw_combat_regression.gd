@@ -145,13 +145,14 @@ func run() -> void:
 	combat.release_draw()
 	advance(0.45)
 	check(rig.phase == "RECOVER", "the shot settles on the bow's own short settle")
+	check(is_equal_approx(rig.recover_seconds(),0.30), "with no retrieval clock to wait for")
 	check(rig.active_bow.nocked_arrow.visible, "the next shaft is back on the string at once")
 	var quiver_top: Vector3 = rig._quiver.to_global(Vector3(0,0.29,0))
 	var string_hand: Vector3 = rig.string_hand.global_position
 	var on_string := string_hand.distance_to(rig.active_bow.get_nock_position())
 	var on_quiver := string_hand.distance_to(quiver_top)
-	check(on_string < 0.20, "the drawing hand sits on the string (%.3f m)" % on_string)
-	check(on_quiver > 0.30, "and never reaches the quiver (%.3f m)" % on_quiver)
+	check(on_quiver > 0.30, "the drawing hand never reaches the quiver (%.3f m)" % on_quiver)
+	check(on_string > 0.10, "and the nock is not played by hand (%.3f m)" % on_string)
 	advance(0.20)
 	check(combat.can_draw(), "and the next draw is open a settle later")
 	rig.bow_no_nock = false

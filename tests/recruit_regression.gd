@@ -381,7 +381,8 @@ func check_live_world() -> void:
 	check(recruit != null, "and the field stands it up")
 	if recruit == null:
 		return
-	check(bool(recruit.permadeath), "the body knows its death is final")
+	check(warband.roster.is_recruit(recruit_id),
+		"the body is the board's, so its death is the band's to lose")
 	check(str((recruit.rig.ability_loadout as Array)[0] if not (recruit.rig.ability_loadout as Array).is_empty() else "")
 			== str(offer.get("skill", "")),
 		"and it carries the one skill the card named (%s)" % str(recruit.rig.ability_loadout))
@@ -406,7 +407,6 @@ func check_live_world() -> void:
 	check(warband.souls.occupied_by(sworn_id) == 0,
 		"while the hireling beside it has nobody inside")
 	if sworn != null:
-		check(not bool(sworn.permadeath), "a sworn body is not on the recruit's rule")
 		sworn.take_damage(float(sworn.max_health) * 3.0, killer)
 		check(bool(sworn.get("alive")) and bool(sworn.get("downed")),
 			"a lethal blow puts a sworn mercenary on his chest")
@@ -426,9 +426,12 @@ func check_live_world() -> void:
 		check(int(warband.stash.pooled_count("armor_leather_chest")) == 0,
 			"and does not walk back into the shared stash with the reap")
 	recruit.take_damage(float(recruit.max_health) * 3.0, killer)
-	check(not bool(recruit.get("alive")),
-		"the same blow destroys a recruit where it stands")
-	check(not bool(recruit.get("downed")), "and it never lies down")
+	check(bool(recruit.get("alive")) and bool(recruit.get("downed")),
+		"the same blow puts a recruit on his chest for the same ten seconds")
+	check(bool(recruit.expendable),
+		"the board's body is a hireling whatever soul rides it")
+	recruit.take_damage(float(recruit.max_health) * 3.0, killer)
+	check(not bool(recruit.get("alive")), "and a second blow takes it for good")
 
 	# The reap is the roster's own: the name is gone a beat later, for good.
 	await create_timer(0.9).timeout
@@ -494,7 +497,6 @@ func check_run_board() -> void:
 	var brought = game.controller.body_of(merc_id)
 	check(brought != null, "the island stands the body up on the same press")
 	if brought != null:
-		check(bool(brought.permadeath), "the run's body knows its death is final")
 		check(run.players.has(1000 + merc_id),
 			"and it carries a run runtime beside the party")
 	# The desk that sold him pays him off: the name, the runtime and the body leave
@@ -519,7 +521,8 @@ func check_run_board() -> void:
 		"a sworn mercenary cannot be paid off: he is the band's")
 	warband.roster.remove(sworn_body)
 	# A second body, bought and then killed in the run, where every other body is
-	# held on its chest: the recruit is the one that does not come back.
+	# held on its chest: the recruit is the one the run does not hold, because he
+	# is the band's hireling and his ten seconds kill him inside a wave too.
 	var second: Dictionary = run.hire(serial, 1, 1)
 	check(bool(second.get("ok", false)),
 		"the board sells a second body: %s" % str(second.get("message", "")))
@@ -529,8 +532,16 @@ func check_run_board() -> void:
 	if corpse != null:
 		var soul = game.controller.focus_body()
 		corpse.take_damage(float(corpse.max_health) * 4.0, int(soul.slot))
-		check(not bool(corpse.get("alive")), "a lethal blow destroys it inside the run")
-		check(not bool(corpse.get("downed")), "and it never lies down")
+		check(bool(corpse.get("alive")) and bool(corpse.get("downed")),
+			"a lethal blow downs a recruit inside the run like any hireling")
+		check(bool(corpse.expendable), "and the run reads it as one of the band's")
+		var runtime = run.players.get(1000 + doomed)
+		check(runtime != null and not bool(runtime.revive_for_clear()),
+			"the level's clear does not stand a hireling back up")
+		check(bool(corpse.get("downed")), "and he is still on the ground after it")
+		corpse.take_damage(float(corpse.max_health) * 4.0, int(soul.slot))
+		check(not bool(corpse.get("alive")),
+			"a second blow takes it for good while the wave holds the party down")
 		var waited := 0
 		while waited < 120 and warband.roster.has(doomed):
 			await physics_frame

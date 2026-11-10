@@ -226,9 +226,9 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	actor.combat.damage_enabled = authoritative
 	actor.configure(0, label, spawn)
 	_apply_gear(actor, merc_id)
-	# A bought recruit's kit is locked and its death is final; both are the record's
-	# answer, read once here so the body, the wire and a guest's copy agree.
-	actor.permadeath = _warband.roster.is_recruit(merc_id)
+	# Whether this body's death is the band's own is read on the frame it goes
+	# down, not here: `WorldScene._on_body_downed` asks the record and the router,
+	# which is where a soul that has since stepped in is known.
 	actor.killed.connect(_on_actor_killed.bind(actor))
 	# The router is what decides who may be entered, so it has to hear about the
 	# lie as well as the death: a body on its chest is still the soul's (it crawls

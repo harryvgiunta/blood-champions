@@ -66,9 +66,9 @@ const KEY_PLAYER := "player"
 ## this flag read once: it does not spend the band's deployment cap (it is bought
 ## *for* a run, not oath'd into the warband), its kit is locked (`Warband.
 ## is_gear_locked` - the gear it was sworn in is the gear it fights with), and a
-## lethal blow destroys it outright instead of laying it on its chest
-## (`WarbandBody.permadeath`). None of them is a new death path: the reap that
-## already erases a dead name is the whole of the permanence.
+## lethal blow lays it on its chest for the hireling's ten seconds and then takes
+## it for good (`WarbandBody.expendable`). None of them is a new death path: the
+## reap that already erases a dead name is the whole of the permanence.
 const KEY_RECRUIT := "recruit"
 ## True when the kit the desk sold the body in is the kit it fights in for good:
 ## no paperdoll press, no pickup, no re-kit, no weapon-set swap, no new skill on

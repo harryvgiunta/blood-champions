@@ -300,7 +300,7 @@ dearer past the free places), not the card's archetype price.
 | No island weight | `_player_count` counts human peers only, so a bought body never doubles a wave's pool |
 | Locked kit | `Warband.is_gear_locked` (`WarbandRoster.KEY_KIT_LOCK`): a bought body fights in the hand and the armour it was sold in - no paperdoll press, no pickup, no re-kit, no weapon-set swap. The stance chip and the ability bar are the card's too (`set_disposition`, `set_hotbar_order` and the two hotbar moves all refuse a locked body). The way to a better-armed body is a better-armed hire at a deeper board |
 | One skill | the rolled id is written into the roster's key list, which is what stops `SeatLoadout` handing an AI body every skill its hands fit. It is rolled from the archetype's own families, filtered to the kinds a body can land (`AbilityRules.AI_KINDS`) and to what the hands that rolled with it can fire |
-| Dies for good | `WarbandBody.permadeath`: a lethal blow destroys the recruit where it stands instead of laying it on its chest, so no chest, channel or town square can stand it back up - the roster's own reap erases the name. Guests keep the downed-and-revived path; a recruit never gets it |
+| Dies for good | `WarbandBody.expendable`: a body nobody's soul is inside lies for `MERCENARY_DOWNED_SECONDS` (ten) rather than the soul's thirty, any second blow on it there finishes it, and when the clock runs out it is dead for good - no chest, no clear, no square and no walk-in stands it back up, only a revive channel inside those ten seconds. A body the recruiter's board sold is on the same rule whatever soul rides it. The roster's reap erases the name; a sworn hireling's kit falls where he fell, a recruit's kit was sold with him and leaves the field with him |
 | Paid off | the desk that sold him can release him: `RunDirector.dismiss(merc_id)` -> `Warband.dismiss_recruit` takes the name out of the warband and `WorldScene.dismiss_body` takes the body off the field on the same press, with the run runtime. Only a recruit may be paid off (a sworn mercenary is the band's) and never while a soul is inside the body. The kit leaves with him: it was sold with the body and locked to it, so a dismissal that fed the shared stash would be a way to buy steel for a recruit's price and keep the piece |
 
 The three archetypes are the campaign's own dispositions, so the way a recruit
@@ -818,6 +818,21 @@ fell). The other soul's five-second channel still works there and is the fast wa
 up, and a party with every body on the floor in the square is not a wipe - the
 checkpoint is not reloaded under the lobby. Off the square the campaign's rule is
 unchanged: the clock kills, and the chest is the way back up on an island.
+
+**None of that is a hireling's rule.** A body nobody's soul is inside - the
+band's man, driven by the AI - and every body a recruiter's board sold, whatever
+soul rides it, is `WarbandBody.expendable`: he lies for
+`MERCENARY_DOWNED_SECONDS` (ten) instead of the soul's thirty, wherever he fell
+and on the square's ground as much as on the island's, any second blow on him
+there finishes him, and the arena's hold does not freeze his clock. When it runs
+out he is dead for good - no chest, no level's clear, no square and no walk-in
+stands him back up, and only a revive channel inside those ten seconds picks him
+up. The roster's reap then erases the name and the desk that sells his like is the
+way to field another. What he was wearing goes with the loss: a sworn hireling's
+kit falls where he fell (`WorldScene.drop_merc_kit`) instead of walking back into
+the shared stash, and a recruit's kit - sold with the body and locked to it -
+leaves the field with him rather than lying there as loot. A body a player's own
+character is inside keeps all of the paragraphs above.
 
 ## The bars over a hostile
 

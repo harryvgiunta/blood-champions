@@ -69,7 +69,7 @@ const SHOP_WARES := 3
 ## Every stop stands a recruiter: a board of three bodies, one of each archetype,
 ## sold for gold and re-rolled on every level load. A recruit is bought for the
 ## run - it spends no deployment place and adds no pool to the island
-## (`_player_count`) - and it dies for good (`WarbandBody.permadeath`).
+## (`_player_count`) - and it dies for good (`WarbandBody.expendable`).
 const SHOP_HIRES := 3
 ## The live cap and the spawn cadence: a wave is a queue that feeds the island,
 ## not a crowd dropped on one frame. The budget below is how many bodies the
@@ -2932,7 +2932,7 @@ func _open_recruiter(serial: int, actor) -> void:
 ## the field stands it up on the sprites' own frame (`stand_up_field`), and it is
 ## then handed a run runtime here, because `_spawn_runners` is otherwise called
 ## once an island. A recruit that dies is reaped like any dead name, and nothing
-## in the run brings it back (`WarbandBody.permadeath`).
+## in the run brings it back (`WarbandBody.expendable`).
 func hire(serial: int, index: int, peer_id: int) -> Dictionary:
 	if _client:
 		send_request({"t": "hire", "serial": serial, "index": index})
