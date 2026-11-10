@@ -222,115 +222,104 @@ static func frontier() -> WorldStyle:
 	}
 	return style
 
-
-## Arena: the same painted palette, lifted a stop brighter with a clearer,
-## cooler haze so duels read against the field.
-static func arena() -> WorldStyle:
-	var style := WorldStyle.new()
-	style.id = "arena"
+## The wood at night: the frontier's own terrain and foliage, one stop down, with
+## the depth fog replaced by a thick exponential haze the torches have to cut
+## through. EnvironmentKit writes the density after the fog mode, which is the
+## only way a density survives in Godot 4.7.
+##
+## Public because the one world is *this* night, not three: the camp clearing and
+## the town are built inside the same style, so a body that walks from the cages
+## to the square never crosses a seam in the light or the fog.
+static func night() -> WorldStyle:
+	var style := WorldStyle.frontier()
+	style.id = "night_wood"
 	style.sky = {
 		"texture": "sky_frontier",
-		"energy": 0.85,
-		"sun_rotation": Vector3(-50.0, -30.0, 0.0),
-		"sun_color": Color("ffe8c2"),
-		"sun_energy": 1.12,
-		"sun_shadow_distance": 80.0,
-		"ambient_color": Color("cfdae1"),
-		"ambient_energy": 0.54,
+		# The panorama at 0.10 filled the frame with a near-black hemisphere the
+		# moment a body turned round; it is a night sky now, not a void, and the
+		# sky's own ambient is what keeps the wood behind the squad readable.
+		"energy": 0.55,
+		"sun_rotation": Vector3(-58.0, -34.0, 0.0),
+		"sun_color": Color(0.54, 0.62, 0.88),
+		"sun_energy": 1.0,
+		"sun_shadow_distance": 70.0,
+		"ambient_color": Color(0.17, 0.20, 0.26),
+		"sun_shadows": false,
+		# Sky ambient at a modest fill: the panorama is brighter now, but this is
+		# still a night wood, not a lit stage.
+		"ambient_energy": 1.3,
 		"use_sky_ambient": true,
-		"fog_color": Color("d2dbe0"),
-		"fog_density": 0.0014,
-		"fog_sun_scatter": 0.2,
-		"fog_sky_affect": 0.08,
-		"fog_aerial_perspective": 0.25,
+		"fog_mode": "exponential",
+		# A lighter haze that also eats the sky: the horizon closes at its own
+		# distance instead of turning the background into a black wall.
+		"fog_color": Color(0.075, 0.094, 0.124),
+		"fog_density": 0.012,
+		"fog_sun_scatter": 0.05,
+		"fog_sky_affect": 0.38,
+		"fog_aerial_perspective": 0.18,
 		"tonemap": Environment.TONE_MAPPER_FILMIC,
-		"exposure": 0.9,
-		"saturation": 1.24,
+		"exposure": 1.0,
+		"saturation": 0.84,
 		"contrast": 1.06,
 	}
+	# The wood's floor: grass where the canopy opens, fallen leaves in broad
+	# patches between (`litter_cover`), trodden dirt wherever the ground map says
+	# feet have been, rock on the rim. The tints are the night's grade on textures
+	# authored at daylight value, so a torch finds real colour in the ground.
 	style.ground = {
 		"grass_texture": "terrain_grass",
+		"litter_texture": "terrain_litter",
 		"dirt_texture": "terrain_dirt",
 		"rock_texture": "terrain_rock",
+		"noise_texture": "terrain_noise",
 		"macro_texture": "terrain_macro",
-		"tile": 6.0,
-		"dirt_tile": 6.0,
-		"rock_tile": 5.0,
-		"macro_tile": 22.0,
-		"grass_tint": Color("c2d492"),
-		"dirt_tint": Color("d2b78c"),
-		"rock_tint": Color("b4b3a6"),
-		"detail_strength": 0.9,
+		"tile": 4.0,
+		"litter_tile": 3.2,
+		"dirt_tile": 5.0,
+		"rock_tile": 4.0,
+		"macro_tile": 24.0,
+		"grass_tint": Color("5b6a4a"),
+		"grass_dry_tint": Color("6e6a4a"),
+		"litter_tint": Color("857560"),
+		"dirt_tint": Color("8a7a64"),
+		"rock_tint": Color("54534c"),
+		"litter_cover": 0.32,
+		"dry_cover": 0.3,
+		"blend_contrast": 0.55,
+		"blend_softness": 0.1,
+		"normal_strength": 1.0,
+		"detail_strength": 0.6,
 		"detail_fade": Vector2(70.0, 120.0),
 	}
-	style.trees = default_trees()
+	# The cover is placed by shape, not by disc (`GrassField.for_area` with a
+	# sampler): the lane's verges and the camp's rim ask for these densities per
+	# square metre, and the worn ground thins them (`terrain.gd`'s `is_trodden`).
+	# A chunk is drawn while its centre is inside `range`, so chunks stay small
+	# enough (48 m) that the next one appears inside the shader's own fade; one
+	# clump mesh and no flowers keep the whole verge to two draws a chunk.
 	style.grass = {
 		"texture": "grass_meadow",
-		"count": 2600,
-		"range": 64.0,
-		"chunk_size": 16.0,
-		"radius": 34.0,
-		"tints": [Color("d2e29e"), Color("bedc8e"), Color("e6f0b4"), Color("afd082")],
-		"shade_tint": Color("7b9558"),
-		"wind": Vector2(0.09, 1.15),
-		"density_falloff": Vector2(1.0, 0.55),
-		"max_slope": 12.0,
-		"height_range": Vector2(-0.6, 40.0),
-		"scale": Vector2(0.8, 1.35),
-		"clump_variants": 3,
+		"density": 0.42,
+		"range": 76.0,
+		"chunk_size": 48.0,
+		"tints": [Color("4c5c3a"), Color("3e4e34"), Color("5a6648"), Color("34442c")],
+		"shade_tint": Color("20281c"),
+		"wind": Vector2(0.10, 1.2),
+		"max_slope": 30.0,
+		"height_range": Vector2(-40.0, 90.0),
+		"scale": Vector2(0.80, 1.5),
+		"clump_variants": 1,
 	}
 	style.ground_cover = {
-		"flowers": {
-			"texture": "flowers", "count": 240, "range": 48.0, "chunk_size": 16.0,
-			"radius": 32.0, "scale": Vector2(0.6, 1.0), "wind": Vector2(0.06, 1.0),
-			"max_slope": 12.0, "height_range": Vector2(-0.4, 40.0),
-			"tints": [Color("f0e2a6"), Color("e8b4c6"), Color("b9c7ef"), Color.WHITE],
-			"shade_tint": Color("80906a"),
-		},
 		"ferns": {
-			"texture": "fern", "count": 140, "range": 44.0, "chunk_size": 16.0,
-			"radius": 33.0, "scale": Vector2(0.7, 1.1), "wind": Vector2(0.05, 0.9),
-			"max_slope": 12.0, "height_range": Vector2(-0.4, 40.0),
-			"tints": [Color("c4dda0"), Color("a9c985")],
-			"shade_tint": Color("5f7b48"),
-		},
-		"rocks": {
-			"texture": "rock", "count": 26, "range": 60.0, "chunk_size": 24.0,
-			"radius": 34.0, "scale": Vector2(0.55, 1.5), "y_scale": Vector2(0.4, 0.8),
-			"tints": [Color("a8aca1"), Color("9a9e94")],
-		},
-		"pebbles": {
-			"texture": "rock", "count": 60, "range": 40.0, "chunk_size": 16.0,
-			"radius": 33.0, "scale": Vector2(0.12, 0.3), "y_scale": Vector2(0.5, 0.8),
-			"tints": [Color("ded8c8"), Color.WHITE],
-		},
-	}
-	style.props = {
-		"kinds": {
-			"wood": "wood_planks",
-			"timber": "timber",
-			"plaster": "plaster",
-			"roof": "roof_shingles",
-			"stone": "stone_blocks",
-		},
-		"scale": {"wood": 0.6, "timber": 0.75, "plaster": 0.4, "roof": 0.9, "stone": 0.55},
-		"tints": {
-			"wood": Color("e2cda8"),
-			"timber": Color("c4b097"),
-			"plaster": Color("f7f0d6"),
-			"roof": Color("dfc2ad"),
-			"stone": Color("e0e2d6"),
+			"texture": "fern", "density": 0.05, "range": 76.0, "chunk_size": 48.0,
+			"scale": Vector2(0.75, 1.45), "wind": Vector2(0.06, 1.0),
+			"max_slope": 34.0, "height_range": Vector2(-40.0, 90.0),
+			"tints": [Color("41552f"), Color("35472a"), Color("56683c")],
+			"shade_tint": Color("1e2718"),
 		},
 	}
 	return style
-
-
-## Convenience lookup for scenes that spawn by species id.
-func species_by_id(species_id: String) -> Dictionary:
-	for entry in trees:
-		if String(entry.get("id", "")) == species_id:
-			return entry
-	return {}
 
 
 static func _species(values: Dictionary) -> Dictionary:

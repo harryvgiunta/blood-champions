@@ -28,7 +28,6 @@ extends Node3D
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const PointerGate = preload("res://scripts/pointer_gate.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
-const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const SignKit = preload("res://scripts/world/sign_kit.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -592,7 +591,7 @@ func _build_wood() -> void:
 	add_child(solids)
 	var mouth := Rect2(-NORTH_GATE_HALF - 1.5, WALL_RADIUS - 2.0,
 		(NORTH_GATE_HALF + 1.5) * 2.0, WOOD_DEPTH + 12.0)
-	wood = ClearingScript.plant_wood(self, RunForestScript.night_style(),
+	wood = ClearingScript.plant_wood(self, WorldStyle.night(),
 		Rect2(-WALL_RADIUS, -WALL_RADIUS, WALL_RADIUS * 2.0, WALL_RADIUS * 2.0),
 		WOOD_DEPTH, [mouth], [], TOWN_WOOD_SEED, solids, "TownWood")
 

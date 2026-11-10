@@ -66,7 +66,6 @@ const MenuScript = preload("res://scripts/warband/warband_menu.gd")
 ## is a real body.
 const TorchScript = preload("res://scripts/warband/torch_light.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
-const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 ## What a slot is read with when a kill arms a body: an empty slot and the naked
 ## set a body is born in are both bare, and a piece is called by its own name.
@@ -548,7 +547,7 @@ func _input(event: InputEvent) -> void:
 ## Under it, the net: a catch floor below the lowest point of the field, so a body
 ## pushed through a collider lands somewhere rather than falling out of the map.
 func _build_ground() -> void:
-	var style: WorldStyle = RunForestScript.night_style()
+	var style: WorldStyle = WorldStyle.night()
 	_town_at = TOWN_AT
 	var pads := [
 		{"rect": Rect2(_town_at.x - TOWN_PAD, _town_at.z - TOWN_PAD,

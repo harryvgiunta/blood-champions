@@ -51,7 +51,7 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 ## The strip the world occupies. `x` is the strip's west edge, `y` its near edge.
 ## It is sized off the trail the world builds: the lane runs 1,375 m south from the
 ## camp's mouth, the town stands 30 m past its far end, and the wood that has
-## grown out to `run_forest.gd`'s `WOOD_EDGE` has to stand on ground that does not
+## grown out to the wood's own edge has to stand on ground that does not
 ## climb. So x reaches 268 m either side of the lane - the wood's edge, the rim's
 ## toe and the face climbing to the boundary - and z runs from the camp's own wood
 ## in the north to a town pad 62 m short of the southern rim.

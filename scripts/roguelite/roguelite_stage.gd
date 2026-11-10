@@ -26,7 +26,6 @@ const CampKit = preload("res://scripts/world/camp_kit.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const WorldScatter = preload("res://scripts/world/scatter.gd")
-const RunForest = preload("res://scripts/warband/run_forest.gd")
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 const WorldStyleScript = preload("res://scripts/world/world_style.gd")
 
@@ -420,7 +419,7 @@ func _floor_style(data: Dictionary) -> WorldStyle:
 	var cached: WorldStyle = _floor_styles.get(key)
 	if cached != null:
 		return cached
-	var style: WorldStyle = RunForest.night_style()
+	var style: WorldStyle = WorldStyleScript.night()
 	style.id = key
 	var ground: Dictionary = style.ground.duplicate()
 	match str(data.get("id", "wilderness")):
@@ -578,7 +577,7 @@ func _plant_bounds(data: Dictionary) -> void:
 ## The wood's line: dead snags and briar pines, the two species that read as a
 ## treeline at night instead of a forest, two rows deep in the fog.
 func _plant_bounds_wood(solid: StaticBody3D) -> void:
-	var style: WorldStyle = RunForest.night_style()
+	var style: WorldStyle = WorldStyleScript.night()
 	var planted := 0
 	for species_id in ["hollow_snag", "briar_pine", "ironoak"]:
 		var species: Dictionary = style.species_by_id(str(species_id))
@@ -667,7 +666,7 @@ func _build_light(data: Dictionary) -> void:
 # --- the three biomes ------------------------------------------------------
 
 func _build_wood(_data: Dictionary) -> void:
-	var style: WorldStyle = RunForest.night_style()
+	var style: WorldStyle = WorldStyleScript.night()
 	var species_ids := ["ironoak", "briar_pine", "hollow_snag"]
 	# The bark a body meets hangs off a real body: a collision shape parented to a
 	# plain node is not in the physics world at all, which is why the wood's trees
