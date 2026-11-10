@@ -88,6 +88,22 @@ const SPAWN_STEPS := [SPAWN_LEAD, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.2, 2.2, SPAWN_
 const LIVE_CAP_BASE := 10
 const LIVE_CAP_PER_ISLAND := 2
 const LIVE_CAP_PER_PLAYER := 2
+## What a frame can pay for, which is the *other* half of the ceiling above: the
+## depth figure is how hard the level means to press, and this is how many bodies
+## the machine running it can keep on the floor while it does. Every body on the
+## field costs every physics tick - its sweep, its sight, its feet - and when the
+## frame slips the engine runs several ticks in a frame to catch up, each of them
+## paying for the whole crowd again. That is the shape of a wave that collapses:
+## forty bodies at 55 fps become seven, and it does not come back until the wave
+## does. So the island measures its own frame and fields only the bodies it can
+## afford, a body a beat, with the depth cap as the ceiling and `BUDGET_FLOOR` as
+## the least it will ever press with. The wave is unchanged - the queued bodies
+## still arrive, in their turn, as the ones on the floor die - so a deep level is
+## fought in waves that fit the frame rather than in a crowd that does not.
+const BUDGET_SLOW_MS := 20.0
+const BUDGET_FAST_MS := 14.0
+const BUDGET_FLOOR := 6
+const BUDGET_INTERVAL := 0.75
 const INTERACT_REACH := 3.4
 const RETARGET_INTERVAL := 0.9
 ## The island's bodies are given no town to be peaceful about. `MobSenses` reads a
@@ -243,6 +259,13 @@ var active_contract: Dictionary = {}
 var _trial_budget_mult := 1.0
 var _trial_live_cap_add := 0
 var _trial_extra_elites := 0
+## The crowd the frame has earned: how many bodies the island keeps on the floor
+## right now, between `BUDGET_FLOOR` and the depth cap (`_live_cap`). 0 until the
+## island has measured a frame, which reads as the depth cap.
+var _earned_cap := 0
+## The frame as the engine last drew it, milliseconds, smoothed.
+var _frame_ms := 0.0
+var _budget_clock := 0.0
 ## The route board rolls on its own generator so it cannot perturb the reward
 ## or mob rolls when code order changes.
 var _route_rng := RandomNumberGenerator.new()
@@ -454,6 +477,11 @@ func start_run() -> Dictionary:
 	_trial_budget_mult = 1.0
 	_trial_live_cap_add = 0
 	_trial_extra_elites = 0
+	# The crowd the last run's frames earned is not this machine's answer for this
+	# one: the island measures its own frame before it thins anything.
+	_earned_cap = 0
+	_frame_ms = 0.0
+	_budget_clock = 0.0
 	# A run's prop serials start at one again: a stale `_opened` from the last run
 	# would spend this run's first chest before it was ever touched.
 	_opened.clear()
@@ -953,6 +981,7 @@ func tick(delta: float) -> void:
 	if not wave_active:
 		state_changed.emit()
 		return
+	_tick_budget(delta)
 	_tick_spawn(delta)
 	_retarget_clock += delta
 	if _retarget_clock >= RETARGET_INTERVAL:
@@ -1131,9 +1160,48 @@ func _assign_rite(spec: Dictionary) -> Dictionary:
 	return spec
 
 
+## How many bodies the island keeps on the floor: the depth's own figure, capped
+## by the crowd this machine has been able to run. `_earned_cap` is 0 until a
+## frame has been measured, which is the depth cap.
 func _live_cap() -> int:
+	var depth := _depth_cap()
+	if _earned_cap <= 0:
+		return depth
+	return mini(depth, _earned_cap)
+
+
+## What this level means to press with, before the frame is asked (`_live_cap`).
+func _depth_cap() -> int:
 	return LIVE_CAP_BASE + LIVE_CAP_PER_ISLAND * maxi(0, stage_index) \
 		+ LIVE_CAP_PER_PLAYER * maxi(0, party_size() - 1) + _trial_live_cap_add
+
+
+## The frame's own say in the crowd above. `TIME_PROCESS` is the last drawn frame
+## as the engine measured it - the only reading here that includes everything a
+## frame pays for: the scripts, the renderer's setup and whatever the platform
+## waits on. Smoothed, so one shader compile or one save is not a reason to thin
+## the wave, and stepped once per `BUDGET_INTERVAL`, so a wave eases into what the
+## machine can hold instead of snapping.
+func _tick_budget(delta: float) -> void:
+	var frame_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	if frame_ms > 0.0:
+		_frame_ms = _frame_ms + (frame_ms - _frame_ms) * 0.15
+	_budget_clock += delta
+	if _budget_clock < BUDGET_INTERVAL:
+		return
+	_budget_clock = 0.0
+	var depth := _depth_cap()
+	if _earned_cap <= 0 or _earned_cap > depth:
+		_earned_cap = depth
+	elif _frame_ms > BUDGET_SLOW_MS and _earned_cap > BUDGET_FLOOR:
+		# The worse the frame, the faster the crowd comes down: a frame twice the
+		# budget loses two bodies a beat, four times loses four - so a collapse is
+		# answered in a couple of seconds instead of half a minute, and a machine
+		# that is merely a little slow still gives its wave time to be a wave.
+		var over := 1 + int(_frame_ms / BUDGET_SLOW_MS)
+		_earned_cap = maxi(BUDGET_FLOOR, _earned_cap - over)
+	elif _frame_ms < BUDGET_FAST_MS and _earned_cap < depth:
+		_earned_cap += 1
 
 
 ## The wait before the body at `index` of the queue: the opening ten follow
@@ -3145,6 +3213,10 @@ func _close_run() -> void:
 	_trial_budget_mult = 1.0
 	_trial_live_cap_add = 0
 	_trial_extra_elites = 0
+	# No island is measuring anything now; the next run starts from its depth.
+	_earned_cap = 0
+	_frame_ms = 0.0
+	_budget_clock = 0.0
 	queue_clear()
 	_clear_stage_props()
 	_free_mobs()
