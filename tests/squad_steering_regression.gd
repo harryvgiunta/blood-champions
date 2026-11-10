@@ -9,7 +9,6 @@ extends SceneTree
 ## which used to reverse every step now never reverses at all.
 
 const SquadScript = preload("res://scripts/warband/squad_drive.gd")
-const NavScript = preload("res://scripts/warband/squad_nav.gd")
 
 var checks := 0
 var failures := 0
@@ -212,72 +211,6 @@ func check_doubled_line(step: float) -> void:
 ## out, turns round and walks back in until the soul walks away. On mapped ground
 ## the same walk leaves through the door and goes round; the door itself is off
 ## the map because it rises.
-func check_cage_walk_out(step: float) -> void:
-	var cage := Node3D.new()
-	root.add_child(cage)
-	var bars := StaticBody3D.new()
-	cage.add_child(bars)
-	for wall in [[Vector3(0.12, 2.7, 2.5), Vector3(-1.15, 1.35, 0.0)],
-			[Vector3(0.12, 2.7, 2.5), Vector3(1.15, 1.35, 0.0)],
-			[Vector3(2.5, 2.7, 0.12), Vector3(0.0, 1.35, 1.15)]]:
-		var shape := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = wall[0]
-		shape.shape = box
-		shape.position = wall[1]
-		bars.add_child(shape)
-	var door := StaticBody3D.new()
-	cage.add_child(door)
-	var door_shape := CollisionShape3D.new()
-	var door_box := BoxShape3D.new()
-	door_box.size = Vector3(2.4, 2.7, 0.12)
-	door_shape.shape = door_box
-	door_shape.position = Vector3(0.0, 1.35, -1.15)
-	door.add_child(door_shape)
-	var nav = NavScript.new()
-	nav.build(cage, Rect2(-10.0, -10.0, 20.0, 20.0), [door])
-	var inside := Vector3(0.0, 0.0, 0.3)
-	var behind := Vector3(0.0, 0.0, 3.6)
-	check(not nav.clear_line(inside, behind), "the back bars are on the map")
-	check(nav.clear_line(inside, Vector3(0.0, 0.0, -3.0)), "and the rising door is not")
-
-	var squad = SquadScript.new()
-	squad.setup(null, null, null)
-	squad.nav = nav
-	var body := FakeBody.new()
-	root.add_child(body)
-	body.global_position = inside
-	var track := {"merc_id": 3, "delta": step, "side": 0.0, "sign": 1.0, "retreat": 0.0}
-	var left_by_door := false
-	var through_bars := 0
-	var frames := 0
-	while frames < 600 and body.global_position.distance_to(behind) > 1.0:
-		var before: Vector3 = body.global_position
-		squad._advance(body, behind, track, 0.85)
-		body.global_position += Vector3(body.last_intent.x, 0.0, body.last_intent.y) * 5.5 * step
-		var after: Vector3 = body.global_position
-		if after.z < -1.45:
-			left_by_door = true
-		# Crossing the back bars' plane anywhere along the cage's width is walking
-		# through the iron.
-		if (before.z < 1.15) != (after.z < 1.15) and absf(after.x) < 1.25 + 0.3:
-			through_bars += 1
-		frames += 1
-	check(body.global_position.distance_to(behind) <= 1.0,
-		"a body penned in a cage reaches a post behind the bars (%.1f m short after %d frames)"
-		% [body.global_position.distance_to(behind), frames])
-	check(left_by_door, "by walking out of the door")
-	check(through_bars == 0, "and never through the bars (%d crossings)" % through_bars)
-	body.queue_free()
-	cage.queue_free()
-
-
-## A walk to a piece of loot is a walk, not an order. The camp showed what the
-## missing rule cost: a freed squad that could not cross a cage wall to the shiv
-## stood shouldering that wall for the rest of the session, so the run never began.
-## A body that has not earned `FETCH_PROGRESS` metres of headway in
-## `FETCH_GIVE_UP` seconds abandons that piece - and the whole squad is on to the
-## next errand, because the abandoned key leaves every selector at once.
 func check_fetch_give_up(step: float) -> void:
 	# --- a body that cannot close the gap -------------------------------
 	var blocked := FakeBody.new()

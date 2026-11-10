@@ -72,7 +72,6 @@ WARBAND_TESTS = [
     "ability_upgrades_regression",
     "ability_fx_regression",
     "mobile_fire_regression",
-    "delve_regression",
     "demon_fire_regression",
     "squad_medicine_regression",
     "squad_steering_regression",

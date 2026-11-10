@@ -107,9 +107,6 @@ const LootHandScript = preload("res://scripts/warband/loot_hand.gd")
 ## every booked piece is written to.
 const LootFeedScript = preload("res://scripts/warband/loot_feed.gd")
 ## The campaign's map sheet. One page, drawn by one `_draw()`, opened with `M`.
-## The delve: the Weeping Hollow's mouth in the square, the counter a party and its
-## delve inventory are made up at, and the cave instance it goes down into.
-const DelveAreaScript = preload("res://scripts/warband/delve_area.gd")
 
 ## Where the square stands. It was the far end of the road once; the road is
 ## gone, so the anchor is frozen here and the town is simply a place.
@@ -225,8 +222,6 @@ var _retarget_ticks := 0
 ## The take-it-all, the loot window, the looted list, and the campaign's map sheet.
 var loot_hand
 var loot_feed
-## The delve (`delve_area.gd`): the mouth in the square and the instance below.
-var delve_area
 ## The arena run: director, island and its plate. Always present; idle until the
 ## Start Run Portal opens a run.
 var roguelite
@@ -310,7 +305,6 @@ func _ready() -> void:
 	_build_revive()
 	_build_squad()
 	_build_areas()
-	_build_delve()
 	_build_roguelite()
 	if _client:
 		_become_client()
@@ -367,7 +361,6 @@ func _note_hitch() -> void:
 		"draws": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 		"objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
 		"guards": guards.size() if guards != null else 0,
-		"below": delve_area != null and delve_area.cave != null,
 	}, Log.LEVEL_WARN)
 
 
@@ -458,11 +451,6 @@ func _step_world(delta: float) -> void:
 		Perf.begin("squad.retarget")
 		SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
 		Perf.end()
-	# The delve's own clock: dens that wake, a party that falls, the eye's sky.
-	if delve_area != null:
-		Perf.begin("delve.tick")
-		delve_area.tick(delta)
-		Perf.end()
 	if roguelite != null:
 		Perf.begin("roguelite.tick")
 		roguelite.tick(delta)
@@ -527,13 +515,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_K:
 			_try_loot()
 			get_viewport().set_input_as_handled()
-		KEY_M:
-			# The Hollow's own plan of the floor: one page, and it never pauses.
-			if delve_area != null and delve_area.in_cave(_soul()) and delve_area.map != null:
-				if _panel_open():
-					_hide_panels()
-				delve_area.map.toggle()
-				get_viewport().set_input_as_handled()
 		KEY_R:
 			_activate_brand()
 			get_viewport().set_input_as_handled()
@@ -766,15 +747,6 @@ func _build_areas() -> void:
 	town.position = _town_at
 	add_child(town)
 	town.embed(self)
-
-
-## The delve stands in the square the town just built, and hands the squad its
-## cave map and the soul its party when a party goes down.
-func _build_delve() -> void:
-	delve_area = DelveAreaScript.new()
-	delve_area.name = "Delve"
-	add_child(delve_area)
-	delve_area.setup(self)
 
 
 ## The roguelite loop's own node and plate. Built with the other areas so the
@@ -1250,10 +1222,6 @@ func _is_free_ally(merc_id: int) -> bool:
 		return false
 	if warband != null and warband.souls != null and warband.souls.occupied_by(merc_id) > 0:
 		return false
-	# While a party is below, a body left in the town is nobody's to drive: it
-	# stands where it was left until the party comes back up.
-	if warband != null and warband.delve.active and not warband.delve.is_member(merc_id):
-		return false
 	return true
 
 
@@ -1336,24 +1304,7 @@ func _on_world_action(actor, action: String, value) -> bool:
 			return _revive_from(actor, bool(value))
 		"loot":
 			return _loot_from(actor, value)
-		"climb_out":
-			return _climb_out_for(actor)
 	return false
-
-
-## A soul on the rope asks the party out. The host owns the descent, so a guest's
-## `G` is an intent: it is honoured only from a body standing at a rope, and it
-## brings the whole party up exactly as the host's own press does. Without it a
-## guest standing over the only standing body has no way out of the Hollow.
-func _climb_out_for(actor) -> bool:
-	if _client or delve_area == null or actor == null or not is_instance_valid(actor):
-		return false
-	if not delve_area.below() or delve_area.cave == null:
-		return false
-	if not delve_area.cave.at_exit(actor):
-		return false
-	var result: Dictionary = delve_area.climb_out()
-	return bool(result.get("ok", false))
 
 
 ## A guest's take, answered on the host for the guest's body. `value` names what
@@ -1834,31 +1785,7 @@ func _hostile_near(at: Vector3, radius: float) -> bool:
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
 	if roguelite != null and roguelite.is_running():
 		return
-	if not _leave_remains(actor, merc_id):
-		drop_merc_gear(actor, merc_id)
-
-
-## A member of the party below who dies keeps what he still wore - both weapon
-## sets, armour, trinkets - on his own body (`WarbandLoot.register_remains`): it is
-## never booked for him, the squad leaves it alone, and the party only gets it back
-## by looting the corpse. What nobody takes back stays below with him. False for
-## any other death, which lets go of its hands as ever.
-func _leave_remains(actor, merc_id: int) -> bool:
-	if _client or warband == null or merc_id <= 0 or not warband.delve.is_member(merc_id):
-		return false
-	var kit: Array[String] = []
-	for entry in warband.roster.worn_entries(merc_id):
-		var item_id: String = warband.roster.take_worn(merc_id, str(entry.get("slot", "")),
-			int(entry.get("set", -1)))
-		if not item_id.is_empty():
-			kit.append(item_id)
-	if loot == null or not is_instance_valid(actor) or kit.is_empty():
-		return true
-	loot.register_remains(actor, kit, warband.roster.name_of(merc_id))
-	if hud != null:
-		hud.set_status("%s is dead. What he wore is on his body: loot it to take it back." %
-			warband.roster.name_of(merc_id), 4.0)
-	return true
+	drop_merc_gear(actor, merc_id)
 
 
 func _on_pickup_taken(_pickup) -> void:
@@ -1924,12 +1851,6 @@ func _check_wipe(delta: float) -> void:
 	# An arena run decides its own loss (`RogueliteDirector._tick_down_check`):
 	# a wipe on the island would reload a campaign checkpoint under the fight.
 	if roguelite != null and roguelite.is_running():
-		_wipe_beat = -1.0
-		return
-	# A party below falls by its own rule (`delve_area.gd`): the bodies left in the
-	# town are still standing, and the Hollow - not the checkpoint - decides what a
-	# fall costs.
-	if warband != null and warband.delve.active:
 		_wipe_beat = -1.0
 		return
 	if not _all_bodies_out():
@@ -2139,9 +2060,6 @@ func _try_interact() -> void:
 			return
 		if hud != null:
 			hud.set_status(GUEST_HANDS_TEXT, 3.0)
-		return
-	# The Hollow's mouth in the square, and the rope out of it below.
-	if delve_area != null and delve_area.interact(actor):
 		return
 	if town != null and not town.interact_at(controller.local_peer_id, actor.global_position).is_empty():
 		return
@@ -2535,10 +2453,6 @@ func _update_prompt() -> void:
 					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
 		_write_prompt(line)
 		return
-	# The Hollow first: below, its objective is the only line that means anything,
-	# and at the mouth it names the way down.
-	if delve_area != null:
-		text = delve_area.prompt_line(actor)
 	if text.is_empty() and town != null and town.in_square(actor):
 		text = town.prompt_line(actor)
 	_write_prompt(text)
@@ -2563,8 +2477,6 @@ func _hide_panels() -> void:
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
 		paperdoll.close()
-	if delve_area != null:
-		delve_area.close_panels()
 	if roguelite_hud != null:
 		roguelite_hud.close_all()
 	if town != null:
@@ -2577,8 +2489,6 @@ func _panel_open() -> bool:
 	if menu != null and menu.is_open():
 		return true
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
-		return true
-	if delve_area != null and delve_area.panels_open():
 		return true
 	if roguelite_hud != null and roguelite_hud.open_panels():
 		return true

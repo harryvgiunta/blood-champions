@@ -16,9 +16,7 @@ extends SceneTree
 ## authority here, not a screenshot. The cages are gone with the opening, so the
 ## camp section is gone with them: what is left of it is the wood.
 
-const CampDressingScript = preload("res://scripts/warband/camp_dressing.gd")
 const TownDressingScript = preload("res://scripts/warband/town_dressing.gd")
-const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
 const SignKit = preload("res://scripts/world/sign_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
@@ -29,7 +27,6 @@ const WARBAND_SAVE := "user://warband_art_warband.json"
 ## prop's extent plus this has to fit between the prop's anchor and the point.
 const BODY_RADIUS := 0.45
 
-var wood
 var town
 var state
 var warband
@@ -71,7 +68,6 @@ func run() -> void:
 	watchdog.start()
 
 	check_signs()
-	await check_wood()
 	await check_town()
 	_finish()
 
@@ -80,7 +76,7 @@ func _on_watchdog() -> void:
 	_finish()
 
 func _finish() -> void:
-	for scene_node in [wood, town]:
+	for scene_node in [town]:
 		if scene_node != null and is_instance_valid(scene_node):
 			scene_node.queue_free()
 	await process_frame
@@ -242,112 +238,6 @@ func assert_clear(props: Array, points: Array, label: String) -> void:
 				margin = gap
 				closest = "%s (%.2f m spare)" % [String(record["name"]), gap]
 		check(margin > 0.0, "%s dressing stands off %s: %s" % [label, String(entry["what"]), closest])
-
-
-# --- the wood at the far end of the road -----------------------------------
-
-## The wood is the camp's own builders with the cages taken out: the same pocket,
-## the same ragged stake line, the same shelters, fire and dressing. What is
-## asserted here is what the deletion changed - the clearing is built with no cage
-## at all, the master's patch is clear of everything a body can hit, and he stands
-## on it.
-func check_wood() -> void:
-	wood = Node3D.new()
-	wood.name = "Wood"
-	wood.set_script(WoodScript)
-	root.add_child(wood)
-	await create_timer(0.9).timeout
-	var clearing: Dictionary = wood.clearing
-	check(not clearing.is_empty(), "the wood built its clearing")
-	var dressing = wood.get_node_or_null("CampDressing")
-	check(dressing != null and dressing is Node3D, "the wood builds its dressing")
-	if clearing.is_empty() or dressing == null:
-		return
-
-	# The cages are gone at the source, not merely hidden.
-	check((clearing.get("cages", []) as Array).is_empty(),
-		"the clearing is built with zero cages (%d)" % (clearing.get("cages", []) as Array).size())
-	check((clearing.get("doors", []) as Array).is_empty(), "and no doors to open")
-	var standing := 0
-	for index in 4:
-		if wood.get_node_or_null("Cage%d" % (index + 1)) != null:
-			standing += 1
-	check(standing == 0, "not one cage node stands in the wood (%d)" % standing)
-	var hardware = dressing.get_node_or_null("CageHardware")
-	check(hardware != null and hardware.get_child_count() == 0,
-		"and the dressing bolts no iron to a cage (%d)"
-		% (0 if hardware == null else hardware.get_child_count()))
-	for label in ["Banners", "Gibbets", "AltarDressing", "Braziers", "GroundScatter"]:
-		var group = dressing.get_node_or_null(label)
-		check(group != null and group.get_child_count() > 0,
-			"the wood still carries its %s" % label)
-
-	# The master stands on his own patch, in the open air, with his pair beside
-	# him - the one thing in the wood that fights back properly.
-	check(wood.boss_point().is_equal_approx(WoodScript.BOSS_POINT),
-		"the wood names the demon's patch (%s)" % str(wood.boss_point()))
-	check(wood.master != null and is_instance_valid(wood.master),
-		"the Horned Thing stands in the wood")
-	if wood.master != null and is_instance_valid(wood.master):
-		# Flat only: this build has no baked ground under it, so the body's own
-		# height here is where gravity left it. The patch it stands on is the claim.
-		var at: Vector3 = (wood.master as Node3D).position
-		check(Vector2(at.x - WoodScript.BOSS_POINT.x,
-			at.z - WoodScript.BOSS_POINT.z).length() < 0.01,
-			"on the patch it is named for (%.1f, %.1f)" % [at.x, at.z])
-		check(wood.master_alive(), "and he is on his feet at the build")
-	check(wood.guards.size() == 1 + WoodScript.GUARD_POSTS.size(),
-		"the master and his keepers are the wood's own list (%d)" % wood.guards.size())
-	check(wood.guards.has(wood.master), "the master is on it")
-	for index in WoodScript.GUARD_POSTS.size():
-		var post: Vector3 = WoodScript.GUARD_POSTS[index]
-		var keeper = wood.get_node_or_null("WoodKeeper%d" % (index + 1))
-		check(keeper != null, "keeper %d stands with him" % (index + 1))
-		if keeper != null:
-			check(Vector2(keeper.position.x - post.x, keeper.position.z - post.z).length() < 0.01,
-				"keeper %d holds its own post" % (index + 1))
-
-	# Clearance: nothing solid stands inside the patch, and no dressing prop's
-	# footprint reaches a body standing on it.
-	var solids = clearing.get("solids")
-	var nearest := INF
-	var nearest_name := "nothing"
-	if solids != null:
-		for child in (solids as Node).get_children():
-			if not (child is CollisionShape3D):
-				continue
-			var at: Vector3 = (child as Node3D).global_position
-			var gap := Vector2(at.x - WoodScript.BOSS_POINT.x, at.z - WoodScript.BOSS_POINT.z).length()
-			if gap < nearest:
-				nearest = gap
-				nearest_name = "a trunk at (%.1f, %.1f)" % [at.x, at.z]
-	check(nearest >= 7.0, "no trunk stands inside the fight's patch (nearest %s, %.1f m)"
-		% [nearest_name, nearest])
-	var props := props_of(dressing)
-	check(props.size() >= 20, "the wood dressing records %d props for the clearance check" % props.size())
-	assert_clear(props, [{"what": "the master's patch", "point": WoodScript.BOSS_POINT,
-		"reach": 0.0}], "wood")
-
-	# The dressing's declared yard is the pocket's, so the two cannot drift.
-	check(is_equal_approx(CampDressingScript.YARD_HALF_WIDTH, WoodScript.YARD_HALF_WIDTH)
-		and is_equal_approx(CampDressingScript.YARD_FRONT, WoodScript.YARD_FRONT)
-		and is_equal_approx(CampDressingScript.YARD_BACK, WoodScript.YARD_BACK),
-		"the dressing's yard mirrors wood_boss.gd's YARD_*")
-	check(CampDressingScript.FLOOR_HALF_WIDTH > WoodScript.YARD_HALF_WIDTH
-		and CampDressingScript.FLOOR_FRONT < WoodScript.YARD_FRONT
-		and CampDressingScript.FLOOR_BACK > WoodScript.YARD_BACK,
-		"the declared floor is bigger than the pocket, always")
-	check(int(clearing.get("trees", 0)) >= 150,
-		"the pocket still sits inside a real wood (%d trees)" % int(clearing.get("trees", 0)))
-	check(int(clearing.get("stakes", 0)) >= 60,
-		"its boundary is still a ragged stake line (%d)" % int(clearing.get("stakes", 0)))
-
-	print("WARBAND_ART_WOOD groups=%d trees=%d stakes=%d props=%d nearest_solid=%.1f" % [
-		dressing.get_child_count(), int(clearing.get("trees", 0)),
-		int(clearing.get("stakes", 0)), props.size(), nearest])
-
-	wood.queue_free()
-	await process_frame
 
 
 # --- the town square -------------------------------------------------------

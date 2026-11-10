@@ -12,7 +12,6 @@ extends SceneTree
 ## and shut-window rule, unchanged beside the fire.
 
 const DemonFireScript = preload("res://scripts/warband/demon_fire.gd")
-const DemonScript = preload("res://scripts/warband/delve_demon.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
 
 ## Far outside the town's safe ring: nothing here is protected from a demon.
@@ -413,11 +412,10 @@ func _target(at: Vector3) -> Target:
 	return body
 
 
-## One of the Hollow's demons (`delve_demon.gd`), built by hand: the master when
-## `boss`, a keeper otherwise. A target passed here is the local ranger.
+## A devil that casts, built by hand. A target passed here is the local ranger.
 func _demon(boss: bool, at: Vector3, target: Node3D = null):
-	var mob = DemonScript.new()
-	mob.boss = boss
+	var mob = DevilMob.new()
+	mob.mob_id = "beast"
 	mob.player = target
 	mob.safe_center = SAFE_OFFSET
 	mob.position = at

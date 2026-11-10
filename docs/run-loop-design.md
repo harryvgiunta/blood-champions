@@ -28,7 +28,7 @@ disagree on cadence, this document copies the **shape**, not the number.
 | Beat | Crab Champions | Why it matters |
 | --- | --- | --- |
 | Lobby | Pick a primary weapon, an ability and a melee weapon; they cannot be swapped during the run. | The run starts with an identity, not a blank body. |
-| Island chain | Four themed biomes (Tropical, Ice, Desert, Volcano). A biome is **ten islands**: island 9 is the shop, island 10 is the elite/boss wall. | Short, self-contained arenas; the run is a sequence of ten-fight blocks, not a campaign. |
+| Island chain | Four themed biomes (Tropical, Ice, Desert, Volcano). In the current build a biome is **seven islands**: five combat islands (the first is a fixed Arena), then the shop, then the elite/boss. | Short, self-contained arenas; the run is a sequence of small fight blocks, not a campaign. |
 | Clear | Enemies die, the island's chest and up to three portals appear. | The reward and the next decision arrive together. |
 | Finale | The final boss ends the arc; the player may go to Crab Island and end the run, or loop with scaling. | The run has a finish line and an endless mode on the same save. |
 | Length / party | 20–40 minute runs; solo or up to four players. | Every island is a bite-sized unit, so a decision every few minutes is cheap. |
@@ -37,17 +37,27 @@ Sources: [Steam store page](https://store.steampowered.com/app/774801/Crab_Champ
 [Biomes](https://crabchampions.wiki.gg/wiki/Biomes),
 [Islands](https://crabchampions.wiki.gg/wiki/Islands),
 [Looping](https://crabchampions.wiki.gg/wiki/Looping),
-[Fandom: Survival](https://crabchampions.fandom.com/wiki/Survival).
+[The Elemental Update](https://crabchampions.wiki.gg/wiki/The_Elemental_Update),
+[Fandom: Survival](https://crabchampions.fandom.com/wiki/Survival),
+[Japanese Wiki: Stage](https://w.atwiki.jp/crabchampionsjp/pages/44.html).
 
-**Version caution.** The official wiki's Difficulty page describes a ten-island
-biome with a guaranteed shop at 9 and a guaranteed elite/boss at 10, and says
-boss islands appear every 30th island. Older community documentation says each
-biome's 10th is a boss and four biomes complete a run. Those two statements
-cannot both be exact for a four-biome game, which is the point: the stable
-lesson is the **ten-fight biome shape**, not the run length. Our own 10-level
-block already matches that shape — shop at 9, wall at 10 — and we deliberately
-make the wall a boss every block. The proposal does not depend on which cadence
-the next patch ships.
+**Version caution.** The cadence changed. The Elemental Update (September 2024)
+cut a biome from eight islands to **seven**: five combat islands (the first is a
+fixed Arena), then the shop, then the elite/boss. The current Japanese wiki
+(updated May 2026) still describes that `5 combat → shop → elite/boss` cycle.
+The English wiki's Difficulty page still describes an older ten-island biome —
+shop at 9, elite/boss at 10 — and warns that its values may be out of date. The
+design uses the **sequence** — combat, then shop, then wall — not the count. Our
+own block is longer: eight combat levels, shop at 9, boss at 10.
+
+If you remember “shop every five levels,” that is the current Crab biome: five
+combat islands, then the shop on the sixth. The shop is not on every fifth
+island globally; it is the sixth island of each seven-island biome.
+
+Blood Champions is not changing that cadence. Its shop is level 9 of each
+ten-level block (`level % 10 == 9`), so it is every ten levels — 9, 19, 29 — not
+every five. A five-level shop cadence would be a separate pacing change to the
+block, not a correction to Crab's structure.
 
 ### 1.2 The portal is the decision
 
@@ -322,11 +332,12 @@ flowchart TD
   B -->|wipe| E[Run ends · keys and record bank]
 ```
 
-The 10-level spine does not change. The shop at 9 and the boss at 10 stay. This
-is also Crab Champions' biome shape — ten islands, shop at 9, wall at 10 — which
-is why the proposal can borrow the doors without rebuilding the block. What
-changes is what stands at the reward cluster after every other clear: three
-**gate contracts** instead of three faction doors with identical pay.
+The 10-level spine does not change. The shop at 9 and the boss at 10 stay.
+Crab's current biome is shorter — five combat islands, shop, elite/boss — but
+the sequence is the same: combat, then shop, then wall. Our block is a longer
+version of that sequence, with a boss every block. What changes is what stands
+at the reward cluster after every other clear: three **gate contracts** instead
+of three faction doors with identical pay.
 
 ### 4.2 The contract
 
@@ -946,16 +957,20 @@ of portal choice and chest categories.
 - [Game Mechanics](https://crabchampions.wiki.gg/wiki/Game_Mechanics)
 - [The Island Update](https://crabchampions.wiki.gg/wiki/The_Island_Update)
 - [The Anvil Update](https://crabchampions.wiki.gg/wiki/The_Anvil_Update)
+- [The Elemental Update](https://crabchampions.wiki.gg/wiki/The_Elemental_Update)
 
 **Steam**
 - [Crab Champions store page](https://store.steampowered.com/app/774801/Crab_Champions/)
 - [The Island Update patch notes](https://store.steampowered.com/news/app/774801/view/637948480724140705)
+- [The Elemental Update patch notes](https://store.steampowered.com/news/app/774801/view/4592070178847557110)
 
 **Community (shape, not numbers)**
 - [Fandom: Portals](https://crabchampions.fandom.com/wiki/Portals)
 - [Fandom: Survival](https://crabchampions.fandom.com/wiki/Survival)
 - [GameAH beginner guide](https://gameah.fr/crab-champions-les-bases-pour-debutant/)
 - [ano_rta portal/build guide, V2347](https://note.com/ano_rta/n/nd53895bc0085)
+- [Crab Champions Japanese Wiki: Stage](https://w.atwiki.jp/crabchampionsjp/pages/44.html)
+  — current `5 combat → shop → elite/boss` structure, updated May 2026
 
 **Blood Champions**
 - [README](../README.md)
