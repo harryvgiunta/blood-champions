@@ -101,7 +101,6 @@ func run() -> void:
 	await create_timer(SETTLE_SECONDS).timeout
 	check_world_pieces()
 	await check_menu()
-	await check_orders()
 	check_ally_rule()
 	_finish()
 
@@ -122,23 +121,6 @@ func check_world_pieces() -> void:
 	check(bound.size() == game.bodies.size(),
 		"every seated body is bound to the abilities (%d of %d)"
 		% [bound.size(), game.bodies.size()])
-
-	# The band on the way out, and its culler.
-	check(game.wilderness != null, "the world builds the wilderness band")
-	var wolves: int = game.wilderness.wolves().size() if game.wilderness != null else 0
-	check(wolves == WarbandWilderness.PACK_COUNT,
-		"the way out holds its whole band (%d of %d wolves)" % [wolves,
-			WarbandWilderness.PACK_COUNT])
-	check(game.find_child("MobCuller", true, false) != null,
-		"the band owns its MobCuller")
-	# They are the world's mobs: the same `guards` list the squad and retarget read.
-	var unlisted := 0
-	if game.wilderness != null:
-		for wolf in game.wilderness.wolves():
-			if not game.guards.has(wolf):
-				unlisted += 1
-	check(unlisted == 0,
-		"every wolf is on the world's hostile list (%d missing)" % unlisted)
 
 	# The HUD is painted against a living body, not idling at zero.
 	var bar: ProgressBar = game.hud.stamina_bar()
@@ -183,176 +165,6 @@ func check_menu() -> void:
 	await process_frame
 	check(not game.menu.is_open(), "a second Escape closes the menu")
 	check(not paused, "closing the menu leaves the world running")
-
-
-# --- the orders, the map and the click -------------------------------------
-
-## The three things the campaign is played against, as the world builds
-## them: the cages, the warcamps, and the map sheet the player reads to find both.
-## Then the one gesture that turns a kill into loot, through the world's own press
-## path - a click on lootable ground must never also be a swing.
-func check_orders() -> void:
-	check(game.soldier_cages != null, "the world builds the cage line")
-	check(game.watcher_warren != null, "the world builds the watcher warcamps")
-	check(game.world_map != null, "the world builds the map sheet")
-	if game.soldier_cages != null:
-		check(game.soldier_cages.remaining() == SoldierCages.CAGE_FRACTIONS.size(),
-			"every soldier the line holds waits in the wood (%d of %d shut)"
-			% [game.soldier_cages.remaining(), SoldierCages.CAGE_FRACTIONS.size()])
-	if game.watcher_warren != null:
-		check(game.watcher_warren.living() == game.watcher_warren.total(),
-			"every warden in the warcamps is standing")
-	var marks: Array = game.map_markers()
-	check(marks.size() >= 4, "the map is told where the orders are (%d marks)" % marks.size())
-
-	_press_key(KEY_M)
-	await process_frame
-	await process_frame
-	check(game.world_map.is_open(), "M opens the map sheet")
-	check(not paused, "the map does not pause the world")
-	_press_key(KEY_M)
-	await process_frame
-	await process_frame
-	check(not game.world_map.is_open(), "a second M closes it")
-
-	# The click that loots. A drop is put exactly under the crosshair, so the ray
-	# the world reads is the ray the test aimed down.
-	var actor = game.controller.active_body(1)
-	check(actor != null, "a body stands for the click")
-	if actor == null or game.loot_hand == null:
-		return
-	# A take is the body's own work: a piece under the crosshair but out of the
-	# body's reach is a swing, never a take from thirty paces off.
-	var far_drop = game.spawn_pickup("wolf_pelt",
-		actor.global_position + actor.global_basis.x * 30.0)
-	check(far_drop != null, "a pelt lies thirty metres off")
-	check(not game.loot_hand.try_click(actor, far_drop.global_position),
-		"a drop out of the body's reach is left to the sword")
-	far_drop.queue_free()
-	# The same gesture on a piece at the body's feet is the take, and it is
-	# instant: no channel, no window, nothing dressed onto the body that searched.
-	var merc_id: int = game.controller.merc_for_peer(1)
-	var worn_before: Dictionary = warband.roster.equipped_of(merc_id)
-	var drop = game.spawn_pickup("wolf_pelt",
-		actor.global_position - actor.global_basis.z * 1.0)
-	check(drop != null, "a pelt lies at the body's feet")
-	check(game.loot_hand.try_click(actor, drop.global_position),
-		"a right click on the drop takes it")
-	check(warband.stash.pooled_count("wolf_pelt") >= 1, "the pelt is in the shared stash")
-	check(warband.roster.equipped_of(merc_id) == worn_before,
-		"and nothing was dressed onto the body that took it")
-	check(game.loot_hand.last_summary().contains("Wolf Pelt"),
-		"one line says what came up (%s)" % game.loot_hand.last_summary())
-
-	# A fighter under the reticle is what the press was for, whatever lies at its
-	# feet. The aim point of a mob across the fight sits on its own chest, so a drop
-	# inside the same arm's reach is "under the crosshair" by distance alone: the
-	# body ducked to work the ground in the middle of the fight and the click never
-	# swung. That is the report "clicking to attack is unresponsive", and it starts
-	# once the ground has steel on it.
-	var stand: Vector3 = actor.global_position
-	var ray: Dictionary = game.controller.camera_rig.aim_ray()
-	var ray_origin: Vector3 = ray.get("origin", stand)
-	var ray_dir: Vector3 = ray.get("direction", -actor.global_basis.z)
-	# The scenery the reticle lands on now is the wall the fighter must stand in
-	# front of, or the ray would stop short and never meet him.
-	var obstacle: Vector3 = game.controller.aim_sample().get("point", stand)
-	var clear_from := ray_origin.distance_to(obstacle) if obstacle != Vector3.ZERO else 0.0
-	var spot := Vector3.ZERO
-	var reachable := false
-	var along := 0.6
-	while along < 14.0:
-		var probe: Vector3 = ray_origin + ray_dir * along
-		var flat := Vector2(probe.x - stand.x, probe.z - stand.z).length()
-		var near_ground := absf((probe.y - 1.0) - stand.y) <= 0.8
-		var clear := clear_from < 0.1 or along < clear_from - 0.4
-		if flat >= 1.7 and flat <= 2.1 and near_ground and clear:
-			spot = probe
-			reachable = true
-			break
-		along += 0.05
-	check(reachable, "the crosshair ray has a point inside a mob's arm's reach")
-	if reachable:
-		var fighter = WatcherScript.new()
-		fighter.name = "LootFighter"
-		fighter.mob_id = "hollow_warden"
-		fighter.health_pool = 8.0
-		game.add_child(fighter)
-		# Feet under the ray point, so the capsule a ~2 m tall body carries has the
-		# reticle on its chest rather than over its head.
-		fighter.global_position = Vector3(spot.x, spot.y - 1.0, spot.z)
-		# Held still so the ray keeps meeting the same capsule for the whole check.
-		fighter.set_physics_process(false)
-		var toward := Vector3(spot.x - stand.x, 0.0, spot.z - stand.z)
-		if toward.length_squared() < 0.0001:
-			toward = -actor.global_basis.z
-		await physics_frame
-		await physics_frame
-		var aimed: Dictionary = game.controller.aim_sample()
-		check(aimed.get("target") == fighter, "the reticle is on the living watcher")
-		# The piece that steals the press: inside the body's reach and inside the
-		# aim point's, so distance alone calls it "under the crosshair".
-		var under = game.spawn_pickup("wolf_pelt",
-			stand + toward.normalized() * 0.9 + Vector3.UP * 0.2)
-		check(under != null, "a pelt lies between the two bodies")
-		# Read once: the squad's own hands take loose steel between frames, and the
-		# piece has to be the same one for every press below.
-		var under_at: Vector3 = under.global_position
-		var strike := InputEventMouseButton.new()
-		strike.button_index = MOUSE_BUTTON_RIGHT
-		strike.pressed = true
-		check(not game._loot_click(strike),
-			"a right press aimed at a living fighter is a cut, not a loot")
-		check(not game.loot_hand.try_click(actor, under_at, fighter),
-			"a living fighter under the reticle is never a loot")
-		check(is_instance_valid(under) and not under.collected,
-			"and the pelt between them is untouched")
-		# The same piece, the same arm: only the body on the reticle changes, and a
-		# body that has stopped fighting is ground to work.
-		fighter.take_damage(1000.0, 0)
-		check(not bool(fighter.get("alive")), "the watcher is down")
-		var banked: int = warband.stash.pooled_total()
-		check(game.loot_hand.try_click(actor, under_at, fighter),
-			"a press on that body once it is down is the loot")
-		check(warband.stash.pooled_total() > banked,
-			"and the take is booked at once (%d -> %d)"
-				% [banked, warband.stash.pooled_total()])
-		if is_instance_valid(under):
-			under.queue_free()
-		fighter.queue_free()
-		await physics_frame
-
-	# Empty hands are the one click that used to do nothing at all. It is not a
-	# loot and it cannot swing, so the HUD has to name the missing piece.
-	var merc: int = game.controller.merc_for_peer(1)
-	var hands: Dictionary = warband.roster.equipped_of(merc)
-	warband.roster.unequip(merc, "main")
-	warband.roster.unequip(merc, "off")
-	game.controller.refresh_gear(merc)
-	await physics_frame
-	check(str(actor.rig.weapon) in ["", "none"], "the body is bare-handed (%s)"
-		% str(actor.rig.weapon))
-	var bare := InputEventMouseButton.new()
-	bare.button_index = MOUSE_BUTTON_LEFT
-	bare.pressed = true
-	check(not game._loot_click(bare), "a bare-handed press is not a loot")
-	var status: Label = game.hud.get("_status_label")
-	check(status != null and status.text.contains("hands are empty"),
-		"and the HUD says why nothing swings (%s)"
-			% ("" if status == null else status.text))
-	for slot in ["main", "off"]:
-		var item_id := str(hands.get(slot, ""))
-		if not item_id.is_empty():
-			warband.roster.equip(merc, slot, item_id)
-	game.controller.refresh_gear(merc)
-
-	# Nothing under the crosshair: the world must not eat the press, or the sword
-	# could never be raised over open ground.
-	await create_timer(0.4).timeout
-	var empty := InputEventMouseButton.new()
-	empty.button_index = MOUSE_BUTTON_LEFT
-	empty.pressed = true
-	check(not game._loot_click(empty), "a press on bare ground is left to the sword")
 
 
 # --- the ally rule ---------------------------------------------------------

@@ -3,7 +3,6 @@ extends SceneTree
 const Actor = preload("res://scripts/warband/warband_body.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
-const Enemy = preload("res://scripts/enemy.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
 const ForestMob = preload("res://scripts/forest_mob.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
@@ -132,37 +131,39 @@ func run() -> void:
 	target.rig.set_cover(false, Vector3.ZERO, 0.0, false, Vector3.ZERO)
 	target.rig.advance_animation(STEP)
 
-	# --- Frontier enemies: cinder devil and wolf zones. ---
-	var devil = Enemy.new()
-	devil.kind = 2
+	# --- The live mobs' zones: the imported rig's head above the shoulders. ---
+	var devil = DevilMob.new()
+	devil.mob_id = "hell_goat"
 	devil.position = Vector3(12, 0, 0)
 	world.add_child(devil)
-	var wolf = Enemy.new()
-	wolf.kind = 0
-	wolf.position = Vector3(-12, 0, 0)
-	world.add_child(wolf)
+	var warden = ForestMob.new()
+	warden.mob_id = "hollow_warden"
+	warden.position = Vector3(-12, 0, 0)
+	world.add_child(warden)
 	await physics_frame
 	await physics_frame
 	await process_frame
-	check(is_equal_approx(devil.max_health, 24.0), "The cinder devil carries its twenty-four health pool")
+	check(is_equal_approx(devil.max_health, 72.0),
+		"The goat man carries its seventy-two health pool")
 	var devil_head: Vector3 = devil.head_hitbox_center()
-	check(devil_head.y > 1.5, "The cinder devil head zone rides the imported head bone above the shoulders")
-	check(Hitbox.is_headshot(devil, devil_head), "The cinder devil head is a head zone")
-	check(not Hitbox.is_headshot(devil, devil.global_position + Vector3(0, 1.0, 0)), "The cinder devil torso is body")
+	check(devil_head.y > 1.5, "The devil head zone rides the imported head bone above the shoulders")
+	check(Hitbox.is_headshot(devil, devil_head), "The devil head is a head zone")
+	check(not Hitbox.is_headshot(devil, devil.global_position + Vector3(0, 1.0, 0)),
+		"The devil torso is body")
+	var devil_base: float = devil.health
 	devil.take_damage(5.0, 0, true)
-	check(is_equal_approx(devil.health, 14.0), "Cinder devil head damage doubles")
+	check(is_equal_approx(devil.health, devil_base - 10.0), "Devil head damage doubles")
 	devil.take_damage(5.0, 0, false)
-	check(is_equal_approx(devil.health, 9.0), "Cinder devil body damage stays base")
+	check(is_equal_approx(devil.health, devil_base - 15.0), "Devil body damage stays base")
 
-	var wolf_head: Vector3 = wolf.head_hitbox_center()
-	check(wolf_head.y > 0.8 and wolf_head.z < wolf.global_position.z - 0.4, "The wolf head zone follows the imported head bone")
-	var wolf_front := Vector3(wolf.global_position.x, 0.85, wolf.global_position.z - 0.30)
-	check(Hitbox.is_headshot(wolf, wolf_front), "The wolf's reachable front neck/head is a head zone")
-	check(not Hitbox.is_headshot(wolf, Vector3(wolf.global_position.x, 0.85, wolf.global_position.z + 0.30)), "The wolf's rear body stays body")
-	wolf.take_damage(10.0, 0, true)
-	check(is_equal_approx(wolf.health, 18.0), "Wolf head damage doubles")
-	wolf.take_damage(10.0, 0, false)
-	check(is_equal_approx(wolf.health, 8.0), "Wolf body damage stays base")
+	var warden_head: Vector3 = warden.head_hitbox_center()
+	check(warden_head.y > 1.5, "The warden head zone rides its imported head bone")
+	check(Hitbox.is_headshot(warden, warden_head), "The warden head is a head zone")
+	var warden_base: float = warden.health
+	warden.take_damage(10.0, 0, true)
+	check(is_equal_approx(warden.health, warden_base - 20.0), "Warden head damage doubles")
+	warden.take_damage(10.0, 0, false)
+	check(is_equal_approx(warden.health, warden_base - 30.0), "Warden body damage stays base")
 
 	# --- Imported mob families: a capsule-surface hit at head height doubles.
 	# These bodies carry authored head radii narrower than their own capsules,

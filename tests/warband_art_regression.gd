@@ -445,12 +445,6 @@ func check_town() -> void:
 			"the square's board carries no floating text")
 		check(square.position.z > 0.13,
 			"the board stands proud of its post (%.2f m)" % square.position.z)
-	var arena_plate = town.get_node_or_null("ArenaGate/ArenaNameplate")
-	check(arena_plate != null, "the arena's name stands on its gate")
-	if arena_plate != null:
-		check(face_of(arena_plate.get_node_or_null("Plate"), "arena") != null,
-			"the arena's name is cut into the lintel's stone")
-		check(labels_under(arena_plate).is_empty(), "nothing floats over the arena gate")
 	check(town.get_node_or_null("SacrificialAltar") == null,
 		"the annoint altar is gone from the square")
 

@@ -44,8 +44,6 @@ TESTS = [
     "arm_clearance_regression",
     "cover_movement_regression",
     "running_slide_regression",
-    "wolf_regression",
-    "devil_regression",
     "swing_reach_regression",
     "hitbox_regression",
     "logging_regression",
@@ -70,19 +68,12 @@ WARBAND_TESTS = [
     "watcher_variants_regression",
     "town_hub_regression",
     "town_stockade_regression",
-    "loot_wow_regression",
-    "arena_regression",
     "roguelite_regression",
     "ability_upgrades_regression",
     "ability_fx_regression",
     "mobile_fire_regression",
-    "demon_duel_regression",
     "delve_regression",
     "demon_fire_regression",
-    "wild_cages_regression",
-    "world_map_regression",
-    "escape_run_regression",
-    "warband_world_regression",
     "squad_medicine_regression",
     "squad_steering_regression",
     "squad_party_mode_regression",
@@ -99,7 +90,6 @@ WARBAND_TESTS = [
     "warband_menu_regression",
     "keybind_screen_regression",
     "warband_vendors_regression",
-    "warband_wilderness_regression",
     "warband_session_world_unit_regression",
     "warband_integration_regression",
     "weapon_traits_regression",
@@ -115,7 +105,7 @@ SERIAL = ["warband_session_regression", "warband_coop_campaign_regression"]
 ## Tests that walk real game time. A fixed clock lets them run as fast as the CPU
 ## can instead of at the wall clock, which is the difference between 90 s and 40 s;
 ## their assertions are distances and states, not frame counts.
-FIXED_FPS = {"cover_movement_regression", "warband_world_regression",
+FIXED_FPS = {"cover_movement_regression",
              "escape_run_regression", "warband_swing_clock_regression"}
 ## How many Godot processes run at once. One process per test sounds fastest and
 ## is not: on a real desktop the pool thrashes and the borderline tests - the ones
@@ -134,7 +124,7 @@ TIMEOUT = 90.0
 TOTAL_BUDGET = 240.0
 ## The top of the allowed band, for the tests that walk a fixed clock or a
 ## kilometre of world. They must still fit inside two minutes.
-TIMEOUTS = {"cover_movement_regression": 120.0, "warband_world_regression": 120.0,
+TIMEOUTS = {"cover_movement_regression": 120.0: 120.0,
             "escape_run_regression": 120.0}
 
 
@@ -193,7 +183,7 @@ def main() -> int:
         want_warband = True
     selected = budget_tests(want_base, want_warband)
     if "--only" in arguments:
-        # `--only town_hub_regression,warband_world_regression` runs exactly
+        # `--only town_hub_regression,roguelite_regression` runs exactly
         # those, for a change whose blast radius is two tests and not fifty.
         names = arguments[arguments.index("--only") + 1].split(",")
         selected = [name.strip() for name in names if name.strip()]

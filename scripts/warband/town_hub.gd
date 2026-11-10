@@ -37,7 +37,6 @@ const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
-const ArenaMenuScript = preload("res://scripts/warband/arena_menu.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -84,8 +83,6 @@ const STASH_POINT := Vector3(-8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
 const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
-## The arena's gate: a stone arch out on the east lane, clear of every counter.
-const ARENA_POINT := Vector3(17.0, 0.0, -4.0)
 ## The run's two fixtures, in the muster ring's line so a fresh body walks out of
 ## the fire and straight into them: the rack that opens and binds the pair, and
 ## the portal that starts the levels.
@@ -213,9 +210,6 @@ var vendor_brann: Node3D
 var vendor_vey: Node3D
 var vendor_menu
 var signpost: Node3D
-## The arena's gate and its board.
-var arena_gate: Node3D
-var arena_menu
 var weapon_rack: Node3D
 var run_portal: Node3D
 var forge_panel
@@ -738,7 +732,6 @@ func _build_services() -> void:
 	vendor_vey = _build_vendor_counter("VendorVey", VENDOR_VEY_POINT,
 		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
-	arena_gate = _build_arena_gate()
 	weapon_rack = _build_weapon_rack()
 	run_portal = _build_run_portal()
 
@@ -770,19 +763,6 @@ func _build_services() -> void:
 	# the moment the coin lands rather than bound when the board was built.
 	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
 	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
-	# The arena board. It lives on its own layer above the HUD, like the stalls,
-	# and it is built with the services rather than with the standalone square's
-	# panels: the world embeds the town and owns the HUD, so a board made there
-	# would never exist in the campaign - and the gate is in the campaign.
-	var arena_layer := CanvasLayer.new()
-	arena_layer.name = "ArenaLayer"
-	arena_layer.layer = 9
-	add_child(arena_layer)
-	arena_menu = ArenaMenuScript.new()
-	arena_menu.name = "ArenaMenu"
-	arena_menu.visible = false
-	arena_layer.add_child(arena_menu)
-	arena_menu.fight_requested.connect(_on_arena_fight_requested)
 	var forge_layer := CanvasLayer.new()
 	forge_layer.name = "ForgeLayer"
 	forge_layer.layer = 9
@@ -792,24 +772,6 @@ func _build_services() -> void:
 	forge_layer.add_child(forge_panel)
 	forge_panel.configure(self)
 	DressingScript.build(self)
-
-
-## The arena's gate: four stone posts and two lintels, standing in the dirt east
-## of the fire. Plain stone, like the gate to a pit - the press is the thing.
-func _build_arena_gate() -> Node3D:
-	var gate := Node3D.new()
-	gate.name = "ArenaGate"
-	gate.position = ARENA_POINT
-	add_child(gate)
-	var stone := StandardMaterial3D.new()
-	stone.albedo_color = Color(0.36, 0.35, 0.33)
-	stone.roughness = 0.95
-	for side in [-1.0, 1.0]:
-		Geo.box(gate, Vector3(0.9, 3.6, 0.9), Vector3(float(side) * 2.2, 1.8, 0.0), stone)
-	Geo.box(gate, Vector3(5.6, 0.7, 1.1), Vector3(0.0, 3.9, 0.0), stone)
-	# The name of the press, cut into a stone plate set on the lintel's face.
-	SignKit.plaque(gate, "arena", Vector3(0.0, 3.9, 0.605), 0.0, "ArenaNameplate")
-	return gate
 
 
 ## The Weapon Rack: three hafts and a bound rack. Every weapon the armory holds
@@ -869,8 +831,8 @@ func _build_run_portal() -> Node3D:
 	return portal
 
 
-## Open the arena board on one of its three pages. The panel is the one thing in
-## the square that is not a counter: it is where a loadout is decided.
+## Open the forge's board. The panel is the one thing in the square that is not a
+## counter: it is where a loadout is decided.
 func _open_forge(mode: String) -> void:
 	_hide_panels()
 	if forge_panel != null:
@@ -1086,18 +1048,6 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			_open_vendor(1)
 		"vendor_vey":
 			_open_vendor(2)
-		"arena":
-			_hide_panels()
-			if arena_menu != null:
-				# The room is drawn and cut while the tiers are read, not on the
-				# press: a chamber that has never grown in this session costs a
-				# quarter of a second to stand up. The board then names the chamber
-				# the band is about to be put into.
-				if host != null and host.get("arena") != null:
-					host.arena.prepare()
-				arena_menu.configure(warband, host.get("arena") if host != null else null)
-				arena_menu.open()
-			hud.set_status("THE ARENA: pick how hard the fight is, then step in.", 4.0)
 		"roguelite_rack":
 			_open_forge("rack")
 			hud.set_status("THE WEAPON RACK: %d keys. Open steel, then bind the two pieces the run carries." % _meta_keys(), 4.0)
@@ -1173,7 +1123,6 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_orla", "point": vendor_orla.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
-		{"id": "arena", "point": arena_gate.global_position, "reach": SERVICE_REACH + 1.0},
 		{"id": "roguelite_rack", "point": weapon_rack.global_position, "reach": SERVICE_REACH},
 		{"id": "roguelite_portal", "point": run_portal.global_position, "reach": SERVICE_REACH + 1.0},
 	]
@@ -1202,33 +1151,11 @@ func service_point(service: String) -> Vector3:
 			return vendor_brann.global_position
 		"vendor_vey":
 			return vendor_vey.global_position
-		"arena":
-			return arena_gate.global_position if arena_gate != null else Vector3.ZERO
 		"roguelite_rack":
 			return weapon_rack.global_position if weapon_rack != null else Vector3.ZERO
 		"roguelite_portal":
 			return run_portal.global_position if run_portal != null else Vector3.ZERO
 	return Vector3.ZERO
-
-## The board's press: the tier is the pit's own, and the pit is the world's. The
-## room is drawn from the host's dice, so a guest does not open one of its own.
-## A town standing alone (its own preview scene) has no campaign around it, so it
-## says so rather than pretending.
-func _on_arena_fight_requested(tier: String) -> void:
-	if host == null or host.get("arena") == null:
-		hud.set_status("The pit needs the campaign around it.", 3.0)
-		return
-	if bool(host.get("_client")):
-		hud.set_status("Co-op: the host takes the band into the pit.", 3.0)
-		return
-	var result: Dictionary = host.arena.enter(tier)
-	if bool(result.get("ok", false)):
-		if arena_menu != null:
-			arena_menu.close()
-		_hide_panels()
-	else:
-		hud.set_status(str(result.get("message", "")), 3.0)
-
 
 ## A paperdoll change has to reach the body standing in the square, or the
 ## mercenary keeps the old kit in the only place the player can see it.
@@ -1282,8 +1209,6 @@ func _hide_panels() -> void:
 		quartermaster.close()
 	if vendor_menu != null and vendor_menu.is_open():
 		vendor_menu.close()
-	if arena_menu != null and arena_menu.is_open():
-		arena_menu.close()
 	if forge_panel != null and forge_panel.is_open():
 		forge_panel.close_panel()
 
@@ -1292,7 +1217,6 @@ func _panel_open() -> bool:
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
 		or (vendor_menu != null and vendor_menu.is_open()) \
-		or (arena_menu != null and arena_menu.is_open()) \
 		or (forge_panel != null and forge_panel.is_open())
 
 # --- seeding ---------------------------------------------------------------

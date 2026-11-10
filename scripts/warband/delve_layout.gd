@@ -844,8 +844,7 @@ static func _narrow(gaps: PackedFloat32Array, spots: Array[Vector2], at: Vector3
 ## `[point, radius]` pairs (cave x/z) no body may stand inside in one room: the
 ## room's ways out, and every light and prop the plan stands on its floor. The
 ## crowd keeps off them (`den_members`) and so does anything else that has to find
-## a spot in a room of this plan standing in the room as it was cut - the arena's
-## own chamber (`arena_cave.gd`), which builds one room of it and nothing else.
+## a spot in a room of this plan standing in the room as it was cut.
 static func crowd_keep_out(index: int) -> Array:
 	var out: Array = []
 	var list := doors()

@@ -18,7 +18,7 @@ const SignKit = preload("res://scripts/world/sign_kit.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
-const EnemyScript = preload("res://scripts/enemy.gd")
+const MobScript = preload("res://scripts/devil_mob.gd")
 
 const SCENE := "res://scenes/town_hub.tscn"
 const TEST_SAVE := "user://town_stockade_state.json"
@@ -516,8 +516,8 @@ func check_guard() -> void:
 
 	# A wolf eight metres outside the gate: the watch should notice, draw, and
 	# put a real shaft in it.
-	var wolf = EnemyScript.new()
-	wolf.kind = 0
+	var wolf = MobScript.new()
+	wolf.mob_id = "hell_goat"
 	wolf.position = town.global_position + Vector3(0.0, 0.05,
 		TownScript.WALL_RADIUS + WOLF_OUTSIDE)
 	root.add_child(wolf)

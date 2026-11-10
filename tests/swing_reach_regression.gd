@@ -4,7 +4,7 @@ extends SceneTree
 ## as its weapon allows: one for a one-hander or a dagger, two for a two-hander.
 ## Precision attacks have separate blade regressions.
 const Actor = preload("res://scripts/warband/warband_body.gd")
-const Enemy = preload("res://scripts/enemy.gd")
+const Mob = preload("res://scripts/devil_mob.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const STEP := 1.0 / 240.0
@@ -35,8 +35,8 @@ func fighter(index: int, at: Vector3):
 	return actor
 
 func target_at(offset: Vector3, kind: int = 2):
-	var enemy := Enemy.new()
-	enemy.kind = kind
+	var enemy := Mob.new()
+	enemy.mob_id = "hell_goat"
 	enemy.position = attacker.global_position+offset
 	world.add_child(enemy)
 	enemy.set_physics_process(false)

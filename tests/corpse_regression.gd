@@ -36,9 +36,7 @@ func run() -> void:
 	var CorpseHold = load("res://scripts/corpse_hold.gd")
 	var CorpsePhysics = load("res://scripts/corpse_physics.gd")
 	var ImpactRules = load("res://scripts/impact_rules.gd")
-	var Enemy = load("res://scripts/enemy.gd")
 	var Mob = load("res://scripts/devil_mob.gd")
-	var DelveDevil = load("res://scripts/delve_devil.gd")
 	var ForestMob = load("res://scripts/forest_mob.gd")
 	var CageWatcher = load("res://scripts/warband/cage_watcher.gd")
 
@@ -84,24 +82,23 @@ func run() -> void:
 	fixture.add_child(floor_body)
 	await physics_frame
 
-	var wolf = Enemy.new()
-	wolf.kind = 0
-	var cinder = Enemy.new()
-	cinder.kind = 2
-	cinder.devil_weapon = "claw"
 	var pack = Mob.new()
 	pack.mob_id = "hell_goat"
-	var delve = DelveDevil.new()
-	delve.configure(1, "claw", 1)
-	var delve_species = DelveDevil.new()
-	delve_species.configure(2, "claw", 1, "hell_goat")
+	var spawn = Mob.new()
+	spawn.mob_id = "spawn"
+	var succubus = Mob.new()
+	succubus.mob_id = "succubus"
+	var beast = Mob.new()
+	beast.mob_id = "beast"
+	var watcher = ForestMob.new()
+	watcher.mob_id = "hollow_warden"
 	pack.note_impact(Vector3(1.0, 0.0, 0.0))
 	var corpses := [
-		["Briar wolf", wolf, Vector3(-6.0, 0.12, 0.0)],
-		["Cinder devil", cinder, Vector3(0.0, 0.12, 0.0)],
-		["Hellish goat man", pack, Vector3(3.0, 0.12, 0.0)],
-		["Delve devil", delve, Vector3(6.0, 0.12, 0.0)],
-		["Delve goat", delve_species, Vector3(9.0, 0.12, 0.0)],
+		["Hellish goat man", pack, Vector3(-6.0, 0.12, 0.0)],
+		["Spawn", spawn, Vector3(0.0, 0.12, 0.0)],
+		["Succubus", succubus, Vector3(3.0, 0.12, 0.0)],
+		["Beast", beast, Vector3(6.0, 0.12, 0.0)],
+		["Hollow warden", watcher, Vector3(9.0, 0.12, 0.0)],
 	]
 	for entry in corpses:
 		var body = entry[1]
@@ -133,15 +130,11 @@ func run() -> void:
 					and (goat_pelvis_body.linear_velocity.x > 0.05
 						or goat_pelvis_body.angular_velocity.z < -0.05),
 				"A killing blow's force drives the corpse along its direction")
-	# Rigged mobs hand their skeleton to the shared ragdoll; only the procedural
-	# depth-role devils keep their authored collapse and fall by root.
-	check(CorpsePhysics.is_limp(wolf._wolf), "The wolf corpse is a physical ragdoll")
-	check(CorpsePhysics.is_limp(cinder._devil), "The cinder corpse is a physical ragdoll")
-	check(CorpsePhysics.is_limp(delve_species._visual), "A delve species corpse is a physical ragdoll")
-	check(not CorpsePhysics.is_limp(delve._visual), "A procedural corpse keeps its authored collapse")
-	var wolf_sim := wolf._wolf.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
-	var wolf_bones := wolf_sim.get_child_count() if wolf_sim != null else 0
-	check(wolf_bones >= 10, "The wolf ragdoll builds its driven bone chain")
+	# Rigged mobs hand their skeleton to the shared ragdoll.
+	check(CorpsePhysics.is_limp(watcher._visual), "A watcher corpse is a physical ragdoll")
+	var watcher_sim := watcher._visual.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
+	var watcher_bones := watcher_sim.get_child_count() if watcher_sim != null else 0
+	check(watcher_bones >= 10, "The watcher ragdoll builds its driven bone chain")
 	# The goat is no longer an animal on the imported skeleton he shipped with:
 	# he wears a fitted skin on the warband's own rig, so his corpse has to hang
 	# on the ranger's 65 bones and fall as the shared ragdoll a ranger's does.
@@ -151,21 +144,19 @@ func run() -> void:
 		"The goat corpse stands on the warband's own 65-bone rig (%d)" % goat_bones)
 	check(CorpsePhysics.is_limp(pack._visual),
 		"A fitted skin's corpse is a limp ragdoll like a ranger's")
-	if wolf_sim != null:
-		var first_bone := wolf_sim.get_child(0) as PhysicalBone3D
+	if watcher_sim != null:
+		var first_bone := watcher_sim.get_child(0) as PhysicalBone3D
 		check(first_bone.collision_layer == 0 and first_bone.collision_mask == 1,
 			"Corpse bones stop blocking fighters while still colliding with the world")
 
 	# The authored poses are held, not reset by a fake delete.
-	check(wolf._wolf.is_dead(), "The wolf enters its corpse ragdoll")
-	check(cinder._devil.is_dead(), "The cinder devil enters its corpse ragdoll")
 	check(pack._visual.is_dead(), "An imported devil enters its corpse ragdoll")
-	check(delve._visual.is_dead(), "A delve devil holds its death pose")
+	check(watcher._visual.is_dead(), "A watcher enters its corpse ragdoll")
 
 	# Corpses obey gravity even when killed in the air: the primitive root and
 	# the rigged limbs both reach the floor instead of hanging at the death spot.
-	var falling_proc = DelveDevil.new()
-	falling_proc.configure(9, "claw", 1)
+	var falling_proc = Mob.new()
+	falling_proc.mob_id = "hell_goat"
 	falling_proc.position = Vector3(-9.0, 5.0, 0.0)
 	fixture.add_child(falling_proc)
 	await physics_frame
@@ -174,8 +165,6 @@ func run() -> void:
 	await pause(1.6)
 	check(falling_proc.global_position.y < 0.6,
 		"A procedural devil killed in the air falls to the ground")
-	check(not CorpsePhysics.is_limp(falling_proc._visual),
-		"The procedural delve corpse has no physical skeleton")
 
 	# --- A killing arrow takes the head with it. ---
 	# Five bodies: one whose headshot is survivable, one killed by a plain blow,
@@ -193,8 +182,8 @@ func run() -> void:
 	cut.mob_id = "hell_goat"
 	cut.position = Vector3(-18.0, 0.12, 0.0)
 	fixture.add_child(cut)
-	var cut_proc = DelveDevil.new()
-	cut_proc.configure(3, "claw", 1)
+	var cut_proc = Mob.new()
+	cut_proc.mob_id = "hell_goat"
 	cut_proc.position = Vector3(-21.0, 0.12, 0.0)
 	fixture.add_child(cut_proc)
 	var beheaded_replica = Mob.new()
@@ -324,8 +313,8 @@ func run() -> void:
 	cleaved.mob_id = "hell_goat"
 	cleaved.position = Vector3(-18.0, 0.12, 12.0)
 	fixture.add_child(cleaved)
-	var cleaved_proc = DelveDevil.new()
-	cleaved_proc.configure(1, "claw", 1)
+	var cleaved_proc = Mob.new()
+	cleaved_proc.mob_id = "hell_goat"
 	cleaved_proc.position = Vector3(-18.0, 0.12, 18.0)
 	fixture.add_child(cleaved_proc)
 	var stabbed = Mob.new()
@@ -336,8 +325,8 @@ func run() -> void:
 	bisected.mob_id = "hell_goat"
 	bisected.position = Vector3(-12.0, 0.12, 12.0)
 	fixture.add_child(bisected)
-	var low_cut = Enemy.new()
-	low_cut.kind = 0
+	var low_cut = Mob.new()
+	low_cut.mob_id = "hell_goat"
 	low_cut.position = Vector3(-12.0, 0.12, 18.0)
 	fixture.add_child(low_cut)
 	await physics_frame
@@ -437,7 +426,7 @@ func run() -> void:
 		"The two halves meet only along the blade's plane")
 	check(bisected._visual.find_child("BodyStump", true, false) == null,
 		"A sliced body is replaced by its halves instead of keeping a stump")
-	check(low_cut._wolf.find_child("SplitBody", true, false) == null,
+	check(low_cut._visual.find_child("SplitBody", true, false) == null,
 		"A body with no third of itself to cut is not split")
 	await pause(0.9)
 	if holder != null and is_instance_valid(holder):
@@ -457,16 +446,7 @@ func run() -> void:
 		check(is_instance_valid(body) and body.collision_layer == 0,
 			label + " corpse never re-enables collision")
 	# The ragdoll retires after settling and leaves its baked pose in place.
-	check(not CorpsePhysics.is_limp(wolf._wolf), "The wolf ragdoll retires after settling")
 	check(not CorpsePhysics.is_limp(pack._visual), "The imported devil ragdoll retires after settling")
-	var baked_head := _bone_world(wolf._wolf, "head")
-	var baked_pelvis := _bone_world(wolf._wolf, "pelvis")
-	check(baked_head.y < 0.8 and baked_pelvis.y < 0.8,
-		"The settled wolf corpse lies on the ground")
-	var wolf_spread := Vector2(baked_head.x - baked_pelvis.x,
-		baked_head.z - baked_pelvis.z).length()
-	check(wolf_spread > 0.3,
-		"The wolf torso stays extended instead of folding into a pile")
 	var goat_head_world := _bone_world(pack._visual, "Head")
 	var goat_pelvis_world := _bone_world(pack._visual, "pelvis")
 	check(goat_head_world.y < 0.6 and goat_pelvis_world.y < 0.6,
@@ -477,8 +457,8 @@ func run() -> void:
 		"The goat torso topples as one body instead of melting in place")
 
 	await pause(0.4)
-	var held_head := _bone_world(wolf._wolf, "head")
-	check(held_head.distance_to(baked_head) < 0.05, "The settled limp pose is held for the corpse lifetime")
+	var held_head := _bone_world(pack._visual, "Head")
+	check(held_head.distance_to(goat_head_world) < 0.05, "The settled limp pose is held for the corpse lifetime")
 
 	# The shared hold dissolves and frees at the end of its clock.
 	var stand_in := Node3D.new()

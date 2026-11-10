@@ -74,8 +74,6 @@ func run() -> void:
 
 func check_square() -> void:
 	check(game.start_area == "town", "the world put the warband down at the town end (%s)" % game.start_area)
-	check(game.wood != null and game.trail != null,
-		"the wood and the trail are the same world, up the road")
 	check(warband.roster.count() == warband.STARTING_BAND.size(),
 		"the hub seeds the starting band (%d)" % warband.roster.count())
 	check(game.bodies.size() == warband.STARTING_BAND.size(),

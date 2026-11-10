@@ -19,7 +19,6 @@ extends SceneTree
 
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
-const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
 const State = preload("res://scripts/player_state.gd")
 const REPORT_NAME := "CoopReport"
 const TRAIL_POINT := Vector3(6.0, 0.0, -90.0)
@@ -304,25 +303,6 @@ func _host_run() -> void:
 			"with the spare back on the host's shelf (%d)"
 				% warband.stash.pooled_count("sword_arming"))
 
-	# --- a guest's press works the altar on the host's books ----------------
-	# The altar is the same shared books as the paperdoll: the request names the
-	# copy, the host throws the die and pays the vial out of the pool both players
-	# draw on, and the weld comes back on the mirror. The guest checks its own
-	# copy and the mirror; here the host checks the pool it paid from and the
-	# ledger the guest is reading.
-	var rited := await _wait_until(func(): return reports.has("rite"), 20.0)
-	check(rited, "The guest reports its altar press")
-	if rited:
-		var rite: Dictionary = reports["rite"]
-		check(warband.stash.pooled_count("ichor_vial") == 0,
-			"the pooled vial left the host's stash (%d)"
-				% warband.stash.pooled_count("ichor_vial"))
-		var rite_copy := int(rite.get("copy", -1))
-		check(warband.annoints.count("sword_arming", rite_copy) == int(rite.get("count", -1)),
-			"and the host's ledger is the count the guest reads (%d vs %d)" % [
-				warband.annoints.count("sword_arming", rite_copy),
-				int(rite.get("count", -1))])
-
 	# The rest of the test measures the wire, not the wood: a cultist that happens
 	# to stand inside its reach would stagger the body between a press and its
 	# blow, and the band's own sweep would claim the corpse and the drop before
@@ -334,102 +314,6 @@ func _host_run() -> void:
 	var squad = world.get("squad")
 	if squad != null:
 		squad.following = false
-
-	# --- the wood's own mobs run on the guest's screen ----------------------
-	# A warden the host moves has to move here too, from the snapshot alone: the
-	# guest runs no brain and steps no body of its own, so a copy that never
-	# arrives is a mob standing still while the host's walks away. The warren is
-	# built on both machines with the same names, which is what lets the state
-	# find it.
-	var combat_actor = flow.session.controller.body_for_peer(guest_peer)
-	var warden = _warren_body(world, 0)
-	check(warden != null, "The host fields the warcamp's wardens")
-	if warden != null and combat_actor != null and is_instance_valid(combat_actor):
-		# Far enough that a warden that wakes up has nobody in its sight (its own
-		# reach is 30 m) and cannot spend the test hitting the guest's body, and
-		# still inside the session's 70 m replication band.
-		var first_at: Vector3 = (combat_actor as Node3D).global_position + Vector3(40.0, 0.0, 0.0)
-		warden.global_position = first_at
-		warden.home = first_at
-		# The fixture's body is the stream, not a fight: a replica on the host
-		# runs no brain, so it cannot wander out from under the comparison while
-		# the guest is being measured.
-		warden.set("replica", true)
-		warden.call("rest", true)
-		# The host polls its mob stream at 15 Hz; give the batch that names this
-		# body time to reach the guest before asking it where the copy stands.
-		await create_timer(0.6).timeout
-		var entries: Array = flow.session.collect_mob_entries(70.0)
-		var named := false
-		for entry in entries:
-			if str(entry[0]) == str((warden as Node).name):
-				named = true
-		check(named, "The host's mob stream names the warden")
-		# Where the body actually came to rest, not the point the test asked for:
-		# a capsule dropped inside a rock is depenetrated on the next move.
-		var host_first: Vector3 = warden.global_position
-		reports.erase("mob")
-		report.probe.rpc_id(guest_peer, "mob")
-		var first_seen := await _wait_until(func(): return reports.has("mob"), 10.0)
-		check(first_seen, "The guest's copy of the warden answers")
-		var first_pos := Vector3.ZERO
-		var first_tick := -1
-		if first_seen:
-			var data: Dictionary = reports["mob"]
-			first_tick = int(data.get("stream_tick", -1))
-			first_pos = Vector3(data.get("pos", [0.0, 0.0, 0.0])[0],
-				data.get("pos", [0.0, 0.0, 0.0])[1], data.get("pos", [0.0, 0.0, 0.0])[2])
-			check(bool(data.get("replica", false)),
-				"The guest's warden is a replica, not a second brain")
-			check(not bool(data.get("resting", true)),
-				"The guest's warden leaves the rest its build put it under")
-			check(first_pos.distance_to(host_first) < 1.5,
-				"The guest's warden stands where the host put it (%s vs %s)"
-					% [str(first_pos), str(host_first)])
-		var second_at := first_at + Vector3(0.0, 0.0, 2.5)
-		warden.global_position = second_at
-		await create_timer(0.7).timeout
-		var host_second: Vector3 = warden.global_position
-		reports.erase("mob")
-		report.probe.rpc_id(guest_peer, "mob")
-		var moved_seen := await _wait_until(func(): return reports.has("mob"), 10.0)
-		check(moved_seen, "The guest's copy answers after the warden moves")
-		if moved_seen:
-			var moved: Dictionary = reports["mob"]
-			# The mob stream is labelled with the physics clock, not with a packet
-			# counter: two probes 0.7 s apart must show ~0.7 s of ticks. Numbered one
-			# per batch this read ~10; it reads ~42 now. That is the whole difference
-			# between a label that maps to elapsed time and one that lies after every
-			# hitch.
-			var span := int(moved.get("stream_tick", -1)) - first_tick
-			check(span >= 30,
-				"The mob stream's tick is the physics clock (%d ticks across 0.7 s)" % span)
-			var moved_pos := Vector3(moved.get("pos", [0.0, 0.0, 0.0])[0],
-				moved.get("pos", [0.0, 0.0, 0.0])[1], moved.get("pos", [0.0, 0.0, 0.0])[2])
-			check(moved_pos.distance_to(host_second) < 1.5,
-				"The guest's warden runs on the snapshot alone (%s vs %s)"
-					% [str(moved_pos), str(host_second)])
-			check(moved_pos.distance_to(host_first) > 1.0,
-				"The guest's warden actually moved (%s vs %s)"
-					% [str(moved_pos), str(host_first)])
-		# The host stops naming the body - the kill that missed a datagram, or
-		# the body that walked out of the 70 m band. A body leaving a peer's
-		# stream is named once, reliably, so the guest's copy leaves the screen
-		# instead of standing where the host no longer has one. The wait is 1.1 s,
-		# inside the 2 s stale clock on purpose: a copy still waiting on a timeout
-		# would be standing here, so what is measured is the word from the host.
-		(world.get("guards") as Array).erase(warden)
-		await create_timer(1.1).timeout
-		reports.erase("mob")
-		report.probe.rpc_id(guest_peer, "mob_gone")
-		var gone_seen := await _wait_until(func(): return reports.has("mob_gone"), 5.0)
-		check(gone_seen, "The guest's copy answers after the host stops naming it")
-		if gone_seen:
-			var gone: Dictionary = reports["mob_gone"]
-			check(not bool(gone.get("visible", true)),
-				"The copy the host stops streaming leaves the screen")
-			check(not bool(gone.get("stale", true)),
-				"put down by the stream, not left to the stale clock")
 
 	# --- the guest's verbs land on the host's field ------------------------
 	# A body the host alone fields stands in front of the guest. The guest
@@ -562,26 +446,6 @@ func _host_run() -> void:
 				piece_name.to_upper()), 5.0)
 		check(fed, "the guest's looted list carries the host's booking (%s)" % str(
 			world.loot_feed.lines() if world.loot_feed != null else []))
-		# A death is a one-shot fact on the reliable channel: the guest's copy of
-		# a body killed on the host falls here even when every pose packet for it
-		# was lost, instead of standing over the host's corpse forever.
-		var dying = _warren_body(world, 1)
-		if dying != null and combat_actor != null and is_instance_valid(combat_actor):
-			var dead_at: Vector3 = (combat_actor as Node3D).global_position + Vector3(3.0, 0.0, 0.0)
-			dying.global_position = dead_at
-			dying.set("replica", true)
-			dying.take_damage(999.0, 0)
-			reports.erase("mob_dead")
-			report.probe.rpc_id(guest_peer, "mob_dead")
-			var dead_seen := await _wait_until(func(): return reports.has("mob_dead"), 10.0)
-			check(dead_seen, "The guest answers for the body the host killed")
-			if dead_seen:
-				var dead: Dictionary = reports["mob_dead"]
-				check(not bool(dead.get("alive", true)),
-					"The guest's copy falls on the one-shot death")
-				check(bool(dead.get("visible", false)),
-					"and its corpse is on the screen")
-
 	# --- killing the guest's body with the last one left -------------------
 	# A blow on a downed campaign body finishes it. The soul inside is ejected,
 	# and with the host's own body the only one left standing, the guest watches.
@@ -837,33 +701,6 @@ func _client_run() -> void:
 	_submit({"kind": "gear", "tag": "gear", "merc": gear_merc,
 		"worn": str(warband.roster.equipped_of(gear_merc).get("main", ""))})
 
-	# --- the guest's own rite at the altar ---------------------------------
-	# The altar's panel is the host's books like the paperdoll: the press is a
-	# request, the host's arm pays the one pooled vial and throws the die, and the
-	# weld comes back on the mirrored ledger. Nothing here rolls locally.
-	var altar_menu = AltarMenuScript.new()
-	altar_menu.name = "GuestAltar"
-	root.add_child(altar_menu)
-	altar_menu.configure(warband)
-	altar_menu.open()
-	var rite_copy := int(warband.annoint_copy_for_item("sword_arming"))
-	var vial_before := int(warband.stash.pooled_count("ichor_vial"))
-	check(vial_before == 1, "The guest sees the host's pooled vial (%d)" % vial_before)
-	altar_menu.press_anoint("sword_arming", rite_copy)
-	check(warband.annoints.count("sword_arming", rite_copy) == 0
-			and warband.stash.pooled_count("ichor_vial") == vial_before,
-		"The guest's rite spends nothing on the lent copy by itself")
-	var spent := await _wait_until(func(): return warband.stash.pooled_count(
-		"ichor_vial") < vial_before, 12.0)
-	check(spent, "The host works the rite and the pooled vial leaves (%d) after [%s]" % [
-		warband.stash.pooled_count("ichor_vial"), altar_menu.status_text()])
-	var rite_rows: int = altar_menu.anoint_rows().size()
-	check(rite_rows > 0, "and the open altar still lists the copies (%d)" % rite_rows)
-	altar_menu.close()
-	_submit({"kind": "rite", "tag": "rite", "copy": rite_copy,
-		"count": warband.annoints.count("sword_arming", rite_copy),
-		"vials": warband.stash.pooled_count("ichor_vial")})
-
 	var told := await _wait_until(func(): return guest_left, int((WATCHDOG_SECONDS - 30.0) * 1000.0))
 	if not told:
 		_submit({"kind": "error", "tag": "finish", "detail": "the host never dismissed the guest"})
@@ -915,35 +752,6 @@ func _on_probe(tag: String) -> void:
 		_submit({"kind": "probe", "tag": tag, "corpses": ids.size(),
 			"corpse": int(ids[0])})
 		return
-	elif tag == "mob" or tag == "mob_gone" or tag == "mob_dead":
-		var warden = _warren_body(world, 1 if tag == "mob_dead" else 0)
-		var payload := {"kind": "probe", "tag": tag, "replica": false, "resting": true,
-			"pos": [0.0, 0.0, 0.0], "visible": false, "stale": false, "alive": true}
-		# A hitch can empty the guest's receive for longer than a poll: wait for
-		# the stream to be live again before reading the copy, which is the
-		# property the check is about. A stream that never comes back still fails.
-		if tag == "mob" and warden != null and is_instance_valid(warden):
-			var before := _mob_tick()
-			await _wait_until(func(): return _mob_tick() > before, 2.0)
-			# A fresh sample still needs its playout to reach it: two intervals.
-			for _beat in 12:
-				await process_frame
-		elif tag == "mob_dead":
-			# The kill is booked on the host on the next mob poll; the probe names
-			# the body and waits for the one-shot death to land before reading it.
-			await _wait_until(func(): return warden == null or not is_instance_valid(warden) \
-				or not bool(warden.get("alive")), 3.0)
-		if warden != null and is_instance_valid(warden):
-			var at: Vector3 = (warden as Node3D).global_position
-			payload["replica"] = bool(warden.get("replica"))
-			payload["resting"] = bool(warden.get("resting"))
-			payload["pos"] = [at.x, at.y, at.z]
-			payload["visible"] = bool(warden.get("visible"))
-			payload["stale"] = bool(warden.get("stale"))
-			payload["stream_tick"] = _mob_tick()
-			payload["alive"] = bool(warden.get("alive"))
-		_submit(payload)
-		return
 	elif tag == "drop":
 		# The host's K test: the guest's own hand on its own world's drop, which
 		# travels as an intent and is booked on the other machine. The drop is
@@ -955,30 +763,6 @@ func _on_probe(tag: String) -> void:
 		_submit({"kind": "probe", "tag": tag, "near": arrived})
 		return
 	_submit(_probe_payload(tag))
-
-
-## The newest mob tick the guest's warden copy has been handed, -1 for none.
-func _mob_tick() -> int:
-	var warden = _warren_body(world, 0)
-	if warden == null or not is_instance_valid(warden):
-		return -1
-	var timeline = warden.get("_timeline")
-	return int(timeline.newest_tick()) if timeline != null else -1
-
-
-## A warcamp body by its place in the field, on whichever machine this runs on.
-## The camps are built from `WatcherWarren.CAMPS` on both peers and the table's
-## own order is the spawn order, so index 0 is the same body on the host and on the
-## guest - which is the property the mob stream is asked about. The names off the
-## table would do too; the index does not have to know them.
-func _warren_body(world_in, index: int):
-	var warren = world_in.get("watcher_warren") if world_in != null else null
-	if warren == null:
-		return null
-	var fielded: Array = warren.mobs()
-	if index < 0 or index >= fielded.size():
-		return null
-	return fielded[index]
 
 
 ## The guest's own copy of a named drop, or null while it has not landed yet.

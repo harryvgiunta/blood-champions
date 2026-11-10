@@ -1,7 +1,7 @@
 extends SceneTree
 
 const Arrow = preload("res://scripts/arrow.gd")
-const Enemy = preload("res://scripts/enemy.gd")
+const Mob = preload("res://scripts/devil_mob.gd")
 var failures := 0
 var defeats := 0
 var arena: Node3D
@@ -24,8 +24,8 @@ func fire(damage: float) -> Node3D:
 func run() -> void:
 	arena = Node3D.new()
 	root.add_child(arena)
-	var enemy := Enemy.new()
-	enemy.kind = 0
+	var enemy := Mob.new()
+	enemy.mob_id = "hell_goat"
 	enemy.position = Vector3(0, 0, -3)
 	arena.add_child(enemy)
 	enemy.defeated.connect(func(_enemy, _reward): defeats += 1)

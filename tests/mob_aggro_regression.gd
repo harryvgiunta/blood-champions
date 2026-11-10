@@ -10,7 +10,6 @@ extends SceneTree
 
 const DevilMob = preload("res://scripts/devil_mob.gd")
 const ForestMob = preload("res://scripts/forest_mob.gd")
-const Enemy = preload("res://scripts/enemy.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const Backstab = preload("res://scripts/backstab_ability.gd")
@@ -52,7 +51,6 @@ func run() -> void:
 	await _check_wake_on_sight(player)
 	await _check_hit_from_anywhere(player)
 	await _check_backstab_from_behind(player)
-	await _check_legacy_wolf(player)
 	await _check_safe_ring(player)
 	print("MOB_AGGRO_REGRESSION checks=%d failures=%d" % [checks, failures])
 	quit(1 if failures > 0 else 0)
@@ -273,34 +271,6 @@ func _check_backstab_from_behind(player: CharacterBody3D) -> void:
 	check(bool(mob._senses.aggressive()), "the stabbed mob turns on the ranger that stabbed it")
 	check(mob._senses.target == player, "the stabbed mob locks onto its attacker")
 	_clear(mob)
-
-
-## The wolf and the cinder devil obey the same rule as the newer families.
-func _check_legacy_wolf(player: CharacterBody3D) -> void:
-	var wolf = Enemy.new()
-	wolf.kind = 0
-	wolf.player = player
-	wolf.safe_center = SAFE_OFFSET
-	wolf.position = Vector3(0.0, 0.05, 0.0)
-	world_root.add_child(wolf)
-	# A fresh mob watches the ranger that spawned it instead of staring down -Z:
-	# a fixed frozen cone left whole packs blind to a ranger beside them.
-	var forward: Vector3 = -wolf.global_basis.z
-	var to_player: Vector3 = player.global_position - wolf.global_position
-	forward.y = 0.0
-	to_player.y = 0.0
-	check(forward.normalized().dot(to_player.normalized()) > 0.95,
-		"a fresh mob spawns facing the ranger")
-	wolf.rotation.y = 0.0
-	player.global_position = Vector3(0.0, 0.0, 3.0)
-	await _frames(30)
-	check(not bool(wolf._senses.seen), "the wolf does not see a ranger behind it")
-	check(str(wolf.state) != "CHASE", "the wolf does not chase what it cannot see")
-	player.global_position = Vector3(0.0, 0.0, -5.0)
-	await _frames(20)
-	check(wolf._senses.target == player, "the wolf acquires the ranger in front of it")
-	check(str(wolf.state) in ["CHASE", "WINDUP"], "the wolf gives chase once it sees")
-	_clear(wolf)
 
 
 ## Town peace: nothing inside the safe ring is hunted, however it was provoked.

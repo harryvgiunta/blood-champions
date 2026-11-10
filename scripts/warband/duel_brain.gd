@@ -2,8 +2,8 @@ class_name DuelBrain
 extends RefCounted
 ## The duel ladder: how a body with a weapon fights another body that has one.
 ##
-## One brain, two owners. The arena's three foes (`arena_area.gd`) and the
-## Hollow's duelists (`devil_mob.gd`) fight through this file: pick the target,
+## One owner: the Hollow's duelists (`devil_mob.gd`) fight through this file:
+## pick the target,
 ## aim at where it is going, close to the weapon's own reach, hold a guard
 ## window, step off the line between blows and - for a bow - keep the range the
 ## bow wants and work the draw, hold and release.

@@ -239,9 +239,6 @@ func check_world_resume() -> void:
 		return
 	check(game.start_area == "checkpoint", "the world opens on the bookmark (%s)" % game.start_area)
 	check(game.bodies.size() == 2, "the bookmark's standing bodies take the field (%d)" % game.bodies.size())
-	check(game.wood != null and game.wood.master_alive(),
-		"the wood's master stands whether or not the party walks in")
-	check(game.wood.get_node_or_null("Cage1") == null, "and no cage stands there to be cut")
 	check(game.squad.following, "the squad walks with the soul")
 	var anchor: Vector3 = warband.checkpoint_position()
 	for body in game.bodies:
@@ -276,7 +273,6 @@ func check_world_resume() -> void:
 		return
 	check(game.start_area == "checkpoint", "the town bookmark is a checkpoint start (%s)" % game.start_area)
 	check(game.bodies.size() == 2, "the town resume fields the standing bodies (%d)" % game.bodies.size())
-	check(game.wood.master_alive(), "and the wood's master still stands")
 	for body in game.bodies:
 		check(is_instance_valid(body) and game.town.in_square(body),
 			"a resumed body stands in the square")
@@ -416,7 +412,9 @@ func check_out_of_the_square_and_back() -> void:
 	if soul == null:
 		return
 	var centre: Vector3 = game.town.global_position
-	var gate: Vector3 = game.trail.town_gate()
+	# A point out past the square's wall: the world's own checkpoint writer calls
+	# anywhere outside it "the road".
+	var gate: Vector3 = centre + Vector3(0.0, 0.0, 40.0)
 	# A fresh campaign opens in the square, so the world writes the town bookmark
 	# on its own first frame: the book starts on the town, not empty.
 	check(warband.checkpoint_id() == "town",
