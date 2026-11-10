@@ -4,9 +4,8 @@ extends RefCounted
 ## A foot that comes down while the body is standing in a death pool leaves a
 ## print on the floor, using the blood already in the scene: the per-scene
 ## `BloodField` owns the pools and the print itself, so a trail fades with the
-## spatter it came from and never outlives it. Shared by the frontier
-## (`main.gd._physics_process`) and the arena/delve fighter (`arena_actor.gd`),
-## so every mode a body can be standing in blood behaves the same.
+## spatter it came from and never outlives it. Every body that stands in blood
+## behaves the same.
 ##
 ## Presentation only: nothing here reads or writes damage, health or authority.
 

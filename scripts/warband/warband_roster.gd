@@ -10,10 +10,8 @@ extends RefCounted
 ## at `WarbandContracts.BASE_MAX_HEALTH` with empty hands: the ONLY thing that
 ## differentiates two mercenaries is the gear in `equipped`.
 ##
-## Brands are item properties, not body properties, so they live in
-## `scripts/warband/cruor_manager.gd` keyed by item id.
 ## This is pure data. It never touches a node, so the possession controller, the
-## warband screen, the recruiter and the altar all share one truth.
+## warband screen and the recruiter all share one truth.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")

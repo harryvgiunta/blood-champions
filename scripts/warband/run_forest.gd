@@ -523,9 +523,8 @@ static func _spawn_posts(path: Path) -> Array:
 	return posts
 
 
-## The three clearings the cult waits in, at the lane's own fractions. The fires
-## and the bowl are dressed here; the garrison is the scene's (`escape_run.gd`
-## builds its own chain of bands along the lane, not a pair a clearing).
+## The three clearings the lane was cut around, at its own fractions. The fires
+## and the bowl are dressed here.
 static func _clearing_points(path: Path) -> Array:
 	var points: Array = []
 	for fraction in CLEARING_FRACTIONS:

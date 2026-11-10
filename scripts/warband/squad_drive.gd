@@ -100,10 +100,10 @@ var _rng_seeded := false
 ## footprint after the line is trimmed, and an ally's place on it survives.
 var _trail: Array[Vector3] = []
 var _trail_base := 0
-## The ground an area has mapped for the squad (`squad_nav.gd`), or null. Where it
-## covers a body and the place it is walking to, the walk goes round what the map
-## knows is solid instead of pushing at it in a straight line; everywhere else the
-## squad steers as it always has. The camp owns the one map today.
+## The ground an area has mapped for the squad, or null. Where it covers a body
+## and the place it is walking to, the walk goes round what the map knows is solid
+## instead of pushing at it in a straight line; everywhere else the squad steers
+## as it always has. Nothing maps ground today.
 var nav = null
 var engage_radius := 60.0
 ## The party's mode (`Contracts.PARTY_MODES`). The scene hands in the warband's own

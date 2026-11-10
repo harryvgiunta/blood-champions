@@ -13,7 +13,7 @@ extends RefCounted
 ##   parked (> 150 m)  never              (no tick, no draw, no state change)
 ##
 ## `MobLod` decides how often a body may *tick*; a family may spread its brain
-## further inside those ticks. `enemy.gd` thinks on the budget itself (60/20/5/2.5
+## further inside those ticks. Every mob class thinks on the budget itself (60/20/5/2.5
 ## Hz by band); `devil_mob` re-spreads its brain over every fifth tick
 ## (`THINK_FRAMES`), so a near body decides 12 times a second, mid 4, far 1 and
 ## deep 0.5 - the further away a body is, the less it is asked to notice, and a

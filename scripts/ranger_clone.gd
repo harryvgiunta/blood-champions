@@ -8,7 +8,7 @@ extends CharacterBody3D
 ## - frontier: `attack_mode = "scene"` routes melee through `attacked`, so the
 ##   controller resolves the live ranger's guard and damage;
 ## - delve: `attack_mode = "direct"` strikes the delve actor and reports the
-##   outcome through `struck`, matching `delve_devil.gd`.
+##   outcome through `struck`, on the same contract as every other mob.
 
 signal defeated(enemy: Node3D, reward: int)
 signal attacked(attacker: CharacterBody3D, amount: float, victim: Node3D)
@@ -103,7 +103,7 @@ var alive := true
 var _impact_force := Vector3.ZERO
 var health := MAX_HEALTH
 var max_health := MAX_HEALTH
-## Slot of the ranger whose damage landed last (see `enemy.gd.last_hitter`).
+## Slot of the ranger whose damage landed last.
 var last_hitter := -1
 var stamina := Stamina.MAX
 var state := "IDLE"
@@ -130,7 +130,7 @@ var _move_intent := Vector3.ZERO
 var _move_speed := 0.0
 var _net_position := Vector3.ZERO
 var _received_pose := false
-## Buffered server states for the replica's delayed render (see `enemy.gd`).
+## Buffered server states for the replica's delayed render.
 var _timeline = NetReplication.mob_timeline()
 var _death_handled := false
 var _body: Node3D

@@ -7,7 +7,7 @@ extends RefCounted
 ## swing and a guard, and the windup is what a player answers. This file owns what
 ## a cast is: how far it reaches, how long it takes, what it costs the demon to
 ## have spent it, and what it leaves in the world. The two demon overrides name
-## which spells their bodies carry (`delve_demon.gd`).
+## which spells their bodies carry.
 ##
 ## **Fire is not a melee blow.** Everything here wounds a body through its own
 ## `take_damage`, so the guard, the armour's reduction and the downed rule answer

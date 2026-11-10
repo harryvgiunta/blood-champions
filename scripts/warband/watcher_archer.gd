@@ -12,7 +12,7 @@ extends "res://scripts/warband/cage_watcher.gd"
 ## posted in: the leash is the group's own anchor, not the player's position.
 ##
 ## Hidden until sprung: `player` stays null and the body rests in its crouch, so
-## nothing in the wood notices a body walking past at 25 m. `escape_run.gd` polls
+## nothing notices a body walking past at 25 m. The scene polls
 ## the three-group ambush and calls `begin_ambush()` on all three at once; a blow
 ## that lands on the archer springs it the same way.
 
@@ -82,11 +82,11 @@ const DRAW_SECONDS := 0.85
 const COOLDOWN_SECONDS := 3.0
 ## What one shaft takes off, before the scene's `blow_scale` dial.
 const ARROW_DAMAGE := 6.0
-## The trail books a warden's blow under `escape_run.gd`'s WATCHER_SOURCE (91).
+## A wave books a warden's blow under its own source id (91).
 ## The arrow carries the same id, so a death is attributed to the wood.
 const DAMAGE_SOURCE := 91
 ## Terrain, the warband's bodies (layer 4) and the raised shield (layer 8).
-## `enemy.gd`'s cinder devil uses this exact mask; a mob's body (layer 2) is not
+## A mob's body (layer 2) is not
 ## in it, so a shaft never hits the archer's own pack.
 const HIT_MASK := 1 | 4 | 8
 
@@ -166,8 +166,8 @@ func begin_ambush(target: Node3D) -> void:
 	hunt(target)
 
 
-## The scene's marker: `escape_run.wake_road()` leaves the ambushers alone, so a
-## group is only ever sprung by a body coming close or by a blow.
+## The scene's marker: a group stays asleep until a body comes close or a blow
+## wakes it.
 func is_ambusher() -> bool:
 	return true
 

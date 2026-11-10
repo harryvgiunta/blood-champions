@@ -2007,9 +2007,8 @@ func _advance_diagonal_chain(variant: String) -> void:
 
 ## Strike again at `rate` times the swing rate: the recovery of the cut already
 ## in the air is given up and the blade comes round on a clock divided by `rate`.
-## `AnnointCatalog.Proc.QUICK_STRIKE` is the only caller, and it only ever asks
-## on the frame after a blow of this wrist landed, so re-arming the same hand is
-## the point rather than a bug.
+## A run's own proc is the caller, and it only ever asks on the frame after a blow
+## of this wrist landed, so re-arming the same hand is the point rather than a bug.
 func quick_melee(hand: String, rate: float) -> bool:
 	var key := "left" if hand == "left" else "right"
 	if weapon not in ["sword","dagger","dual"] or swing_weapon_class(key).is_empty():

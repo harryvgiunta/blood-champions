@@ -99,14 +99,14 @@ var kind := 3
 var player: CharacterBody3D
 var targets: Array[CharacterBody3D] = []
 var replica := false
-## Buffered server states for the replica's delayed render (see `enemy.gd`).
+## Buffered server states for the replica's delayed render.
 var _timeline = NetReplication.mob_timeline()
 var _received_pose := false
 var safe_center := Vector3.ZERO
 var home := Vector3.ZERO
 var health := 50.0
 var max_health := 50.0
-## Slot of the ranger whose damage landed last (see `enemy.gd.last_hitter`).
+## Slot of the ranger whose damage landed last.
 var last_hitter := -1
 var alive := true
 var _impact_force := Vector3.ZERO
@@ -846,7 +846,7 @@ func _windup_seconds() -> float:
 
 # --- the owner's difficulty --------------------------------------------------
 
-## This body's share of its owner's difficulty (`delve_mode.gd`): how often it
+## This body's share of its owner's difficulty: how often it
 ## swings. 1.0 is the body as authored, and the frontier's own mobs never leave it.
 ## The swing's telegraph and strike are the animation's and stay as authored - a
 ## body that swings twice as often still lands its blow on the clip's own impact
@@ -998,7 +998,7 @@ func _duel_step(delta: float) -> bool:
 
 ## What this body may throw, in the order it tries them. The base demon fights
 ## with its hands alone, so an empty kit is every frontier mob and every watcher
-## unchanged; the Hollow's goatmen name their fire in `delve_demon.gd`.
+## unchanged; a goatman names its fire in its own profile.
 func _fire_kit() -> Array[String]:
 	return []
 

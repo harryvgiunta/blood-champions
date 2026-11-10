@@ -6,8 +6,8 @@ extends RefCounted
 ## Two different things fight in this game: the arena layer's `ArenaActor`
 ## (authoritative, predicted, snapshotted) and the frontier controller's raw
 ## `CharacterBody3D`. Neither can inherit the other, and a shared node would drag
-## one mode's lifecycle into the other, so only the arithmetic lives here - the
-## state machines stay in `arena_actor.gd` and `main.gd`.
+## one mode's lifecycle into the other, so only the arithmetic lives here and
+## each body keeps its own state machine.
 ##
 ## The threshold itself is never re-derived: `WarbandContracts.resolve_damage`
 ## and `finishes_downed` already own it, and this file is the single place a

@@ -2,47 +2,33 @@ extends Node3D
 ## BLOOD CHAMPIONS: the town and the run, in one continuous world.
 ##
 ## Hearthstead is where a game starts: the walled square with its counters, the
-## recruiter's board, the Weapon Rack and the Start Run Portal. Walking is
-## the only way anywhere - there is no scene door to press - and the two
-## directions are the two things to do: **the road**, 1,374 m of wood with a
-## cage, cultists and warcamps on it, ending at the deep wood where the
-## Horned Thing holds his patch; and **the Hollow**, the descent under the square.
-## They stand in **one coordinate space** on **one ground**: `terrain.gd`'s
-## heightfield, with the town square padded flat into a rolling forest floor.
+## recruiter's board, the Weapon Rack and the Start Run Portal. The square stands
+## on `terrain.gd`'s heightfield, padded flat into a rolling forest floor, and the
+## portal is the game: every level is fought on an island of its own, stood far
+## above this ground by `roguelite_stage.gd`.
 ##
 ## The band a run opens with is one naked body standing in that square: nothing
-## is issued, and every piece he ends the campaign in was won off a body he put
-## down - one piece per kill, onto a field body this world owns (`arm_one_piece`,
-## from `_arm_from_kill`). The second body is the one cage on the road, or the
-## recruiter's desk in the square.
+## is issued, and every piece he ends the run in was won off a body he put down -
+## one piece per kill, onto a field body this world owns (`arm_one_piece`, from
+## `_arm_from_kill`). The second body is the recruiter's desk in the square.
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
-## warband screen, the paperdoll, the tips, the ability scene, the
-## campaign menu, the loot vacuum, the revive channel, the downed-crawl, the
-## branded runner, and the wilderness band on the way out - and it builds the
-## areas that bring only their own geometry and their own business:
+## warband screen, the paperdoll, the tips, the ability scene, the campaign menu,
+## the loot vacuum, the revive channel, the downed-crawl, the squad and the
+## roguelite director - and it builds the one area that brings only its own
+## geometry and its own business:
 ##
-##   * `Wood` - `wood_boss.gd`: the ragged pocket at the road's far end and the
-##     demon in it. No fences and no cages: a hole in the trees with a fire, and
-##     the Horned Thing standing in the middle of it.
-##   * `Trail` - `escape_run.gd`: the 915 m way through the wood, with the twenty
-##     cultists on it. There is no lane: a faint worn line between trunks that
-##     stand in it, marked by a pair of torches every twelve metres. Its first
-##     waypoint is `Camp.CAMP_TO_ROAD_METRES` of ordinary wood past the camp's
-##     mouth, so the way on is a long walk and not the other side of a hedge.
-##   * `Town` - `town_hub.gd`: the square at the far end, walled on three sides,
-##     open where the trail comes in.
+##   * `Town` - `town_hub.gd`: the square, walled on three sides, with the rack,
+##     the portal and every counter a body kitted up at.
 ##
-## Nothing in this scene changes scene: walking is the only way between the three
-## places, and the campaign menu's own doors go through `GameFlow`.
+## Nothing in this scene changes scene: the portal is a door on the ground, and
+## the campaign menu's own doors go through `GameFlow`.
 ##
 ## Keys: O warband, ESC the campaign menu (resume, save, load, settings, leave,
 ## quit), TAB quick weapon swap, P paperdoll, G interact and the revive hold,
-## K manual loot (never advertised), R the branded sigil, X shoulder swap.
-## Q and E are held to strafe, WASD to walk, so neither is a press key. The camp's
-## lesson adds F1-F5 and `[` `]`.
-
+## K manual loot (never advertised), X shoulder swap.
+## Q and E are held to strafe, WASD to walk, so neither is a press key.
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const PointerGate = preload("res://scripts/pointer_gate.gd")
