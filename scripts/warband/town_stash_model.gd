@@ -13,7 +13,6 @@ extends RefCounted
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
-const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 
 ## item_id -> the serials of the copies nobody is wearing, ascending.
 ##
@@ -119,22 +118,17 @@ func pooled_map() -> Dictionary:
 
 # --- value -----------------------------------------------------------------
 
-## What one copy is worth for sorting: its keeper price plus the ritual value of
-## any brand burned into it. A branded relic therefore floats to the top.
-static func value_of(item_id: String, brand: Dictionary = {}) -> int:
+## What one piece is worth: its keeper price.
+static func value_of(item_id: String) -> int:
 	var item: Dictionary = State.ITEMS.get(item_id, {})
-	var value := int(item.get("price", 0))
-	if not brand.is_empty():
-		var tier := int(brand.get("tier", -1))
-		value += int(round(float(CruorCatalog.tier_value(tier)) * 0.5))
-	return value
+	return int(item.get("price", 0))
 
 # --- the collective list ---------------------------------------------------
 
 ## One row per owned item id, sorted by value (highest first), then name.
-## Row: `{item_id, name, category, value, pooled, worn, total, tags, branded}`.
+## Row: `{item_id, name, category, value, pooled, worn, total, tags}`.
 ## `worn` is `[{merc_id, merc_name, slot}]`; `tags` is the display list.
-func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
+func rows(roster) -> Array[Dictionary]:
 	var by_item: Dictionary = {}   # item_id -> {pooled:int, worn:Array}
 	for item_id in _pooled:
 		by_item[str(item_id)] = {"pooled": (_pooled[item_id] as Array).size(),
@@ -163,8 +157,6 @@ func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
 		var worn: Array = entry["worn"]
 		var pooled := int(entry["pooled"])
 		var item: Dictionary = State.ITEMS.get(item_id, {})
-		var brand: Variant = brands.get(item_id, {})
-		var brand_payload: Dictionary = brand if brand is Dictionary else {}
 		var tags: Array[String] = []
 		for wear in worn:
 			tags.append("%s %s" % [str(wear.get("merc_name", "Mercenary")),
@@ -173,12 +165,11 @@ func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
 			"item_id": item_id,
 			"name": str(item.get("name", item_id)),
 			"category": str(item.get("category", "")),
-			"value": value_of(item_id, brand_payload),
+			"value": value_of(item_id),
 			"pooled": pooled,
 			"worn": worn,
 			"total": pooled + worn.size(),
 			"tags": tags,
-			"branded": not brand_payload.is_empty(),
 		})
 	rows.sort_custom(_sort_rows)
 	return rows

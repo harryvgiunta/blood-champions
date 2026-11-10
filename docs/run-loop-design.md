@@ -59,6 +59,17 @@ ten-level block (`level % 10 == 9`), so it is every ten levels — 9, 19, 29 —
 every five. A five-level shop cadence would be a separate pacing change to the
 block, not a correction to Crab's structure.
 
+**Cadence comparison.**
+
+| | Crab Champions, current | Blood Champions |
+| --- | --- | --- |
+| Combat levels before the shop | 5 | 8 |
+| Shop position | 6th of 7 | 9th of 10 |
+| Wall | 7th (elite/boss) | 10th (boss) |
+| Block | 7-island biome | 10-level run block |
+
+The sequence is the same; the length is not. That is the whole correction.
+
 ### 1.2 The portal is the decision
 
 After a cleared island, up to three portals spawn. Walking close reveals where
@@ -338,6 +349,30 @@ the sequence is the same: combat, then shop, then wall. Our block is a longer
 version of that sequence, with a boss every block. What changes is what stands
 at the reward cluster after every other clear: three **gate contracts** instead
 of three faction doors with identical pay.
+
+**The shop gap.** If the goal is to feel like Crab's rhythm rather than only
+borrow its doors, the shop cadence is the one structural mismatch left. A
+10-level block cannot put a shop on level 10 — that is the boss — so “every five
+levels” has to become a choice about where the extra stop goes.
+
+| Option | Shape | Cost | Verdict |
+| --- | --- | --- | --- |
+| **A. Keep** | 8 combat → shop 9 → boss 10 | none | Preserves the spine and the pre-boss stop; the shop is sparse, every 10 levels. |
+| **B. Mid-block market** | 4 combat → shop 5 → 3 combat → shop 9 → boss 10 | small: `SHOP_LEVELS = [5, 9]`, market stock, tests, docs | **Recommended if we want the rhythm.** Adds a shop halfway through, keeps the full pre-boss shop and boss 10. Two shops raise power, so the level-5 market should be smaller (stall + pedestal, no rack, fewer wares). |
+| **C. Move the shop** | 5 combat → shop 6 → 3 combat → boss 10 | medium: shop kind, tests, economy | Matches Crab's “five combat, then shop” position, but removes the pre-boss shop; boss prep becomes weaker. |
+| **D. Shorten the block** | 5 combat → shop 6 → elite/boss 7 | large: `LEVELS_PER_ISLAND`, boss cadence, keys, depth curve, tests, README | The exact current-Crab shape, but it breaks the “boss every tenth level” promise and rebalances the whole run. Not recommended unless we want a full pacing reset. |
+
+The recommendation is **B** only if the shop cadence is part of the first cut.
+If it is not, **A** is honest: the gate-contract loop works at 10 levels, and the
+shop gap is a separate pacing decision. Do not do **D** just to match a number;
+it changes the key economy, the depth curve and every regression that assumes a
+ten-level block.
+
+B can slide by one level. A shop at **5** is “every five” by level number (four
+combat levels first); a shop at **6** is Crab's five-combat-then-shop position.
+Both keep the pre-boss shop at 9. Pick by whether the level number or the combat
+count is the target. Either way, the first stop should be a smaller market — the
+full shop stays at 9.
 
 ### 4.2 The contract
 
@@ -743,6 +778,7 @@ gates are normal contracts again, and the next depth block begins.
 | --- | --- | --- |
 | **0. Data and labels** | Add `pool` to the 161 rows; pin the census; add `RouteContract` helpers; gate payload carries the contract; floating card copy. | The contract must be data before it is UI. |
 | **1. Gate draft** | Replace `GATES` with `_gate_contracts(next_level)`; `_spawn_gates` carries the contract; `advance_level(route)` stores the active contract; `_clear_level` uses it for the chest's pool/tier; state/wire includes it. | This is the core loop change; no new combat code. |
+| **1b. Shop cadence (optional)** | If the pacing is in scope, add `SHOP_LEVELS = [5, 9]` (or `[6, 9]`) and a smaller market at the first stop; update `_kind_for_level`, `_begin_level`, `_spawn_shop_level`, docs and tests. | Do this before the route board if it ships with the first cut; it changes the level sequence. |
 | **2. Chest choice** | `_open_chest` builds per-body offers from the promised pool; the existing draft modal chooses one; AI auto-picks; armour/gold/revive unchanged; `coral_amulet` / `big_chests` / `faulty_chests` re-scoped. | This is the “augment” the player feels; it reuses the pedestal machinery. |
 | **3. Launch trials** | Duel, Swarm, Tithe, Fog, Spiked, Reliquary, Forge, Greed; apply budget/cap/HP/fog at `_begin_level`; reset on advance. | Trials turn the contract into a risk/reward decision without new objectives. |
 | **4. New objectives** | Horde, Gauntlet, Hunt; goal state in the director; cash-out UI for Gauntlet. | These are the pacing variety layer; they cost the most and should follow the proven decision loop. |
@@ -760,7 +796,7 @@ the gate/chest pair is fun in a playtest.
 | --- | --- |
 | `scripts/roguelite/mod_catalog.gd` | `pool` field and six pool constants; `draft(..., pool)` filter; new surface/tier rules; offer-count helper; census assertions. |
 | `scripts/roguelite/run_player.gd` | `chest_draft(contract)` per body; offer count from the contract + `chest_choices`; avoid auto-taking the row. |
-| `scripts/roguelite/run_director.gd` | `_gate_contracts`, `_spawn_gates`, `_clear_level` contract, `_open_chest` offers, `choose_draft` for chests, trial application in `_begin_level`, state/wire. |
+| `scripts/roguelite/run_director.gd` | `_gate_contracts`, `_spawn_gates`, `_clear_level` contract, `_open_chest` offers, `choose_draft` for chests, trial application in `_begin_level`, state/wire; optional `SHOP_LEVELS` and market variant. |
 | `scripts/roguelite/roguelite_props.gd` | Gate label card; chest tier glow; contract badge; no new geometry required. |
 | `scripts/roguelite/roguelite_hud.gd` | Route triptych near the gates; chest modal header; contract status; reuse `open_draft`. |
 | `scripts/roguelite/roguelite_stage.gd` | Fog/lighting presets for the Fog trial; no new maps. |
@@ -813,8 +849,11 @@ The regression should prove, not just exercise:
 7. **Keys.** No trial, chest or route pays keys; only a boss does.
 8. **Co-op.** The host's route is the party's; a guest's gate press is refused;
    a guest's chest pick is its own.
-9. **Existing suite.** The full `tests/roguelite_regression.gd` and
-   `python tools/run_tests.py` pass with the new contract assertions.
+9. **Shop cadence (if option B).** The market stands at level 5 (or 6), the
+   full shop at 9, the boss at 10; the market has no Weapon Rack and a smaller
+   stock; keys and boss cadence are unchanged.
+10. **Existing suite.** The full `tests/roguelite_regression.gd` and
+    `python tools/run_tests.py` pass with the new contract assertions.
 
 ---
 
@@ -926,6 +965,7 @@ These are proposed defaults, not blockers:
 | When do the gates unseal? | After the first chest open, as today; the chest remains for late picks. | No waiting; the chest is still per-body. |
 | Does the boss hoard offer a choice? | Four offers, take two, one legendary. | The boss should feel like the run's ceiling, not a slot pull. |
 | What is the first chest? | Starter Contract: Arms, standard, 3 offers. | Teaches the promise before the first gate. |
+| Does the shop cadence change? | Keep A (shop 9) unless the pacing is in the first cut; then B (shop 5/6 + 9, market at the first stop). | A is the current spine; B is the smallest Crab-shaped rhythm change. |
 | Do trials appear at the shop? | No. | The shop is the breath; the boss is the wall. |
 | Is there a fourth gate? | Not in the launch version. | Three is readable; a fourth is a later meta reward, not a baseline. |
 | Do keys get a new sink? | No. | Keys stay the armory's currency; mastery is records. |

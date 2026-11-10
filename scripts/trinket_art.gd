@@ -7,7 +7,6 @@ extends RefCounted
 ## pieces from this table so an icon shows exactly what the paperdoll shows.
 ## Nothing here mutates PlayerState or touches combat.
 
-const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 const Geo = preload("res://scripts/geo.gd")
 
 ## One row per catalog trinket: band metal, optional stone and its shape.
@@ -32,8 +31,7 @@ const RING_STYLES := {
 	"ring_grit": {"metal":"5a4130", "rough":0.70},
 }
 
-## The pendant's half-size. `AnnointMarks.sphere_marks` only inscribes a body it
-## can stand a mark on, and this is the smallest stone it will work.
+## The pendant's half-size: the smallest stone the cord builds.
 const PENDANT_SIZE := 0.018
 
 const NECK_STYLES := {
@@ -53,7 +51,7 @@ const NECK_STYLES := {
 ## the same figure the rig draws the hands' inlay from. An anointed cord burns
 ## that inlay on its stone, so a piece welded at the altar is worked in the
 ## paperdoll too and not only in the card's prose.
-static func apply(skeleton: Skeleton3D, kit: Dictionary, marks: Dictionary = {}) -> void:
+static func apply(skeleton: Skeleton3D, kit: Dictionary) -> void:
 	if skeleton == null:
 		return
 	clear(skeleton)
@@ -177,36 +175,7 @@ static func _necklace(item_id: String, front: Vector3, marks: int = 0) -> Node3D
 	if pendant != null:
 		pendant.position = front * 0.068 + Vector3(0.0,-0.026,0.0)
 		root.add_child(pendant)
-		# The altar's inlay sits on the stone, one mark per weld.
-		_inscribe(root, pendant.position, PENDANT_SIZE, front, marks)
 	return root
-
-
-## The altar's inlay on a pendant: one small mark per annointment ringed on the
-## stone's face. `AnnointMarks.sphere_marks` is sized for a blade's fuller and a
-## helm's bowl - on an 18 mm stone its marks are wider than the stone - so the
-## cord gets its own ring, each mark a third of the stone across so six still read
-## as separate beads rather than one lit lump.
-static func _inscribe(root: Node3D, centre: Vector3, size: float, front: Vector3,
-		tier: int) -> int:
-	var material := AnnointMarks.material_for(tier)
-	if material == null or size <= 0.004:
-		return 0
-	var count := AnnointMarks.glyph_count(tier)
-	var axis := front.normalized()
-	var side := axis.cross(Vector3.UP)
-	if side.length_squared() < 0.0001:
-		side = axis.cross(Vector3.RIGHT)
-	side = side.normalized()
-	var up := side.cross(axis).normalized()
-	var radius := size * 0.55
-	var mark := maxf(size * 0.16, 0.0018)
-	for index in count:
-		var angle := TAU * float(index) / float(count) - PI * 0.5
-		var at := centre + axis * (size * 0.80) \
-			+ (side * cos(angle) + up * sin(angle)) * radius
-		Geo.sphere(root, mark, at, material, Vector3(1.0, 1.0, 0.5))
-	return count
 
 
 static func _gem(shape: String, size: float, color: Color, glow: String) -> MeshInstance3D:

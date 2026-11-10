@@ -3,7 +3,7 @@ extends PanelContainer
 ## The hover card for one catalog piece: its name, what it is, the words the
 ## catalogue authors for it, whatever numbers a table actually owns (an armor
 ## piece's guard, a trinket's modifiers, the bunch an ammunition row buys), the
-## brand and anointing the ledger holds for that id, and its worth.
+## and its worth.
 ##
 ## The catalogue is the only source of the type line and the detail text, so a
 ## card can never disagree with the stash row that opened it. Everything else is
@@ -109,33 +109,6 @@ static func detail_rows(item_id: String, item: Dictionary) -> Array:
 	return rows
 
 
-## The lines the altar's ledger owns: `{text, skill}`, where `skill` marks the
-## anointing line (gold) rather than a brand (teal). A plain weapon still says
-## what the altar would wake in it, which is the only place a player learns it
-## before the piece enters a body.
-static func wear_lines(item_id: String, cruor: Variant) -> Array:
-	var lines: Array = []
-	if cruor == null or not is_instance_valid(cruor):
-		return lines
-	if cruor.has_method("brand_line"):
-		var brand_line := str(cruor.brand_line(item_id))
-		if not brand_line.is_empty():
-			lines.append({"text":brand_line, "skill":false})
-	if not cruor.has_method("anoint_line"):
-		return lines
-	var anoint_line := str(cruor.anoint_line(item_id))
-	if not anoint_line.is_empty():
-		lines.append({"text":anoint_line, "skill":true})
-		return lines
-	var skill: Dictionary = WarbandCruor.anoint_skill(item_id)
-	if not skill.is_empty():
-		var ability := str(skill.get("id", ""))
-		var recipe := WarbandCruor.recipe_text(WarbandCruor.anoint_recipe(ability))
-		lines.append({"text":"Plain - anoint it to wake %s  ·  %s" % [
-			str(skill.get("name", ability)), recipe], "skill":true})
-	return lines
-
-
 ## Dress this panel as the card for `item_id`. `warband` (optional) supplies the
 ## brand/anointing ledger; `hint` is the row's own instruction, `count` how many
 ## copies the row stands for, `note` anything the caller's board adds (a keeper's
@@ -152,8 +125,6 @@ func compose(item_id: String, warband = null, hint: String = "",
 	custom_minimum_size = Vector2(WIDTH, 0)
 	theme = Ledger.get_theme()
 	add_theme_stylebox_override("panel", _panel_style())
-	var cruor: Variant = _cruor_of(warband)
-
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_theme_constant_override("margin_left", int(PAD))
@@ -178,27 +149,14 @@ func compose(item_id: String, warband = null, hint: String = "",
 
 	var detail := str(item.get("detail", ""))
 	var rows := detail_rows(item_id, item)
-	var wears := wear_lines(item_id, cruor)
-	# The welded annointments sit under the ledger lines: one row per modifier,
-	# read straight off the pool so a new entry needs no card change.
-	for entry in annoint_entries(item_id, warband, copy_ordinal):
-		rows.append({"label": "ANNOINT", "value": "%s - %s" % [
-			str(entry.name), str(entry.line)]})
-	if not detail.is_empty() or not rows.is_empty() or not wears.is_empty():
+	if not detail.is_empty() or not rows.is_empty():
 		_rule(column)
 	if not detail.is_empty():
 		var line := _text(column, detail, 12, CREAM)
 		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	for row in rows:
 		_stat(column, str(row.get("label", "")), str(row.get("value", "")))
-	for entry in wears:
-		var line := _text(column, str(entry.get("text", "")), 11,
-			GOLD if bool(entry.get("skill", false)) else TEAL)
-		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-
-	var brand: Dictionary = cruor.brand_of(item_id) if cruor != null \
-		and cruor.has_method("brand_of") else {}
-	var worth := StashScript.value_of(item_id, brand)
+	var worth := StashScript.value_of(item_id)
 	_rule(column)
 	_stat(column, "WORTH", "%d G" % worth)
 	if count > 1:
@@ -209,30 +167,6 @@ func compose(item_id: String, warband = null, hint: String = "",
 	if not hint.is_empty():
 		var line := _text(column, hint, 10, TEAL)
 		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-
-
-## The annointments on the copy this card is showing. `ordinal` -1 is resolved by
-## the warband (a worn piece answers its own copy); a pooled one answers the
-## first copy, which is what a board without its own addresses presses. A row
-## that stands for one copy of many passes its own.
-static func annoint_entries(item_id: String, warband, ordinal: int = -1) -> Array:
-	if warband == null or not is_instance_valid(warband):
-		return []
-	var ledger: Variant = (warband as Object).get("annoints")
-	if ledger == null:
-		return []
-	var copy := ordinal
-	if copy < 0:
-		copy = 0
-		if (warband as Object).has_method("annoint_copy_for_item"):
-			copy = int((warband as Object).annoint_copy_for_item(item_id))
-	return ledger.entries_of(item_id, copy)
-
-
-static func _cruor_of(warband) -> Variant:
-	if warband == null or not is_instance_valid(warband):
-		return null
-	return (warband as Object).get("cruor")
 
 
 func _panel_style() -> StyleBoxFlat:

@@ -152,12 +152,6 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_state_changed.connect(_on_body_state_changed)
 		if not _warband.souls.body_unregistered.is_connected(_on_body_unregistered):
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
-		# Welding an annointment changes the copy's steel: the body holding it is
-		# dressed again, so the marks and the modifiers both land now and not at
-		# the next spawn.
-		if _warband.has_signal("annointed_state") \
-				and not _warband.annointed_state.is_connected(_on_piece_annointed):
-			_warband.annointed_state.connect(_on_piece_annointed)
 		if _warband.has_signal("armed") and not _warband.armed.is_connected(_on_warband_armed):
 			_warband.armed.connect(_on_warband_armed)
 	if sync == null:
@@ -284,28 +278,11 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 			"off": off_id,
 		},
 	}
-	var annoints := _warband_annoints(merc_id)
 	# The player's equipped ability list rides beside the kit. The rig filters it
 	# by the hands it is about to hold, so a stowed weapon's skills wait.
-	SeatLoadout.apply(actor.rig, loadout, annoints,
+	SeatLoadout.apply(actor.rig, loadout,
 		_warband.roster.hotbar_order_of(merc_id), _peer_driven(actor))
-	# The rig holds the stats; the body owns the maxima and the runtime, so it is
-	# told with an empty stat payload (the rig already has them) and the procs.
-	if actor.has_method("apply_annointments"):
-		actor.apply_annointments({}, annoints.get("procs", []))
 	_loadouts[merc_id] = loadout
-
-## The warband's annointments as the rig consumes them: stats in `TrinketStats`
-## shape, the skill each hand's copy wakes, the welds that ride each hand's steel
-## (`hands`) and the marks drawn on the piece. All are local ledger reads, so a
-## replica cannot claim a modifier its steel was never given.
-func _warband_annoints(merc_id: int) -> Dictionary:
-	if _warband == null or not _warband.has_method("annointment_stats"):
-		return {}
-	return {"stats": _warband.annointment_stats(merc_id),
-		"procs": _warband.annointment_procs(merc_id),
-		"hands": _warband.annointment_hands(merc_id),
-		"marks": _warband.annointment_marks(merc_id)}
 
 # --- reading ---------------------------------------------------------------
 
@@ -399,13 +376,6 @@ func refresh_gear(merc_id: int) -> bool:
 		return false
 	_apply_gear(actor, merc_id)
 	return true
-
-## The altar welded an annointment to a copy: the piece draws a new mark and its
-## storage is bigger, so every body wearing that copy is dressed again. The signal
-## carries the ledger's id list; only the copy's owner cares which entries they are.
-func _on_piece_annointed(item_id: String, _entries: Array) -> void:
-	_redress_wearers(item_id)
-
 
 ## Dress again every fielded body whose kit wears `item_id` in any slot. The
 ## altar works a hand, an armour piece or a worn trinket alike, and a weld is a

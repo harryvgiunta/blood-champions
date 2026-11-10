@@ -57,7 +57,6 @@ const TipsScript = preload("res://scripts/warband/warband_tips.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
-const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 ## The arena loop: the director that runs a wave campaign and the plate it reads.
@@ -210,8 +209,6 @@ var paperdoll
 var tips
 var loot
 var revive
-var branded
-var brand_hud
 var squad
 ## Ticks banked toward the party's next brain tick, and the time they added up to
 ## (`SQUAD_TICKS`). Seeded full, so the first tick of the world drives the band.
@@ -312,7 +309,9 @@ func _ready() -> void:
 	# field's first seen body, and a signal connected afterwards would miss it.
 	_wire_possession()
 	_seat_warband()
-	_build_brand()
+	# The blood field is the shared one: a scene that owns its own pool of stains
+	# owns its own budget too.
+	BloodFx.field_for(self)
 	# No capture here: `_tick_frame` asks `PointerGate` every frame, so a world
 	# that opens in the background (or before the player has clicked into this
 	# window) never warps the desktop's pointer into itself.
@@ -514,9 +513,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 		KEY_K:
 			_try_loot()
-			get_viewport().set_input_as_handled()
-		KEY_R:
-			_activate_brand()
 			get_viewport().set_input_as_handled()
 		KEY_G:
 			_try_interact()
@@ -722,17 +718,6 @@ func _build_revive() -> void:
 	revive = ReviveScript.new()
 	revive.name = "Revive"
 	add_child(revive)
-
-
-func _build_brand() -> void:
-	branded = BrandedScript.new()
-	branded.name = "Branded"
-	add_child(branded)
-	brand_hud = BrandedHud.attach(self)
-	_attach_brand()
-	# The blood field is the shared one: a scene that owns its own pool of stains
-	# owns its own budget too.
-	BloodFx.field_for(self)
 
 
 # --- the three areas -------------------------------------------------------
@@ -1391,7 +1376,6 @@ func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 		# player's number keys fire.
 		if paperdoll != null:
 			paperdoll.follow_controlled(merc_id)
-	_attach_brand()
 	_write_prompt("")
 
 
@@ -1410,7 +1394,6 @@ func _on_possession_released(peer_id: int, reason: String) -> void:
 		hud.set_status("The soul is loose (%s)." % reason, 4.0)
 	if paperdoll != null:
 		paperdoll.follow_controlled(-1)
-	_attach_brand()
 
 
 func _on_possess_requested(merc_id: int) -> void:
@@ -2386,35 +2369,6 @@ func _tick_revive(delta: float) -> void:
 		hud.set_prompt("REVIVING  %d%%" % int(round(progress * 100.0)))
 	if not revive.channeling(controller.local_peer_id):
 		_reviving = false
-
-
-# --- the branded sigil -----------------------------------------------------
-
-## The sigil belongs to the weapon, not the body: every time the soul changes
-## hands, the runner is re-bound to whatever blade that mercenary holds.
-func _attach_brand() -> void:
-	if branded == null:
-		return
-	var actor = _soul()
-	var merc_id: int = _soul_merc()
-	if actor == null or merc_id <= 0:
-		branded.attach(null, {})
-	else:
-		var main_id := str(warband.roster.equipped_of(merc_id).get("main", ""))
-		branded.attach(actor, warband.cruor.brand_of(main_id))
-	if brand_hud != null:
-		brand_hud.set_runner(branded)
-
-
-func _activate_brand() -> void:
-	if branded == null or hud == null:
-		return
-	var status: Dictionary = branded.can_activate()
-	if not bool(status.get("ok", false)):
-		hud.set_status(str(status.get("reason", "No brand.")), 2.0)
-		return
-	if branded.activate():
-		hud.set_status(str(branded.brand().get("ability", "")), 1.5)
 
 
 # --- the one HUD line ------------------------------------------------------

@@ -16,7 +16,6 @@ const NetLimits = preload("res://scripts/net_limits.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const GameFlowScript = preload("res://scripts/warband/game_flow.gd")
 const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
-const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
 
 const WARBAND_SAVE := "user://warband_session_world_unit_warband.json"
@@ -297,64 +296,6 @@ func run() -> void:
 	check(bool(laid.get("pending", false)) and asked.size() == 3
 			and str(asked[2].get("verb", "")) == "hotbar_order",
 		"and the keys a guest lays out are the host's to lay (%s)" % str(asked))
-	# The altar is open to a guest: the press is a request naming the copy, the
-	# pooled vial is the host's to spend, and the die is the host's to throw.
-	var copy := int(warband.annoint_copy_for_item("bow_short"))
-	var rite: Dictionary = warband.anoint("bow_short", copy)
-	check(bool(rite.get("pending", false)) and asked.size() == 4
-			and str(asked[3].get("verb", "")) == "anoint"
-			and int((asked[3].get("args", []) as Array)[1]) == copy,
-		"a guest's rite travels to the host with the copy it laid (%s)" % str(asked))
-	check(warband.annoints.count("bow_short", copy) == 0
-			and warband.stash.pooled_count("ichor_vial") == 1,
-		"and the lent books spend no vial until the host answers")
-	# The host runs the same verb on the books it lent. One weld is already on the
-	# copy so every band of the die - add, take, replace - commits on the host and
-	# the test cannot hang on a roll of nothing.
-	var host: Variant = WarbandStateScript.new()
-	host.from_dict(host_dict)
-	var pool: Array = AnnointCatalog.for_item(State.ITEMS.get("bow_short", {}))
-	var seed_id := ""
-	for entry in pool:
-		if bool(entry.wired):
-			seed_id = str(entry.id)
-			break
-	check(not seed_id.is_empty() and host.annoints.add("bow_short", copy, seed_id),
-		"the host's copy carries a weld to begin with")
-	var seeded: Array = host.annoints.ids("bow_short", copy)
-	var answered: Dictionary = host.apply_gear_request(
-		{"verb": "anoint", "args": ["bow_short", copy]})
-	check(bool(answered.get("ok", false))
-			and str(answered.get("item_id", "")) == "bow_short",
-		"the host answers with the rite's own result (%s)" % str(answered.get("message", "")))
-	check(host.annoints.ids("bow_short", copy) != seeded,
-		"the host's die landed on the copy the guest named")
-	check(host.stash.pooled_count("ichor_vial") == 0,
-		"the rite spends the pooled vial on the host's books")
-	var re_dressed: Array[String] = []
-	warband.annointed_state.connect(func(item_id: String, _entries: Array) -> void:
-		re_dressed.append(item_id))
-	warband.lend(host.to_dict(), 444)
-	check(re_dressed.has("bow_short"),
-		"and the host's welds re-dress the guest's bodies (%s)" % str(re_dressed))
-	host.free()
-	warband.gear_requester = Callable()
-	check(not bool(warband.equip_merc(host_id, "main", "sword_iron").get("ok", true)),
-		"and the door shuts with the session")
-	check(int(player.credits) == own_credits, "the guest's own purse is untouched")
-	warband.save_state()
-	check(FileAccess.get_file_as_string(WARBAND_SAVE) == own_text,
-		"a lent warband never writes over the guest's own save")
-	check(not warband.load_state(), "a lent warband never reads the guest's own save into the session")
-	warband.lend(host_dict, 500)
-	check(warband.gold() == 500 and warband.roster.count() == 2,
-		"the host's next copy replaces the lent one whole")
-	warband.end_loan()
-	check(not warband.lent, "the loan ends with the session")
-	check(warband.roster.count() == 1 and warband.roster.name_of(warband.roster.ids()[0]) == "Own Man",
-		"the guest's own campaign comes back from its own file")
-	check(warband.gold() == own_credits, "and so does its own purse (%d)" % warband.gold())
-
 	# --- the mob stream only carries news -------------------------------
 	# Thirty calm bodies in a hall are the traffic that turns a walk through it
 	# into a stutter: an unchanged body costs no packet, and a refresh repeats

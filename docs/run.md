@@ -8,6 +8,10 @@ where the run begins, and the level's own gates carry it on.
 > typed chests, trials, and the decisions behind them — is in
 > [run-loop-design.md](run-loop-design.md). This file describes the loop as
 > built; that file describes the loop we are considering next.
+>
+> **Pacing note:** our shop is level 9 of each ten-level block. Crab Champions'
+> current biome is five combat islands → shop → elite/boss. The design record
+> compares the two cadences and the optional mid-block shop.
 
 ## The counters
 

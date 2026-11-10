@@ -64,7 +64,6 @@ WARBAND_TESTS = [
     "stash_autoloot_regression",
     "corpse_loot_regression",
     "warband_ui_regression",
-    "branded_abilities_regression",
     "watcher_variants_regression",
     "town_hub_regression",
     "town_stockade_regression",

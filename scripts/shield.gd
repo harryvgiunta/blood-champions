@@ -5,7 +5,6 @@ extends AnimatableBody3D
 ## character capsule.
 
 const Geo = preload("res://scripts/geo.gd")
-const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 const SHIELD_LAYER := 8
 ## The kite shield is the authored default; buckler and tower keep the same
 ## construction and only change the silhouette and collision radius.
@@ -22,10 +21,6 @@ var _tower_bands: Array[Node3D] = []
 ## Forged fittings and the plank build: the wooden shield swaps one for the other.
 var _iron_parts: Array[Node3D] = []
 var _plank_parts: Array[Node3D] = []
-## The altar's work on this copy: one lit stud per annointment around the face.
-var annoint_tier := 0
-var _annoint_glyphs := 0
-var _annoint_marks: Node3D
 
 func _ready() -> void:
 	collision_layer = SHIELD_LAYER
@@ -35,7 +30,6 @@ func _ready() -> void:
 	_visual.name = "Visual"
 	add_child(_visual)
 	_build()
-	_etch_annoints()
 	_shape = CylinderShape3D.new()
 	_shape.radius = RADIUS
 	_shape.height = THICKNESS
@@ -118,30 +112,6 @@ func radius() -> float:
 
 ## The altar's record of this copy. The face is rebuilt only when the rung moves,
 ## and the studs follow the variant's own radius because they hang off `_visual`.
-func set_annoint_marks(value: int) -> void:
-	var wanted := AnnointMarks.tier_of(value)
-	if wanted == annoint_tier and _annoint_marks != null:
-		return
-	annoint_tier = wanted
-	_etch_annoints()
-
-
-func annoint_glyphs() -> int:
-	return _annoint_glyphs
-
-
-func _etch_annoints() -> void:
-	if _visual == null:
-		return
-	if _annoint_marks == null:
-		_annoint_marks = Node3D.new()
-		_annoint_marks.name = "AnnointMarks"
-		_visual.add_child(_annoint_marks)
-	for child in _annoint_marks.get_children():
-		_annoint_marks.remove_child(child)
-		child.queue_free()
-	_annoint_glyphs = AnnointMarks.studs(_annoint_marks,RADIUS,-0.040,annoint_tier)
-
 func set_active(active: bool) -> void:
 	visible = active
 	collision_layer = SHIELD_LAYER if active else 0

@@ -19,23 +19,6 @@ static func hand(value: Variant, slot: String) -> String:
 		return ""
 	return id
 
-## Stats ride the rig's own trinket dictionary. A weld is a number or a proc
-## now; skills are the player's equipped list, not the steel's.
-static func _apply_annoints(rig, annoints: Dictionary) -> void:
-	if rig == null or annoints.is_empty():
-		return
-	var stats: Variant = annoints.get("stats", {})
-	var procs: Variant = annoints.get("procs", [])
-	if rig.has_method("apply_annointments"):
-		rig.apply_annointments(stats if stats is Dictionary else {},
-			procs if procs is Array else [])
-	var hand_stats: Variant = annoints.get("hands", {})
-	if hand_stats is Dictionary and rig.has_method("set_hand_annointments"):
-		rig.set_hand_annointments(hand_stats)
-	var marks: Variant = annoints.get("marks", {})
-	if marks is Dictionary and rig.has_method("set_annoint_marks"):
-		rig.set_annoint_marks(marks)
-
 ## Every unlocked combat skill whose family fits the kit, in catalog order, capped
 ## at the seven keys a body has beside its starter. Used only for a body with no
 ## player's list behind it.
@@ -64,17 +47,12 @@ static func trinkets(value: Variant) -> Dictionary:
 		kit[slot] = hand(source.get(slot,""),slot)
 	return kit
 
-## `annoints` is the warband's own trusted-local ledger, never a loadout field:
-## `{stats: Dictionary, marks: {main, off}, hands: {main, off}}`; a bare
-## dictionary leaves the rig alone. `marks` is how many annointments each held
-## copy carries, which the rig draws on the piece, and `hands` the welds that
-## ride one hand's steel (`overhead_damage` and its like) rather than the body's
-## whole kit. `ability_loadout` is the player's equipped ability ids for this
+## `ability_loadout` is the player's equipped ability ids for this
 ## body, read off the mercenary's record; `gain` shows only the families its
 ## current hands fit. `starter_ability` is the caller's reading of whether a
 ## player is inside the body being dressed: only then is it given the starter
 ## spell, so a squadmate never gains a caster it never had.
-static func apply(rig, loadout: Dictionary, annoints: Dictionary = {},
+static func apply(rig, loadout: Dictionary,
 		ability_loadout: Array = [], starter_ability: bool = false) -> void:
 	if rig == null or loadout.is_empty():
 		return
@@ -110,7 +88,6 @@ static func apply(rig, loadout: Dictionary, annoints: Dictionary = {},
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else rig.armor_pieces.duplicate()
 		rig.apply_loadout(State.build_loadout(main,off,pieces,worn,
 			starter_ability))
-		_apply_annoints(rig, annoints)
 		return
 	# A kit that omits the hands still carries its worn trinkets.
 	rig.apply_trinkets(worn)
@@ -120,4 +97,3 @@ static func apply(rig, loadout: Dictionary, annoints: Dictionary = {},
 		rig.set_sword(int(sword))
 	if armor_ok:
 		rig.set_armor_bits(int(armor))
-	_apply_annoints(rig, annoints)

@@ -324,7 +324,7 @@ func check_sweep() -> void:
 	check(_loot.describe().begins_with("drops=1"),
 		"only the unreachable drop is still lying there, got %s" % _loot.describe())
 
-	var rows := stash.rows(_warband.roster, _warband.cruor.brands)
+	var rows := stash.rows(_warband.roster)
 	check(rows.size() == 8, "seven pooled ids plus the worn piece, got %d" % rows.size())
 	var present := {}
 	for row in rows:
@@ -371,7 +371,7 @@ func check_infinite_stash() -> void:
 	var stash: WarbandStash = _warband.stash
 	stash.add("ring_copper", 1000)
 	check(stash.pooled_count("ring_copper") == 1000, "a thousand copies of one id are stored")
-	var rows := stash.rows(_warband.roster, _warband.cruor.brands)
+	var rows := stash.rows(_warband.roster)
 	check(rows.size() == 1, "a thousand copies are one row, got %d" % rows.size())
 	if rows.size() == 1:
 		check(int(rows[0]["total"]) == 1000, "that row counts all thousand, got %d" % int(rows[0]["total"]))
@@ -392,7 +392,7 @@ func check_infinite_stash() -> void:
 		"1000 + 500 pieces are stored together, got %d" % stash.pooled_total())
 	check(stash.pooled_ids().size() == ids.size(), "every catalog id is pooled")
 
-	rows = stash.rows(_warband.roster, _warband.cruor.brands)
+	rows = stash.rows(_warband.roster)
 	check(rows.size() == ids.size(), "one row per distinct id, got %d of %d" % [rows.size(), ids.size()])
 	var total := 0
 	var readable := true
@@ -453,7 +453,7 @@ func check_ten_slot_kit() -> void:
 	check(str(worn.get("main", "")) == main_id and str(worn.get("off", "")) == off_id,
 		"the hands hold the one-hander and the shield together")
 
-	var rows := stash.rows(_warband.roster, _warband.cruor.brands)
+	var rows := stash.rows(_warband.roster)
 	var tagged := 0
 	for row in rows:
 		if int(row["total"]) == 1 and (row["tags"] as Array).size() == 1:

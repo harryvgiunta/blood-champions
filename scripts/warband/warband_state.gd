@@ -1,6 +1,6 @@
 extends Node
 ## Autoload `Warband`: the persistent soul, the roster, the infinite stash, the
-## Cruor ledger, the recruiter and the campaign ledger, in one place.
+## The roster, the purse and the campaign ledger, in one place.
 ##
 ## Ghost of the Warband is a possession game, so the thing that survives a
 ## battle is not a character: it is the warband. This node owns that state and
@@ -12,8 +12,6 @@ extends Node
 signal changed
 ## A piece just woke into its skill at the altar. Whatever dresses bodies off the
 ## roster listens, so every body already holding a copy carries the skill at once.
-## A copy's annointment list changed: `[entry ids]`, in weld order.
-signal annointed_state(item_id: String, entries: Array)
 ## The warband armed itself out of the pool: these mercenaries' kits changed, so
 ## whatever keeps a live rig re-dresses them (`PossessionController`).
 signal armed(merc_ids: Array)
@@ -21,17 +19,11 @@ signal armed(merc_ids: Array)
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
-const CruorScript = preload("res://scripts/warband/cruor_manager.gd")
 const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
 const SoulScript = preload("res://scripts/warband/soul_router.gd")
-const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
-const AnnointScript = preload("res://scripts/warband/annoint_ledger.gd")
-const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
-const AnnointRoll = preload("res://scripts/warband/annoint_roll.gd")
-const AnnointLedger = preload("res://scripts/warband/annoint_ledger.gd")
 
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
@@ -84,9 +76,6 @@ const LENT_MESSAGE := "This is the host's warband: only the host changes its gea
 var roster: WarbandRoster = RosterScript.new()
 var souls: SoulRouter = SoulScript.new()
 var stash: WarbandStash = StashScript.new()
-var cruor: WarbandCruor = CruorScript.new()
-## Per-copy annointments: `"<catalog id>#<ordinal>" -> [entry ids]`.
-var annoints: AnnointLedger = AnnointScript.new()
 ## Which copy a worn piece is: `"<merc id>:<slot>" -> {item, ordinal}`. The
 ## roster stores catalog ids, so the copy is bookkeeping that lives here.
 var worn_copies: Dictionary = {}
@@ -180,36 +169,7 @@ func award_gold(amount: int) -> void:
 func lend(data: Dictionary, gold_amount: int) -> void:
 	lent = true
 	_lent_gold = maxi(0, gold_amount)
-	var before := annoints.to_dict()
 	from_dict(data)
-	_announce_annointments(before)
-
-## The welds in a host's copy that this machine did not already hold. A mirror is
-## not an altar press, so nothing else here would know a copy's marks moved - and
-## the marks on the steel, the stats in the rig's dictionary and the skills on the
-## hotbar are all read off the ledger when a body is dressed. Named by catalog id,
-## exactly like the altar's own `annointed_state`, which the controller answers by
-## re-dressing every wearer of that row.
-func _announce_annointments(before: Dictionary) -> void:
-	var previous: Variant = before.get("pieces", {})
-	var current: Variant = annoints.to_dict().get("pieces", {})
-	if not previous is Dictionary or not current is Dictionary:
-		return
-	var moved := {}
-	for key in previous:
-		if str(previous[key]) != str(current.get(str(key), [])):
-			moved[_annointment_item(str(key))] = true
-	for key in current:
-		if not previous.has(key):
-			moved[_annointment_item(str(key))] = true
-	for item_id in moved:
-		annointed_state.emit(str(item_id), annoints.ids(str(item_id)))
-
-## `AnnointLedger.key_of` is "item_id#ordinal". A catalog id never carries the
-## separator, so a key without one is the id it names.
-static func _annointment_item(key: String) -> String:
-	var cut := key.rfind("#")
-	return key.substr(0, cut) if cut > 0 else key
 
 ## A co-op host's purse moved on its own, with no change to the books beside it: a
 ## kill's gold, a sale. The whole copy does not need re-sending for one number.
@@ -689,15 +649,8 @@ func _best_spare(slot_id: String, gear: Dictionary, disposition: String = "") ->
 ## function the arming and a pickup both read, so a bowman's main hand and a
 ## tank's shield hand cannot disagree about what they want.
 func _gear_score(item_id: String, item: Dictionary, disposition: String) -> float:
-	var value := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
-	var score := Contracts.disposition_gear_score(disposition, item, value)
-	# Annointed steel is worth more to the body it suits: up to 40 gold-equivalent
-	# for a six-annoint piece. `want_for` is the only reader, so the pool's tags
-	# decide this, not a table here.
-	if not annoints.ids(item_id, annoint_copy_for_item(item_id)).is_empty():
-		var refs := [AnnointLedger.ref(item_id, annoint_copy_for_item(item_id))]
-		score += annoints.want_for(refs, disposition) * 40.0
-	return score
+	var value := WarbandStash.value_of(item_id)
+	return Contracts.disposition_gear_score(disposition, item, value)
 
 ## Re-equip one body from the pool: everything it wears goes back first, then the
 ## same choice an arming pass makes fills it again - the dearest legal spare for
@@ -1007,16 +960,9 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 	var display := str(item.get("name", id))
 	# The pool is the authority on whether there is a copy to sell: a worn piece
 	# is on a body, not on the keeper's shelf, and a failed removal must never pay.
-	# Sell the plainest copy first: an annointed copy is one of a kind and never
-	# leaves by accident because its kind was cheaper than its marks.
-	var plainest := -1
-	var fewest := -1
-	for serial in stash.serials_of(id):
-		var marks := annoints.count(id, int(serial))
-		if fewest < 0 or marks < fewest:
-			plainest = int(serial)
-			fewest = marks
-	if not stash.remove(id, 1, plainest):
+	# The pool is the authority on whether there is a copy to sell, and a
+	# failed removal must never pay.
+	if not stash.remove(id, 1):
 		return {"ok": false, "price": 0, "item_id": id,
 			"message": "You have no spare %s in the stash." % display}
 	var payout := int(floor(float(list_price) * clampf(share, 0.0, 1.0)))
@@ -1026,422 +972,6 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 	_notify()
 	return {"ok": true, "item_id": id, "price": payout,
 		"message": "Sold %s for %d gold." % [display, payout]}
-
-## The altar's ritual: one warden's ichor, four equal outcomes, no destruction.
-##
-##   * add an ability / add a passive / remove one / replace one, 25% each
-##   * at six annointments the two add outcomes become a replace
-##
-## `ordinal` names the copy (see `annoint_copy`); -1 takes the first copy, which
-## is what the altar's list presses. `rng` exists so a regression can force a
-## band - the game never passes one.
-func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = null) -> Dictionary:
-	if lent:
-		# The altar is not shut to a guest: the steel, the vials and the die are
-		# the shared warband's, so the press travels and the host works it. The
-		# answer arrives as the copied ledger (the new marks, the spent vial), and
-		# a `rng` handed to this call is ignored - only the host throws.
-		if ask_gear("anoint", [item_id, ordinal]):
-			return {"ok": true, "pending": true, "message": RITE_SENT,
-				"item_id": item_id, "ordinal": ordinal, "outcome": -1,
-				"entry_id": "", "removed_id": "", "skill": "",
-				"count": annoints.count(item_id, ordinal),
-				"max": AnnointCatalog.MAX_PER_PIECE}
-		return _lent_refusal({"item_id": item_id, "outcome": -1, "entry_id": "",
-			"removed_id": "", "count": 0, "max": AnnointCatalog.MAX_PER_PIECE})
-	var item: Dictionary = State.ITEMS.get(item_id, {})
-	var piece := str(item.get("name", item_id))
-	if item.is_empty():
-		return {"ok": false, "message": "The altar does not know that piece.",
-			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
-			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	var pool := _annoint_pool(item, str(item.get("slot", "")))
-	if not _annoint_worth(item) or pool.is_empty():
-		return {"ok": false, "message": "The altar will not take that.",
-			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
-			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	if not stash.owns(item_id, roster):
-		return {"ok": false, "message": "The warband does not carry a %s." % piece,
-			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
-			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	if stash.pooled_count(CruorScript.BASIC_REAGENT) < 1:
-		return {"ok": false, "message": "The rite needs %s." % str(State.ITEMS.get(
-			CruorScript.BASIC_REAGENT, {}).get("name", CruorScript.BASIC_REAGENT)),
-			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
-			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	var copy := _resolve_copy(item_id, ordinal)
-	var existing := annoints.ids(item_id, copy)
-	var at_cap := existing.size() >= AnnointCatalog.MAX_PER_PIECE
-	if rng == null:
-		rng = RandomNumberGenerator.new()
-		rng.randomize()
-	var rolled := AnnointRoll.roll(pool, existing, at_cap, rng,
-		AnnointCatalog.groups_of(item))
-	stash.remove(CruorScript.BASIC_REAGENT, 1)
-	var outcome := int(rolled["outcome"])
-	var added := str(rolled["entry_id"])
-	var removed := str(rolled["removed_id"])
-	var committed := false
-	var skill := ""
-	match outcome:
-		AnnointRoll.Outcome.ADD_PASSIVE:
-			committed = annoints.add(item_id, copy, added)
-		AnnointRoll.Outcome.REMOVE:
-			committed = annoints.remove_id(item_id, copy, removed)
-		AnnointRoll.Outcome.REPLACE:
-			committed = annoints.replace(item_id, copy, removed, added)
-	annointed_state.emit(item_id, annoints.ids(item_id, copy))
-	_notify()
-	var message := str(rolled["message"])
-	if not committed:
-		message += " The piece is unchanged."
-	var line := "%s  [%d / %d]" % [message, annoints.count(item_id, copy),
-		AnnointCatalog.MAX_PER_PIECE]
-	return {"ok": committed, "message": line, "item_id": item_id, "ordinal": copy,
-		"outcome": outcome, "converted": bool(rolled["converted"]),
-		"entry_id": added, "removed_id": removed, "skill": skill,
-		"count": annoints.count(item_id, copy), "max": AnnointCatalog.MAX_PER_PIECE,
-		"spent": {CruorScript.BASIC_REAGENT: 1}}
-
-## The altar's rack: every weld this copy could take, and what each one costs.
-##
-## The altar is deterministic now. There is no die to throw: a piece's next weld
-## is a row the player reads - its name, what it does and its price - and a press
-## either takes it or is refused. What replaces the gacha is the *choice*: each
-## rung is dearer than the last, so a body's steel is a ladder somebody climbed on
-## purpose, and PvP gear is a thing a warband can reason about instead of a thing
-## it rolled.
-##
-## One row: `{entry_id, name, kind, kind_name, line, cost_tier, cost_count,
-## cost_name, vials, affordable, reason, owned}`.
-func weld_options(item_id: String, ordinal: int = -1) -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	var item: Dictionary = State.ITEMS.get(item_id, {})
-	if item.is_empty():
-		return out
-	var copy := ordinal if ordinal >= 0 else 0
-	var owned := annoints.ids(item_id, copy)
-	for entry in AnnointCatalog.for_item(item):
-		if not entry.wired:
-			continue
-		var cost := _weld_cost(entry, annoints.count(item_id, copy))
-		var tier := int(cost["tier"])
-		var count := int(cost["count"])
-		var vials := int(cost["vials"])
-		var has_materials: bool = cruor.tier_count(tier) >= count \
-			and stash.pooled_count(CruorScript.BASIC_REAGENT) >= vials
-		var row := {
-			"entry_id": str(entry.id),
-			"name": str(entry.name),
-			"kind": int(entry.kind),
-			"kind_name": _weld_kind_name(int(entry.kind)),
-			"line": str(entry.line),
-			"cost_tier": tier,
-			"cost_count": count,
-			"cost_name": CruorCatalog.tier_name(tier),
-			"vials": vials,
-			"owned": owned.has(str(entry.id)),
-			"affordable": has_materials,
-			"reason": "" if has_materials else "Not enough cruor or ichor.",
-		}
-		if bool(row["owned"]):
-			row["reason"] = "The piece already carries it."
-		elif annoints.is_full(item_id, copy):
-			row["reason"] = "The piece is full: unbind a weld first."
-		out.append(row)
-	return out
-
-
-## The price of one weld: a vial always, plus cruor by kind - abilities are the
-## dearest (a skill in the hand), procs sit in the middle, a plain stat line is
-## the cheap one.
-static func _weld_cost(entry, owned: int = 1) -> Dictionary:
-	match int(entry.kind):
-		AnnointCatalog.Kind.ABILITY:
-			return {"tier": Contracts.CruorTier.T2_BLACK_BILE, "count": 2, "vials": 1}
-		AnnointCatalog.Kind.PROC:
-			return {"tier": Contracts.CruorTier.T2_BLACK_BILE, "count": 1, "vials": 1}
-	return {"tier": Contracts.CruorTier.T1_RITUAL_TALLOW, "count": 3, "vials": 1}
-
-
-static func _weld_kind_name(kind: int) -> String:
-	match kind:
-		AnnointCatalog.Kind.ABILITY:
-			return "ABILITY"
-		AnnointCatalog.Kind.PROC:
-			return "PROC"
-	return "STAT"
-
-
-## Weld one entry onto one copy, for its price, or refuse. Deterministic to the
-## letter: the same piece, the same books and the same row always give the same
-## steel. The copy is `ordinal`; -1 means the first copy that is not full.
-func weld(item_id: String, ordinal: int, entry_id: String) -> Dictionary:
-	if lent:
-		if ask_gear("weld", [item_id, ordinal, entry_id]):
-			return {"ok": true, "pending": true, "message": RITE_SENT,
-				"item_id": item_id, "ordinal": ordinal, "entry_id": entry_id}
-		return _lent_refusal({"item_id": item_id, "entry_id": entry_id})
-	var item: Dictionary = State.ITEMS.get(item_id, {})
-	if item.is_empty():
-		return {"ok": false, "message": "No such piece.", "item_id": item_id}
-	if entry_id.is_empty():
-		return {"ok": false, "message": "Pick a weld from the rack.", "item_id": item_id}
-	var entry := AnnointCatalog.by_id(entry_id)
-	if entry == null or not entry.wired:
-		return {"ok": false, "message": "That weld does not exist.", "item_id": item_id}
-	var allowed := false
-	for candidate in AnnointCatalog.for_item(item):
-		if str(candidate.id) == entry_id:
-			allowed = true
-			break
-	if not allowed:
-		return {"ok": false, "item_id": item_id,
-			"message": "%s cannot take %s." % [str(item.get("name", item_id)), str(entry.name)]}
-	var copy := ordinal if ordinal >= 0 else 0
-	if annoints.has(item_id, copy, entry_id):
-		return {"ok": false, "item_id": item_id,
-			"message": "The piece already carries %s." % str(entry.name)}
-	if annoints.is_full(item_id, copy):
-		return {"ok": false, "item_id": item_id,
-			"message": "That piece is full: unbind a weld before laying another."}
-	var cost := _weld_cost(entry, annoints.count(item_id, copy))
-	var tier := int(cost["tier"])
-	var count := int(cost["count"])
-	var vials := int(cost["vials"])
-	if cruor.tier_count(tier) < count or stash.pooled_count(CruorScript.BASIC_REAGENT) < vials:
-		return {"ok": false, "item_id": item_id,
-			"message": "That weld costs %d %s and %d ichor; the warband does not have it."
-				% [count, CruorCatalog.tier_name(tier), vials]}
-	if not cruor.spend(tier, count):
-		return {"ok": false, "message": "The cruor is short.", "item_id": item_id}
-	stash.remove(CruorScript.BASIC_REAGENT, vials)
-	if not annoints.add(item_id, copy, entry_id):
-		# The books refused after the price was taken: give it back rather than
-		# charge for a weld that did not land.
-		cruor.add(tier, count)
-		stash.add(CruorScript.BASIC_REAGENT, vials)
-		return {"ok": false, "message": "The piece refused the weld.", "item_id": item_id}
-	var skill := ""
-	annointed_state.emit(item_id, annoints.ids(item_id, copy))
-	_notify()
-	var line := "%s takes %s  [%d / %d]" % [str(item.get("name", item_id)),
-		str(entry.name), annoints.count(item_id, copy), AnnointCatalog.MAX_PER_PIECE]
-	return {"ok": true, "message": line, "item_id": item_id, "ordinal": copy,
-		"entry_id": entry_id, "skill": skill, "outcome": int(entry.kind),
-		"count": annoints.count(item_id, copy), "max": AnnointCatalog.MAX_PER_PIECE,
-		"spent_tier": tier, "spent_count": count, "spent_vials": vials}
-
-
-## What the altar would tell a player before they spend the vial.
-func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
-	var item: Dictionary = State.ITEMS.get(item_id, {})
-	var pool := _annoint_pool(item, str(item.get("slot", "")))
-	var copy := _resolve_copy(item_id, ordinal)
-	var owned := not item.is_empty() and stash.owns(item_id, roster)
-	var can := owned and _annoint_worth(item) and not pool.is_empty() \
-		and stash.pooled_count(CruorScript.BASIC_REAGENT) >= 1
-	var reason := ""
-	if not owned:
-		reason = "The warband does not carry one."
-	elif not _annoint_worth(item):
-		reason = "The altar will not take that."
-	elif pool.is_empty():
-		reason = "Nothing fits that piece."
-	elif stash.pooled_count(CruorScript.BASIC_REAGENT) < 1:
-		reason = "The rite needs %s." % str(State.ITEMS.get(CruorScript.BASIC_REAGENT,
-			{}).get("name", CruorScript.BASIC_REAGENT))
-	return {"ok": can, "message": reason, "item_id": item_id, "ordinal": copy,
-		"pool": pool.size(), "abilities": AnnointCatalog.abilities_of(pool).size(),
-		"count": annoints.count(item_id, copy), "max": AnnointCatalog.MAX_PER_PIECE,
-		"full": annoints.is_full(item_id, copy), "odds": AnnointRoll.CHANCES,
-		"reagent": CruorScript.BASIC_REAGENT}
-
-## The pool a piece rolls from: its type's pool, or its armour material's.
-func _annoint_pool(item: Dictionary, slot: String) -> Array:
-	if str(item.get("category", "")) == "armor":
-		return AnnointCatalog.for_armour_slot(slot, AnnointCatalog.material_of(item))
-	return AnnointCatalog.for_item(item)
-
-
-## What the altar will take. A piece of gear worth working is worth the vial:
-## the four forged armour sets are worked whatever their price, because their
-## price is the wood's, not the woodwork's. Everything else keeps the old floor.
-func _annoint_worth(item: Dictionary) -> bool:
-	if str(item.get("category", "")) == "armor":
-		return AnnointCatalog.workable(item)
-	return int(item.get("price", 0)) >= CruorScript.MAGIC_PRICE
-
-# --- copies ----------------------------------------------------------------
-
-## Which copy of `item_id` a mercenary wears in `slot_id`. The roster keeps
-## catalog ids, so the copy is resolved here once and remembered: a body wears
-## the most-annointed copy that no other slot has claimed, else the lowest free
-## ordinal. That is what keeps one annointed bow from being worn twice.
-func annoint_copy(merc_id: int, slot_id: String) -> int:
-	var key := "%d:%s" % [merc_id, slot_id]
-	var item_id := str(roster.equipped_of(merc_id).get(slot_id, ""))
-	var held: Variant = worn_copies.get(key, {})
-	if held is Dictionary and not item_id.is_empty() \
-			and str((held as Dictionary).get("item", "")) == item_id:
-		return int((held as Dictionary).get("ordinal", 0))
-	var ordinal := _claim_copy(merc_id, slot_id, item_id)
-	worn_copies[key] = {"item": item_id, "ordinal": ordinal}
-	return ordinal
-
-## The copy a body takes up, named by the serial every physical copy carries.
-##
-## A body claims a *free* copy from the pool - the plainest one first, so a piece
-## bought off a keeper is plain steel even when a relic of the same kind is
-## sitting beside it - and the claim takes that copy out of the pool and remembers
-## its serial for the slot. The relic is only ever worn by a body that claimed it,
-## which is what stops one annointed greatsword turning every greatsword into one.
-func _claim_copy(merc_id: int, slot_id: String, item_id: String) -> int:
-	if item_id.is_empty():
-		return 0
-	var key := "%d:%s" % [merc_id, slot_id]
-	var best := -1
-	var best_marks := -1
-	for serial in stash.serials_of(item_id):
-		if _serial_is_worn_elsewhere(int(serial), item_id, key):
-			continue
-		var marks := annoints.count(item_id, int(serial))
-		if best_marks < 0 or marks < best_marks:
-			best = int(serial)
-			best_marks = marks
-	if best >= 0:
-		stash.remove(item_id, 1, best)
-	else:
-		# Nothing in the pool to take (the piece was put on a body before the pool
-		# ever held it): give the copy an identity of its own, but do not invent a
-		# spare - a phantom copy in the pool is a piece the warband does not own.
-		best = stash.mint_serial(item_id)
-	worn_copies[key] = {"item": item_id, "ordinal": best}
-	return best
-
-
-## Whether another slot's copy is this same serial. A serial is worn by one body
-## at a time; a legacy save may name one that two slots still claim.
-func _serial_is_worn_elsewhere(serial: int, item_id: String, mine: String) -> bool:
-	for key in worn_copies:
-		if str(key) == mine:
-			continue
-		var held: Variant = worn_copies[key]
-		if held is Dictionary and str((held as Dictionary).get("item", "")) == item_id \
-				and int((held as Dictionary).get("ordinal", 0)) == serial:
-			return true
-	return false
-
-
-## Let go of the copy `merc_id` wears in `slot_id` when that claim names this very
-## piece, and answer the serial to put it back under. `-1` when the slot holds no
-## claim of its own - a slot dressed behind the state's back, or a piece waiting
-## in the weapon set the hands are not carrying - so the caller mints a copy
-## instead of handing over another weapon's identity.
-func _release_claim(merc_id: int, slot_id: String, item_id: String) -> int:
-	var key := "%d:%s" % [merc_id, slot_id]
-	var held: Variant = worn_copies.get(key, {})
-	if not held is Dictionary or str((held as Dictionary).get("item", "")) != item_id:
-		return -1
-	worn_copies.erase(key)
-	return int((held as Dictionary).get("ordinal", -1))
-
-## A copy leaving a body: the slot forgets it and the caller gets the piece and
-## the serial it was worn under, so the weapon that was annointed is the weapon
-## that comes off the body. The caller puts it back; this only lets go.
-func _release_copy(merc_id: int, slot_id: String) -> Dictionary:
-	var key := "%d:%s" % [merc_id, slot_id]
-	var held: Variant = worn_copies.get(key, {})
-	worn_copies.erase(key)
-	if not held is Dictionary:
-		return {}
-	var item_id := str((held as Dictionary).get("item", ""))
-	if item_id.is_empty():
-		return {}
-	return {"item": item_id, "serial": int((held as Dictionary).get("ordinal", -1))}
-
-## Which copy a card for `item_id` is showing: the first copy that exists, else
-## the first one a body wears, else 0. Cards are read off the piece, not a body,
-## so this is the least surprising answer for a stash row.
-func annoint_copy_for_item(item_id: String) -> int:
-	return _resolve_copy(item_id, -1)
-
-
-## The copy an altar press means when it names none: the copy a body is wearing
-## (the piece in the hand is the piece the player walked up with), else the
-## plainest spare. A copy is an instance, so a press never reaches across to a
-## relic the warband is not wearing, and a purchase is a new weapon with no marks.
-## `ordinal >= 0` is taken as given.
-func _resolve_copy(item_id: String, ordinal: int) -> int:
-	if ordinal >= 0:
-		return ordinal
-	for key in worn_copies:
-		var held: Variant = worn_copies[key]
-		if held is Dictionary and str((held as Dictionary).get("item", "")) == item_id:
-			return int((held as Dictionary).get("ordinal", 0))
-	var best := -1
-	var fewest := -1
-	for serial in stash.serials_of(item_id):
-		var marks := annoints.count(item_id, int(serial))
-		if fewest < 0 or marks < fewest:
-			best = int(serial)
-			fewest = marks
-	return maxi(best, 0)
-
-## The annointment-bearing pieces one body wears, as ledger refs. The armour, the
-## hands and the worn jewellery: a necklace or a ring is a piece the altar can
-## work exactly like steel, and its weld is the cord's own.
-func annoint_refs(merc_id: int) -> Array:
-	var out: Array = []
-	var kit := roster.equipped_of(merc_id)
-	for slot in AnnointCatalog.ARMOUR_SLOTS + ["main", "off"] \
-			+ AnnointCatalog.JEWELRY_SLOTS:
-		var item_id := str(kit.get(slot, ""))
-		if item_id.is_empty():
-			continue
-		out.append(AnnointLedger.ref(item_id, annoint_copy(merc_id, slot)))
-	return out
-
-## Every stat this body's annointments add, in `TrinketStats` shape. The welds
-## that ride one hand's steel are not in it (`AnnointLedger.HAND_KEYS`): those are
-## the hand's, and `annointment_hands` answers them.
-func annointment_stats(merc_id: int) -> Dictionary:
-	return annoints.stats_for(annoint_refs(merc_id))
-
-## The welds that ride the steel in a hand, `{main: {...}, off: {...}}`, read off
-## the copy each hand holds. A body carrying a Heavy Swing club and a greatsword
-## in its other set swings the greatsword on the greatsword's own clock.
-func annointment_hands(merc_id: int) -> Dictionary:
-	var kit := roster.equipped_of(merc_id)
-	var out := {"main": {}, "off": {}}
-	for slot in ["main", "off"]:
-		var item_id := str(kit.get(slot, ""))
-		if item_id.is_empty():
-			continue
-		out[slot] = annoints.hand_stats_for(item_id, annoint_copy(merc_id, slot))
-	return out
-
-## The procs this body's annointments arm: `AnnointRuntime` reads this once per
-## dress and rolls the verbs itself.
-func annointment_procs(merc_id: int) -> Array:
-	return annoints.procs_for(annoint_refs(merc_id))
-
-
-## How many annointments each held copy carries, per worn slot. The rig draws a
-## hand's as inlaid marks on the weapon; the preview draws the necklace's on its
-## stone, one per annointment.
-func annointment_marks(merc_id: int) -> Dictionary:
-	var kit := roster.equipped_of(merc_id)
-	var out := {"main": 0, "off": 0}
-	for slot in AnnointCatalog.JEWELRY_SLOTS:
-		out[slot] = 0
-	for slot in ["main", "off"] + AnnointCatalog.JEWELRY_SLOTS:
-		var item_id := str(kit.get(slot, ""))
-		if item_id.is_empty():
-			continue
-		out[slot] = annoints.count(item_id, annoint_copy(merc_id, slot))
-	return out
-
 
 ## The ability book for one body: every catalog ability, its family, whether the
 ## player owns it, whether it fits the kit that body is wearing, and whether the
@@ -1766,15 +1296,9 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 		return result
 	var displaced: Dictionary = result.get("displaced", {})
 	if moved_serial < 0:
-		# A copy off the shelf: take the plainest one, by its own serial.
-		var plainest := -1
-		var fewest := -1
-		for serial in pool.serials_of(item_id):
-			var marks := annoints.count(item_id, int(serial))
-			if fewest < 0 or marks < fewest:
-				plainest = int(serial)
-				fewest = marks
-		moved_serial = plainest
+		# A copy off the shelf: take the first free one, by its own serial.
+		var serials: Array = pool.serials_of(item_id)
+		moved_serial = int(serials[0]) if not serials.is_empty() else -1
 	pool.remove(item_id, 1, moved_serial)
 	# The copy this body was wearing in that slot, if any, goes back to the pool
 	# as itself.
@@ -1961,27 +1485,24 @@ func gear_value(merc_id: int) -> int:
 	for entry in roster.worn_entries(merc_id):
 		var item_id := str(entry.get("item", ""))
 		if not item_id.is_empty():
-			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+			total += WarbandStash.value_of(item_id)
 	return total
 
-## The warband's combined worth - gear, the town stash, the delve inventory and
-## essence - for the HUD and tests.
+## The warband's combined worth - gear and the town stash - for the HUD and tests.
 func total_value() -> int:
 	var total := 0
 	for entry in _worn_entries_all():
 		var item_id := str(entry.get("item", ""))
 		if not item_id.is_empty():
-			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+			total += WarbandStash.value_of(item_id)
 	total += _pool_value(stash)
-	for tier in CruorCatalog.TIER_ORDER:
-		total += cruor.tier_count(tier) * CruorCatalog.tier_value(tier)
 	return total
 
 func _pool_value(pool: WarbandStash) -> int:
 	var total := 0
 	var pooled := pool.pooled_map()
 	for item_id in pooled:
-		total += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * int(pooled[item_id])
+		total += WarbandStash.value_of(str(item_id)) * int(pooled[item_id])
 	return total
 
 # --- the party's mode ------------------------------------------------------
@@ -2116,8 +1637,6 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	roster.clear()
 	stash.clear()
 	auto_equip_restricted.clear()
-	cruor.clear()
-	annoints.clear()
 	worn_copies.clear()
 	souls.clear()
 	deployment_cap = maxi(1, cap)
@@ -2139,8 +1658,6 @@ func to_dict() -> Dictionary:
 		"deployment_cap": deployment_cap,
 		"roster": roster.to_dict(),
 		"stash": stash.to_dict(),
-		"cruor": cruor.to_dict(),
-		"annoints": annoints.to_dict(),
 		"worn_copies": worn_copies.duplicate(true),
 		"checkpoint": checkpoint.duplicate(true),
 		"party_mode": party_mode,
@@ -2150,9 +1667,6 @@ func to_dict() -> Dictionary:
 func from_dict(data: Dictionary) -> void:
 	roster.from_dict(data.get("roster", {}))
 	stash.from_dict(data.get("stash", {}))
-	# v12 adds per-copy annointments; a v11 file has none and every piece is
-	# plain steel, which is exactly what an unannointed warband is.
-	annoints.from_dict(data.get("annoints", {}))
 	worn_copies.clear()
 	var saved_copies: Variant = data.get("worn_copies", {})
 	if saved_copies is Dictionary:
@@ -2170,7 +1684,6 @@ func from_dict(data: Dictionary) -> void:
 			var held_id := State.migrate_item_id(str(raw_id))
 			if not held_id.is_empty() and State.ITEMS.has(held_id):
 				auto_equip_restricted[held_id] = true
-	cruor.from_dict(data.get("cruor", {}))
 	# Read before the dead are reaped below: a member still on the books of a party
 	# below is reaped into the delve inventory, which the load's fall then loses,
 	# never into the stash. A v7 file has no delve at all.
@@ -2367,7 +1880,7 @@ static func is_standable(value: Variant) -> bool:
 
 ## One line for the log card and for tests.
 func describe() -> String:
-	return "mercs=%d alive=%d cap=%d gold=%d cruor=%d brands=%d stash=%d checkpoint=%s" % [
+	return "mercs=%d alive=%d cap=%d gold=%d stash=%d checkpoint=%s" % [
 		roster.count(), roster.alive_count(), deployment_cap,
-		gold(), cruor.total(), cruor.brands.size(), stash.pooled_total(),
+		gold(), stash.pooled_total(),
 		checkpoint_id() if has_checkpoint() else "-"]

@@ -15,7 +15,6 @@ const Dagger = preload("res://scripts/dagger.gd")
 const Shield = preload("res://scripts/shield.gd")
 const Staff = preload("res://scripts/staff.gd")
 const FocusItem = preload("res://scripts/focus_item.gd")
-const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
@@ -290,10 +289,6 @@ func set_ability_loadout(ids: Variant) -> void:
 ## and empty for a mob, a clone or a caged soldier. `AbilityRules.granted` puts
 ## it after the equipped list and before the consumables.
 var starter_ability := ""
-## How many annointments the altar welded to the copy in each hand, 0..6. The rig
-## hands these to the piece it is drawing, so a worked blade carries its marks in
-## the hand, on the floor and in the paperdoll's mirror - never in a menu alone.
-var annoint_marks := {"main":0, "off":0}
 var _ward: EnergyShield
 var skeleton: Skeleton3D
 var _phase_time := 0.0
@@ -452,7 +447,6 @@ var _melee_hand := "right"
 var _right_variant := "overhead"
 ## The welds that ride the steel in one hand (`{main: {...}, off: {...}}`), set by
 ## `SeatLoadout` off the warband's ledger: `overhead_damage`, `overhead_speed`.
-var hand_annointments: Dictionary = {"main": {}, "off": {}}
 ## Where the alternating click cuts are in their chain: `0` is the first cut of a
 ## pair, `1` the second - the one a greatsword swings off the first's momentum.
 ## A stab, an overhead or an aborted swing breaks the chain.
@@ -1678,51 +1672,7 @@ func _sync_weapon_visibility() -> void:
 		_quiver.visible = weapon == "bow" and not consuming
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and not consuming and is_visible_in_tree())
-	_apply_annoint_marks()
 
-
-## The altar's count belongs to a copy, and a rig draws exactly one copy per hand:
-## so every dress and every weapon change hands the number to the piece that is
-## actually in the hand. A stowed blade stays plain until it is drawn.
-func _apply_annoint_marks() -> void:
-	var main_tier := int(annoint_marks.get("main",0))
-	var off_tier := int(annoint_marks.get("off",0))
-	if weapon == "bow":
-		_annoint_piece(active_bow,main_tier)
-	elif weapon == "dagger":
-		_annoint_piece(active_dagger,main_tier)
-	elif _staff_shown():
-		_annoint_piece(active_staff,main_tier)
-	elif weapon in ["sword","dual"]:
-		_annoint_piece(active_sword,main_tier)
-	if weapon == "dual":
-		_annoint_piece(active_off_weapon,off_tier)
-	if focus_active:
-		_annoint_piece(active_focus,off_tier)
-	if shield_equipped:
-		_annoint_piece(active_shield,off_tier)
-
-
-func _annoint_piece(node: Node3D, tier: int) -> void:
-	if node == null or not is_instance_valid(node) or not node.has_method("set_annoint_marks"):
-		return
-	node.set_annoint_marks(tier)
-
-
-## The warband's ledger reading for the two hands, pushed by whoever dressed the
-## rig (`SeatLoadout`). Accepted before the rig is built, so a body can be told its
-## kit before it owns a skeleton.
-func set_annoint_marks(marks: Dictionary) -> void:
-	var main_count := AnnointMarks.tier_of(int(marks.get("main",0)))
-	var off_count := AnnointMarks.tier_of(int(marks.get("off",0)))
-	if main_count == int(annoint_marks.get("main",0)) \
-			and off_count == int(annoint_marks.get("off",0)):
-		return
-	annoint_marks = {"main":main_count, "off":off_count}
-	if not _built:
-		return
-	_sync_weapon_visibility()
-	_update_pose(0.0)
 
 ## Hand-above weapon node used for blood coating. Only the weapon actually
 ## drawn in that hand is stained, so a stowed sword keeps its clean steel.
@@ -1955,12 +1905,11 @@ func _duration_for(hand: String, variant: String) -> float:
 		# A stab is the dagger clock, whichever hand swings it: a sword's thrust
 		# is not a sword's overhead. A dagger keeps its own profile's timing.
 		base = float(profile_for_hand(hand).seconds if dagger else dagger_profile(0).seconds)
-	# Trinket haste, the held item's passive, the annointments welded onto the
-	# steel and this swing's own rate compose as one figure, so the same wheel-up
-	# lunge is fast for every hand that carries a shank and a proc's quick cut is
-	# simply five times that figure.
+	# Trinket haste, the held item's passive and this swing's own rate compose as
+	# one figure, so the same wheel-up lunge is fast for every hand that carries a
+	# shank and a proc's quick cut is simply five times that figure.
 	return base/maxf(attack_rate()*variant_attack_rate(hand,variant) \
-		*variant_annoint_rate(hand,variant)*_swing_rate,0.01)
+		*_swing_rate,0.01)
 
 func _valid_variant(variant: String) -> bool:
 	return variant in MELEE_VARIANTS
@@ -2135,21 +2084,6 @@ func swing_damage(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	return melee_damage(key)*variant_damage_scale(key,melee_variant(key))
 
-## Trinket modifiers read by the controllers, `Combat` and the ability cues.
-## Fold a body's annointment stats into the same dictionary every accessor
-## already reads (`melee_scale`, `attack_rate`, `move_scale`,
-## `damage_reduction`, ...), so a welded modifier needs no second pipeline.
-## Additive with the trinkets, then the shared clamps decide the ceiling.
-func apply_annointments(stats: Dictionary, procs: Array = []) -> void:
-	# `procs` is the body's business: the rig holds stats, `WarbandBody` holds the
-	# runtime that plays them, so a plain Archer simply ignores the list.
-	if stats.is_empty():
-		return
-	if trinket_stats.is_empty():
-		trinket_stats = TrinketStats.sum({})
-	for key in stats:
-		trinket_stats[str(key)] = float(trinket_stats.get(str(key), 0.0)) + float(stats[key])
-
 func apply_trinkets(kit: Dictionary) -> void:
 	trinkets = TrinketStats.kit(kit)
 	trinket_stats = TrinketStats.sum(trinkets)
@@ -2231,44 +2165,11 @@ func dual_block_chance() -> float:
 		swing_weapon_class("left"))
 
 
-## The worn annointments' own factor on one melee variant's rate: a weld that
-## names `overhead_speed` speeds the overhand the way `item_passives.gd`'s class
-## row does, as a second rate beside it. The weld rides the steel in that hand
-## (`SeatLoadout` lays it down from the warband's ledger), so a Heavy Swing club
-## does not speed the greatsword in the other set.
-func variant_annoint_rate(hand: String, variant: String) -> float:
-	var bonus := _hand_variant_bonus(hand,ItemPassives.variant_key(variant))
-	return clampf(1.0 + bonus,1.0,ItemPassives.MAX_RATE)
-
-
 ## The damage on one melee variant, as a multiplier: the class's own rule (a
-## shiv's downward blow is double) with the welded figure on that hand's steel
-## multiplied on top. `1.0` when neither names the variant.
+## shiv's downward blow is double). `1.0` when it names no variant.
 func variant_damage_scale(hand: String, variant: String) -> float:
-	var gained := ItemPassives.variant_damage_scale(swing_weapon_class(hand),variant)
-	return maxf(0.0,gained * (1.0 + _hand_variant_bonus(hand,
-		ItemPassives.variant_damage_key(variant))))
+	return maxf(0.0, ItemPassives.variant_damage_scale(swing_weapon_class(hand),variant))
 
-
-## The weld figure `key` names on the piece this hand is swinging, or 0.0.
-func _hand_variant_bonus(hand: String, key: String) -> float:
-	if key.is_empty():
-		return 0.0
-	var payload: Variant = hand_annointments.get("off" if hand == "left" else "main",{})
-	if not payload is Dictionary:
-		return 0.0
-	return float((payload as Dictionary).get(key,0.0))
-
-
-## The welds that ride the steel in one hand, `{main: {...}, off: {...}}`, laid
-## down by `SeatLoadout` from the warband's ledger. A hand with no weld swings the
-## clip its profile authored.
-func set_hand_annointments(hands: Dictionary) -> void:
-	hand_annointments = {"main": {}, "off": {}}
-	for side in ["main", "off"]:
-		var payload: Variant = hands.get(side,{})
-		if payload is Dictionary:
-			hand_annointments[side] = (payload as Dictionary).duplicate()
 
 func move_scale() -> float:
 	return TrinketStats.move_scale(trinket_stats)

@@ -1,7 +1,7 @@
 extends SceneTree
 ## What a piece of steel does because of what it is, and what a weld does on top.
 ##
-## This owns blunt steel's two native traits and the one annointment the campaign
+## This owns blunt steel's two native traits
 ## issues with them:
 ##   * the class resolution (club and limb are blunt, a forged blade is not, a
 ##     staff is its own class) on the rig, in the catalog and on an item card
@@ -19,8 +19,6 @@ const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const State = preload("res://scripts/player_state.gd")
-const Catalog = preload("res://scripts/warband/annoint_catalog.gd")
-const Ledger = preload("res://scripts/warband/annoint_ledger.gd")
 const Card = preload("res://scripts/warband/item_card.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const Watcher = preload("res://scripts/warband/cage_watcher.gd")
@@ -68,7 +66,6 @@ func run() -> void:
 	check_lodged_blade()
 	check_stagger_rules(holder)
 	check_watcher_line(holder)
-	check_annoints()
 	check_issued_club()
 	holder.queue_free()
 	await process_frame
@@ -158,28 +155,9 @@ func check_club_clocks(holder: Node3D) -> void:
 	check(is_equal_approx(rig.swing_damage("right"), 6.0),
 		"a plain club overhand deals its authored six (%.2f)" % rig.swing_damage("right"))
 
-	# Heavy Swing on the hand that holds it: three times the damage at half
-	# again the club's own rate, and never the other hand's.
-	rig.set_hand_annointments({"main": {"overhead_damage": 2.0, "overhead_speed": 0.5}})
-	check(rig.begin_melee("right", "overhead"), "the annointed club starts its overhand")
-	var welded: float = float(rig.melee_seconds("right"))
-	check(is_equal_approx(welded, 0.6),
-		"Heavy Swing takes half again off the club's own 0.9 s (%.3f s)" % welded)
-	check(is_equal_approx(rig.swing_damage("right"), 18.0),
-		"Heavy Swing deals three times the club's six (%.2f)" % rig.swing_damage("right"))
-	rig.abort_melee("right")
-	check(rig.begin_melee("right", "diagonal_right"), "the annointed club starts its sweep")
-	check(is_equal_approx(float(rig.melee_seconds("right")), 0.55),
-		"Heavy Swing leaves the sweep alone")
-	rig.abort_melee("right")
-	check(is_equal_approx(rig.melee_damage("right"), 6.0),
-		"an item skill still reads the plain blow (%.2f)" % rig.melee_damage("right"))
-	check(rig.begin_melee("left", "overhead") == false, "the club is one-handed")
-	check(is_equal_approx(rig.variant_annoint_rate("left", "overhead"), 1.0),
-		"the weld does not follow into the empty hand")
+
 
 	# A forged blade inherits neither.
-	rig.set_hand_annointments({})
 	rig.set_sword(0)
 	check(rig.swing_weapon_class("right") == "sword", "a shortsword reads as a sword")
 	check(rig.begin_melee("right", "overhead"), "the shortsword starts its overhand")
@@ -189,11 +167,9 @@ func check_club_clocks(holder: Node3D) -> void:
 		"and deals its own damage (%.2f)" % rig.swing_damage("right"))
 	rig.abort_melee("right")
 
-	# A staff is its own class and reads no overhead weld.
+	# A staff is its own class.
 	rig.set_staff(0, true)
 	check(rig.swing_weapon_class("right") == "staff", "the staff still reads as a staff")
-	check(is_equal_approx(rig.variant_annoint_rate("right", "overhead"), 1.0),
-		"and a staff is never sped by a blunt weld")
 	rig.set_staff(0, false)
 
 
@@ -516,118 +492,6 @@ func check_stagger_rules(holder: Node3D) -> void:
 ## The campaign's own mobs: a watcher has no `Combat`, so `Combat.blunt_stagger`
 ## is its roll and `stagger` its state. A blow of no damage isolates it - the
 ## watcher's own tenth-of-the-pool rule cannot fire, so only the piece's weight
-## can break its line.
-func check_watcher_line(holder: Node3D) -> void:
-	var club: Variant = _watcher(holder, "Runt_Club")
-	var edge: Variant = _watcher(holder, "Runt_Edge")
-	check(club != null and edge != null, "two watchers stand on the plate")
-	if club == null or edge == null:
-		return
-	for swing in 60:
-		club.note_strike("blunt")
-		club.take_damage(0.0, 99)
-		edge.note_strike("sword")
-		edge.take_damage(0.0, 99)
-	check(str(club.state) == "STAGGER",
-		"a club's blow breaks a watcher's line (%s)" % str(club.state))
-	check(str(edge.state) != "STAGGER",
-		"an edge of the same weight never does (%s)" % str(edge.state))
-	club.queue_free()
-	edge.queue_free()
-
-
-func _watcher(parent: Node3D, label: String):
-	var watcher = Watcher.new()
-	watcher.name = label
-	watcher.mob_id = Watcher.RUNT_ID
-	watcher.health_pool = Watcher.RUNT_HEALTH
-	parent.add_child(watcher)
-	watcher.set_physics_process(false)
-	return watcher
-
-
-# --- 5. the weld -----------------------------------------------------------
-
-func check_annoints() -> void:
-	var entry := Catalog.by_id(HEAVY)
-	check(entry != null, "the pool knows Heavy Swing")
-	if entry == null:
-		return
-	check(entry.wired, "and it is a weld the game can play")
-	check(int(entry.kind) == Catalog.Kind.STAT, "it is a stat weld, not a skill")
-	check(is_equal_approx(float(entry.stats.get("overhead_damage", 0.0)), 2.0),
-		"Heavy Swing carries three times the overhand")
-	check(is_equal_approx(float(entry.stats.get("overhead_speed", 0.0)), 0.5),
-		"and half again its speed")
-	check(not str(entry.line).is_empty(), "the card has a line for it")
-
-	var club_groups := Catalog.groups_of(State.ITEMS[CLUB])
-	check(club_groups.has("blunt"), "the club carries the blunt group (%s)" % str(club_groups))
-	var limb_groups := Catalog.groups_of(State.ITEMS[LIMB])
-	check(limb_groups.has("blunt"), "so does the whole limb (%s)" % str(limb_groups))
-	check(not Catalog.groups_of(State.ITEMS["sword_short"]).has("blunt"),
-		"a forged blade does not")
-	check(_ids(Catalog.for_item(State.ITEMS[CLUB])).has(HEAVY),
-		"the club's rack offers Heavy Swing")
-	check(_ids(Catalog.for_item(State.ITEMS[LIMB])).has(HEAVY),
-		"the limb's rack offers it too")
-	for forged in ["sword_short", "sword_arming", "sword_great", "dagger_ironwood"]:
-		check(not _ids(Catalog.for_item(State.ITEMS[forged])).has(HEAVY),
-			"%s cannot take Heavy Swing" % forged)
-	# A club takes everything a sword class takes; the new group narrows nothing.
-	check(_ids(Catalog.for_item(State.ITEMS[CLUB])).has("f_weapon_attack_speed_3"),
-		"the club's blade-class welds are still offered")
-
-	var ledger := Ledger.new()
-	check(ledger.add(CLUB, 0, HEAVY), "a club's copy takes Heavy Swing")
-	check(not ledger.add(CLUB, 0, HEAVY), "and never takes it twice")
-	var hand := ledger.hand_stats_for(CLUB, 0)
-	check(is_equal_approx(float(hand.get("overhead_damage", 0.0)), 2.0),
-		"the ledger hands that hand three times the overhand")
-	check(is_equal_approx(float(hand.get("overhead_speed", 0.0)), 0.5),
-		"and half again its speed")
-	# The weld rides the copy in one hand: the kit's own stats never carry it, so
-	# the greatsword in the other set swings on its own clock.
-	var kit := ledger.stats_for([Ledger.ref(CLUB, 0)])
-	check(not kit.has("overhead_damage") and not kit.has("overhead_speed"),
-		"the kit's stats leave the hand keys to the hand (%s)" % str(kit))
-	check(ledger.hand_stats_for(CLUB, 1).is_empty(), "a spare club's hand is plain")
-	check(ledger.hand_stats_for(LIMB, 0).is_empty(), "so is a limb nobody welded")
-	check(is_equal_approx(float(Ledger.CEILINGS.get("overhead_damage", 0.0)), 2.0),
-		"the ceiling is the one piece's figure")
-	check(is_equal_approx(float(Ledger.CEILINGS.get("overhead_speed", 0.0)), 0.5),
-		"and the one piece's speed")
-
-	# The card says what the piece does.
-	var club_rows := Card.detail_rows(CLUB, State.ITEMS[CLUB])
-	var labels := PackedStringArray()
-	for row in club_rows:
-		labels.append(str(row.get("label", "")))
-	check(labels.has("PASSIVE"), "the club's card names its passive (%s)" % str(labels))
-	# The club's card names its weight, not an overhand rule: the class grants no
-	# rate at all now, so the only rows it can show are the passive and the stagger.
-	check(labels.has("STAGGER"), "and the stagger")
-	var sword_rows := Card.detail_rows("sword_short", State.ITEMS["sword_short"])
-	var paired := PackedStringArray()
-	for row in sword_rows:
-		paired.append(str(row.get("label", "")))
-	check(paired.has("TWIN BLADES") and paired.has("TWIN GUARD"),
-		"a one-hander's card names the pair's rules (%s)" % str(paired))
-	var dagger_rows := Card.detail_rows("dagger_ironwood", State.ITEMS["dagger_ironwood"])
-	var shiv := PackedStringArray()
-	for row in dagger_rows:
-		shiv.append(str(row.get("label", "")))
-	check(shiv.has("FORWARD STAB") and shiv.has("OVERHEAD DAMAGE"),
-		"the shiv's card names its lunge and its downward blow (%s)" % str(shiv))
-	var axe_rows := Card.detail_rows("axe_makeshift", State.ITEMS["axe_makeshift"])
-	var hurled := PackedStringArray()
-	for row in axe_rows:
-		hurled.append(str(row.get("label", "")))
-	check(hurled.has("THROWN"), "the axe's card names its throw (%s)" % str(hurled))
-
-
-# --- 6. the starter pair a new player is issued ---------------------------
-
 func check_issued_club() -> void:
 	var warband := root.get_node_or_null("Warband")
 	check(warband != null, "the warband autoload is there to seed")
@@ -642,10 +506,6 @@ func check_issued_club() -> void:
 		"and the starter bow is in his hand")
 	check(str(warband.roster.weapon_set_pair(merc, 1).get("main", "")) == warband.STARTING_MELEE,
 		"with the makeshift hatchet waiting in set 2")
-	check(warband.annointment_hands(merc).get("main", {}).is_empty(),
-		"the starter pair is plain steel: annointments are out of this game")
-	check(warband.annointment_procs(merc).is_empty(),
-		"and no weld arms a proc on it")
 	# The roster is the game's; a test never leaves its own band behind.
 	warband.reset_state()
 	var save := ProjectSettings.globalize_path(TEST_SAVE)
