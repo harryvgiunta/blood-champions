@@ -199,6 +199,31 @@ func tree_trunk_scenarios() -> void:
 	query.transform = actor.cover._collider.global_transform
 	check(scene.get_world_3d().direct_space_state.intersect_shape(query,1).is_empty(),
 		"and the standing capsule is outside the bark, not buried in the flare")
+	# The report "some trees make you crouch": walking into the bark without a
+	# press must leave the body standing. What it leans on is beside it; a crouch
+	# is the room above its head being taken, and a trunk has none of that.
+	await relocate(Vector3(0,0,20.0-footprint-3.0))
+	await drive(90,Vector2(0,1))
+	check(actor.is_on_floor() and not actor.cover.crouched and actor.cover._can_stand(),
+		"walking into a trunk leaves the body standing (it crouched at %.2f m)"
+		% Vector2(actor.position.x,actor.position.z-20.0).length())
+	# The same report with a round prop: a ball the body walks into at chest height
+	# is beside it, not over its head, and must not fold it either.
+	var ball := StaticBody3D.new()
+	ball.position = Vector3(8, 1.05, 12)
+	ball.collision_layer = 1
+	ball.collision_mask = 0
+	var ball_collider := CollisionShape3D.new()
+	var ball_shape := SphereShape3D.new()
+	ball_shape.radius = 0.85
+	ball_collider.shape = ball_shape
+	ball.add_child(ball_collider)
+	scene.add_child(ball)
+	await relocate(Vector3(8,0,16))
+	await drive(90,Vector2(0,-1))
+	check(actor.is_on_floor() and not actor.cover.crouched and actor.cover._can_stand(),
+		"a round prop the body leans on does not fold it into a crouch")
+	ball.queue_free()
 	body.queue_free()
 	await drive(3)
 
@@ -665,8 +690,17 @@ func run() -> void:
 	check(not actor.combat.begin_melee() and actor.cover.active,"A cooldown-rejected melee input does not break cover")
 	actor.combat.melee_progress = 1.0
 	actor.combat.grounded = false
-	check(not actor.combat.begin_melee() and actor.cover.active,"An airborne-rejected melee input does not break cover")
+	check(actor.combat.begin_melee() and not actor.cover.active and actor.rig.phase=="MELEE",
+		"A cut thrown in the air is accepted and leaves cover")
+	# Back on the floor and out of that swing for the walled case below.
+	actor.combat.stop()
+	actor.rig.set_weapon("sword")
+	actor.rig.set_sword(2)
 	actor.combat.grounded = true
+	actor.combat.melee_progress = 1.0
+	check(actor.cover.try_enter(Vector3.FORWARD),"A fresh press takes the wall again")
+	await drive(20)
+	check(actor.cover.active and actor.rig.phase=="READY","and the body settles back behind it")
 	actor.combat.set_aim(actor.position+Vector3(0,1.2,-12))
 	check(actor.combat.begin_melee() and not actor.cover.active and actor.rig.phase=="MELEE","Even the solid middle of a tall wall permits an immediate melee exit")
 	await drive(3)

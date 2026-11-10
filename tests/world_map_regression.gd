@@ -22,6 +22,7 @@ extends SceneTree
 const RunForest = preload("res://scripts/warband/run_forest.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const MapScript = preload("res://scripts/warband/world_map.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 const SignKit = preload("res://scripts/world/sign_kit.gd")
 const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 
@@ -521,10 +522,13 @@ func run() -> void:
 	var paused_before: bool = paused
 	map.close()
 	check(not map.is_open() and not map.visible, "closing the page puts it away")
-	# The headless display server has no pointer to capture, so the capture is only
-	# asserted where there is one; the visible half above holds in both.
-	if DisplayServer.get_name() != "headless":
-		check(Input.mouse_mode == Input.MOUSE_MODE_CAPTURED, "the pointer is captured again")
+	# Closing asks the gate for the pointer, and a process that is headless or
+	# not in front is refused: the desktop's cursor never gets warped into a
+	# window that is not the one the player is working in.
+	check(not PointerGate.can_capture(),
+		"an unattended or background process may not capture the pointer")
+	check(Input.mouse_mode == Input.MOUSE_MODE_VISIBLE,
+		"closing the page never takes the pointer from the window in front")
 	check(paused == paused_before, "the map never stops the wood")
 	map.toggle()
 	check(map.is_open(), "the toggle opens it")

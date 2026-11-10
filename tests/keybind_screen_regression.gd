@@ -19,7 +19,7 @@ const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 ## The keys the campaign actually reads. Every one of them must be washed blood:
 ## a controls sheet that leaves a live key as dead bone is the one lie it can tell.
 const BOUND := ["W", "A", "S", "D", "SHIFT", "SPACE", "C", "TAB", "F1", "F5",
-	"LMB", "RMB", "WHEEL", "T", "Q", "E", "R", "G", "K", "P", "O", "M", "B", "ESC"]
+	"LMB", "RMB", "WHEEL", "T", "Q", "E", "R", "G", "K", "I", "O", "M", "B", "ESC"]
 
 var checks := 0
 var failures := 0
@@ -66,7 +66,7 @@ func _check_board() -> void:
 	var lit: Array[String] = page.lit_keys()
 	for token in BOUND:
 		check(lit.has(token), "%s is one of the lit keys (%s)" % [token, str(lit)])
-	check(not lit.has("Z") and not lit.has("Y") and not lit.has("9"),
+	check(not lit.has("Z") and not lit.has("Y") and not lit.has("9") and not lit.has("P"),
 		"a key with no action is left dead bone (%s)" % str(lit))
 
 	# One arrowhead per action key, each ending on its own label.

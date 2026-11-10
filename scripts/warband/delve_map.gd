@@ -22,6 +22,7 @@ const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Rock = preload("res://scripts/warband/delve_rock.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 const TITLE := "THE WEEPING HOLLOW  \u00b7  FLOOR I"
 const SUBTITLE := "SIX ROPES ROUND GOREHORN'S LAIR  \u00b7  THE DEEP SIDE IS UP"
@@ -98,7 +99,8 @@ func close() -> void:
 		return
 	_open = false
 	visible = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Refused unless this window is in front and engaged; see `pointer_gate.gd`.
+	PointerGate.capture()
 	set_process(false)
 
 

@@ -24,7 +24,7 @@ extends SceneTree
 ##     or a squadmate - lands in the inventory and never in the stash; a right
 ##     click takes a whole body and the steel beside it and dresses nobody;
 ##   * a den sleeps until a body is in its room, then joins the hostile list whole,
-##     and falls leaving a thin share of its kit; anointed steel off a body wakes
+##     and falls leaving a thin share of its kit; steel off a body is plain.
 ##     its skill as it is taken;
 ##   * a member who dies below keeps his kit on his body, booked for nobody and
 ##     left alone by the squad, until a right click takes it back;
@@ -1045,11 +1045,8 @@ func check_den_and_loot() -> void:
 	var inventory_before: int = warband.delve.inventory.pooled_total()
 	var victim = den[0]
 	# The table's rare finds, put on the first body by hand so every run has them:
-	# a piece of Ritual Tallow to carry up to the wallet, and steel already
-	# anointed in its hand.
+	# a piece of Ritual Tallow to carry up to the wallet, and its own steel.
 	victim.carried.append("cruor_t1")
-	var anointed_id := str(victim.weapon_item)
-	victim.weapon_anointed = true
 	var kit_before := 0
 	for mob in den:
 		kit_before += (mob.gear_items() as Array).size()
@@ -1070,12 +1067,6 @@ func check_den_and_loot() -> void:
 			kit_after += 1
 	check(kit_after > 0 and kit_after * 2 < kit_before,
 		"the den leaves a thin share of its kit (%d of %d pieces)" % [kit_after, kit_before])
-	var marked := false
-	for pickup in game.loot.pickups():
-		if bool(pickup.anointed) and str(pickup.item_id) == anointed_id:
-			marked = true
-	check(marked, "the anointed steel falls as an anointed drop (%s)" % anointed_id)
-	check(not warband.cruor.is_anointed(anointed_id), "and nothing is awake before it is taken")
 	var corpse_id: int = game.loot.corpse_at(victim.global_position, 1.0)
 	check(corpse_id != 0, "a fallen watcher is a body to search")
 	_soul_to(soul, victim.global_position + Vector3(1.2, 0.12, 0.0))
@@ -1098,13 +1089,10 @@ func check_den_and_loot() -> void:
 			whole = false
 	check(whole and not game.loot.has_corpse(corpse_id),
 		"a right click takes everything on the body (%s of %s)" % [str(took), str(on_body)])
-	check(took.has(anointed_id), "and the steel that fell beside it")
 	check(warband.roster.worn_entries(soul_merc) == worn_before, "none of it goes onto the body that took it")
 	check(warband.delve.inventory.pooled_total() == inventory_before + took.size(),
 		"every piece lands in the delve inventory (%d -> %d)" % [inventory_before,
 			warband.delve.inventory.pooled_total()])
-	check(warband.cruor.is_anointed(anointed_id),
-		"taking the anointed steel wakes its skill for the warband (%s)" % anointed_id)
 	check(warband.stash.pooled_map() == stash_before, "the town stash did not move while below")
 	check(not game.loot_feed.lines().is_empty(), "the looted list names what came up (%s)" % str(game.loot_feed.lines()))
 	check(game.loot_feed.header_text().contains("DELVE INVENTORY"), "and the delve's line heads it")

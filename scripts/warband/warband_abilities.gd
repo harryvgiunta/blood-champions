@@ -15,6 +15,7 @@ extends Node
 
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
+const AbilitySignatures = preload("res://scripts/ability_signatures.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const SpellProjectile = preload("res://scripts/spell_projectile.gd")
@@ -32,11 +33,22 @@ const MAX_MISSILES := 32
 ## Cold steel, one shade brighter than a plain cut: the necklace's waves and the
 ## glow they leave on both blades.
 const WAVE_TINT := Color("eef5ff")
+## The skill poison's tick: a quarter-second, the cadence the run's own bleeds,
+## wounds and zones use, so a 5 dps dose reads as five points a second instead of
+## a hundred tiny numbers.
+const POISON_TICK := 0.25
+## The bloom a poisoned body gives off - the altar's poison row uses the same
+## green, so the two doses read as one mechanic.
+const POISON_TINT := Color("7ee06a")
 
 var _world: Node3D
 var _controller
 var _bodies: Array = []
 var _missiles: Array = []
+## Laid doses: `{target, dps, left, clock, source, run}`. One per body, refreshed
+## rather than stacked, and ticked by this node so a dose outlives the
+## activation that laid it.
+var _venoms: Array = []
 
 
 ## Wire the node to the world it spawns into. The controller is kept because a
@@ -103,13 +115,26 @@ func _on_cue(id: String, cue: String, index: int, actor) -> void:
 		return
 	var effect: Dictionary = definition.get("effect", {})
 	var damage: float = AbilityRules.damage_for(definition, rig)
+	# The beat's own art first, from the shared signature table: every skill draws
+	# its own shape on the line the scene has already solved, before the damage
+	# branch below spends the hit. A skill with no signature is reported by
+	# `AbilitySignatures.missing_signatures()`, never silently skipped.
+	var aim: Vector3 = runner.combat.aim_point if is_instance_valid(runner.combat) \
+		else rig.global_position - rig.global_basis.z
+	var forward: Vector3 = aim - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	AbilitySignatures.cue(_fx_parent(), rig, definition, cue, index,
+		forward.normalized(), aim)
 	match str(effect.get("kind", "")):
 		"barrage", "volley", "piercing_shot":
 			_fire_arrows(actor, runner, definition, index, damage)
 		"projectile":
 			_launch_spell(actor, runner, definition, damage)
 		"backstab":
-			_backstab(actor, cue, damage)
+			_backstab(actor, runner, cue, damage)
 		"melee_arc", "melee_ring":
 			_melee(actor, runner, definition, cue, index, damage)
 		"melee_wave":
@@ -170,13 +195,41 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 		base = -rig.global_basis.z
 	var profile: Dictionary = Archer.BOW_DATA[
 		clampi(int(rig.bow_index), 0, Archer.BOW_DATA.size() - 1)]
+	var family := AbilityRules.type_of(definition)
+	var run = actor.get("roguelite")
+	var base_damage := damage
 	var speed := float(profile.speed) * float(effect.get("arrow_speed_scale", 1.0))
 	var pierce := int(effect.get("pierce", 0))
 	var shots := int(effect.get("shots", 1)) if kind == "volley" else 1
+	var split := 0
+	var extra := 0
+	var bounces := 0
+	var homing := 0.0
+	var spiral := false
+	var plan: Dictionary = {}
+	if run != null:
+		plan = run.spell_plan(base_damage, family)
+		base_damage = float(plan.get("damage", base_damage))
+		speed *= float(plan.get("speed", 1.0))
+		pierce += int(plan.get("pierce", 0))
+		bounces = int(plan.get("bounces", 0))
+		homing = float(plan.get("homing", 0.0))
+		split = int(run.ability_arrow_split(family)) if run.has_method("ability_arrow_split") else 0
+		extra = 1 if run.has_method("ability_extra_arrow") and run.ability_extra_arrow(family) else 0
+		spiral = run.has_method("ability_spiral") and run.ability_spiral(family)
+	var total := shots + split + extra + (1 if runner.take_recast() else 0)
+	# A skill may author a venom: the shaft is the dose, so every arrow this beat
+	# looses lays it on the body it opens. The run's own on-hit chain stays behind
+	# it - a poison is a second thing the hit does, never a replacement.
+	var poison_dps := float(effect.get("poison_dps", 0.0))
+	var poison_seconds := float(effect.get("poison_seconds", 0.0))
+	var on_hit: Callable = run.hit_hook() if run != null else Callable()
+	if poison_dps > 0.0 and poison_seconds > 0.0:
+		on_hit = _poisoned(on_hit, run, poison_dps, poison_seconds, int(actor.slot))
 	var excluded: Array[RID] = []
 	if actor is CollisionObject3D:
 		excluded.append(actor.get_rid())
-	for shot in shots:
+	for shot in total:
 		# A skill looses arrows like a bow does: one shaft out of the party quiver
 		# each. A volley that outruns the quiver fires only what is left in it, so
 		# no skill can spend the count past zero.
@@ -186,22 +239,31 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 		var pattern_index := index if kind == "barrage" else shot
 		var offsets: Vector2 = AbilityFx.shot_offsets(definition, pattern_index)
 		var direction := AbilityFx.rotate_direction(base, offsets.x, offsets.y)
+		var arrow_damage := base_damage
+		# Split Fletching pays 25% for the extra shafts; an extra arrow from
+		# Double Nock and a recast pay in full.
+		if shot >= shots and shot < shots + split:
+			arrow_damage *= 0.25
 		var arrow := Arrow.new()
 		arrow.source_id = int(actor.slot)
 		arrow.shooter = actor
 		arrow.hit_mask = TARGET_MASK
 		arrow.authoritative_damage = true
-		var run = actor.get("roguelite")
-		if run != null:
-			var plan: Dictionary = run.spell_plan(damage)
-			damage = float(plan.get("damage", damage))
-			arrow.crit = bool(plan.get("crit", false))
-			arrow.proc_coeff = float(plan.get("proc", 1.0))
-			arrow.on_hit = run.hit_hook()
+		arrow.crit = bool(plan.get("crit", false))
+		arrow.proc_coeff = float(plan.get("proc", 1.0))
+		arrow.bounces = bounces
+		arrow.bounce_scale = run.engine.hop_scale() if run != null else 0.9
+		arrow.homing = homing
+		arrow.spiral = 4.0 if spiral else 0.0
+		arrow.on_hit = on_hit
+		if run != null and run.director != null:
+			arrow.bounce_provider = Callable(run.director, "bounce_target")
+			arrow.homing_provider = Callable(run.director, "nearest_enemy")
+		if run != null and not arrow.impacted.is_connected(run.note_shot_impact):
+			arrow.impacted.connect(run.note_shot_impact)
 		add_child(arrow)
-		arrow.launch(origin, direction, speed, damage, excluded, origin, pierce)
+		arrow.launch(origin, direction, speed, arrow_damage, excluded, origin, pierce)
 		_track(arrow)
-
 
 ## One shaft out of the party quiver, through the world's own spend funnel so the
 ## co-op peers are told about it too. A node with no world behind it - a harness
@@ -224,32 +286,49 @@ func _launch_spell(actor, runner, definition: Dictionary, damage: float) -> void
 	var direction := aim - origin
 	if direction.length_squared() < 0.0001:
 		direction = -rig.global_basis.z
-	var spell := SpellProjectile.new()
-	spell.kind = str(effect.get("projectile", "fireball"))
-	spell.hit_mask = TARGET_MASK
-	spell.shooter = actor
-	spell.authoritative_damage = true
-	# A body fighting a run rolls its staff's damage and on-hit chain exactly as
-	# it rolls a bow's: the spell is one more projectile of the same arsenal.
+	var family := AbilityRules.type_of(definition)
 	var run = actor.get("roguelite")
+	var spell_damage := damage
+	var speed := float(effect.get("speed", 22.0))
+	var pierce := int(effect.get("pierce", 0))
+	var radius := float(effect.get("radius", 0.0))
+	var bounces := 0
+	var plan: Dictionary = {}
 	if run != null:
-		var plan: Dictionary = run.spell_plan(damage)
-		damage = float(plan.get("damage", damage))
+		plan = run.spell_plan(spell_damage, family)
+		spell_damage = float(plan.get("damage", spell_damage))
+		speed *= float(plan.get("speed", 1.0))
+		pierce += int(plan.get("pierce", 0))
+		radius += float(plan.get("radius", 0.0))
+		bounces = int(plan.get("bounces", 0))
+	# A recast is one more orb down the same line. Copies are spawned before the
+	# loop so the runner's flag is consumed once.
+	var copies := 1 + (1 if runner.take_recast() else 0)
+	for _copy in copies:
+		var spell := SpellProjectile.new()
+		spell.kind = str(effect.get("projectile", "fireball"))
+		spell.hit_mask = TARGET_MASK
+		spell.shooter = actor
+		spell.authoritative_damage = true
 		spell.crit = bool(plan.get("crit", false))
 		spell.proc_coeff = float(plan.get("proc", 1.0))
-		spell.on_hit = run.hit_hook()
-	add_child(spell)
-	var excluded: Array[RID] = []
-	if actor is CollisionObject3D:
-		excluded.append(actor.get_rid())
-	spell.launch(origin, direction, float(effect.get("speed", 22.0)), damage,
-		excluded, spell.hit_mask, true, rig.global_position,
-		float(effect.get("radius", 0.0)), int(effect.get("pierce", 0)))
-	spell.source_rig = rig
-	spell.set_meta("stagger", float(effect.get("stagger", 0.0)))
-	spell.detonated.connect(_on_spell_detonated.bind(spell, actor.combat))
-	_track(spell)
-
+		spell.bounces = bounces
+		if run != null:
+			spell.bounce_scale = run.engine.hop_scale()
+			spell.on_hit = run.hit_hook()
+			if run.director != null:
+				spell.bounce_provider = Callable(run.director, "bounce_target")
+		add_child(spell)
+		var excluded: Array[RID] = []
+		if actor is CollisionObject3D:
+			excluded.append(actor.get_rid())
+		spell.launch(origin, direction, speed, spell_damage,
+			excluded, spell.hit_mask, true, rig.global_position,
+			radius, pierce)
+		spell.source_rig = rig
+		spell.set_meta("stagger", float(effect.get("stagger", 0.0)))
+		spell.detonated.connect(_on_spell_detonated.bind(spell, actor.combat))
+		_track(spell)
 
 func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref) -> void:
 	if not is_instance_valid(spell) or not is_instance_valid(combat_ref):
@@ -262,24 +341,17 @@ func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref
 
 # --- backstab --------------------------------------------------------------
 
-## The blink smokes the old spot and, on the authority only, moves the body
-## behind the preflight target; the stab spends the doubled dagger damage on the
-## body the caster is now behind.
-func _backstab(actor, cue: String, damage: float) -> void:
+## The blink moves the body and smokes the spot it lands on; the departure smoke
+## and the flash on the wound are the signature's. The stab spends the doubled
+## dagger damage on the body the caster is now behind.
+func _backstab(actor, runner, cue: String, damage: float) -> void:
 	var rig = actor.rig
 	var target: Node3D = null
 	if actor.has_meta("backstab_target"):
 		var resolved = actor.get_meta("backstab_target")
 		if is_instance_valid(resolved) and resolved is Node3D:
 			target = resolved
-	var forward: Vector3 = actor.combat.aim_point - rig.global_position
-	forward.y = 0.0
-	if forward.length_squared() < 0.0001:
-		forward = -rig.global_basis.z
-		forward.y = 0.0
-	forward = forward.normalized()
 	if cue == "blink":
-		_puff(rig.global_position)
 		if target == null:
 			return
 		var spot: Dictionary = BackstabAbility.behind_spot(_space(), target)
@@ -293,10 +365,13 @@ func _backstab(actor, cue: String, damage: float) -> void:
 	if target == null:
 		target = _backstab_target(actor)
 	if target != null and target.get("alive") != false:
+		var run = actor.get("roguelite")
+		if run != null:
+			damage *= run.ability_damage_multiplier("dagger") \
+				* run.engine.melee_damage_multiplier()
 		BackstabAbility.strike(actor, target, damage, int(actor.slot))
-	if target != null:
-		_fx_call("backstab_flash", [target.global_position - forward * 0.35
-			+ Vector3.UP * 1.15, forward])
+		if target.get("alive") != false and runner.take_recast():
+			BackstabAbility.strike(actor, target, damage * 0.8, int(actor.slot))
 	if actor.has_meta("backstab_target"):
 		actor.remove_meta("backstab_target")
 
@@ -312,62 +387,40 @@ func _backstab_target(actor) -> Node3D:
 # --- melee -----------------------------------------------------------------
 
 ## The blade beats. The hit itself goes through the body's own combat so blocks,
-## armour, blood and damage numbers are the authored swing's; the presentation is
-## the frontier's, one branch per skill shape.
-func _melee(actor, runner, definition: Dictionary, cue: String, index: int,
+## armour, blood and damage numbers are the authored swing's; the art is
+## `AbilitySignatures`, drawn on the same cue before this function spends the hit.
+func _melee(actor, runner, definition: Dictionary, cue: String, _index: int,
 		damage: float) -> void:
 	var effect: Dictionary = definition.get("effect", {})
-	var rig = actor.rig
-	var id := str(definition.get("id", ""))
 	var radius := float(effect.get("radius", 1.7))
 	var arc := float(effect.get("arc_degrees", 360.0))
 	var ring := str(effect.get("kind", "")) == "melee_ring" or arc >= 359.0
-	var forward: Vector3 = runner.combat.aim_point - rig.global_position
-	forward.y = 0.0
-	if forward.length_squared() < 0.0001:
-		forward = -rig.global_basis.z
-		forward.y = 0.0
-	forward = forward.normalized()
-	# The greatsword's wind-up is presentation only: the blade gathers speed
-	# before the ring cue spends the hit.
-	if cue == "wind":
-		_fx_call("blade_trail", [rig, 0.55])
-		return
-	# The lunge's dash beat marks the takeoff with its wake; the thrust cue, not
-	# the dash, spends the hit.
-	if cue == "dash":
-		_fx_call("lunge_wake", [rig, 0.40])
+	# The greatsword's wind-up and the lunge's takeoff are presentation only: the
+	# blade gathers speed before the ring cue spends the hit, and the thrust cue,
+	# not the dash, is the blow.
+	if cue == "wind" or cue == "dash":
 		return
 	# A travelling skill already swept its lane, so the closing beat shares that
 	# victim set and never hits a body the dash passed through twice.
 	var victims: Dictionary = {}
 	if bool(effect.get("path_damage", false)):
 		victims = runner.active_victims
-	runner.combat.ability_strike(radius, arc, damage,
-		float(effect.get("stagger", 0.0)), ring, not ring, victims)
-	if id.begins_with("shield_"):
-		# The shield face is the weapon, so the impact sits on the boss instead
-		# of a crescent that never matched the hands.
-		_fx_call("shield_impact", [rig.global_position + forward * 0.95
-			+ Vector3.UP * 1.05, forward, radius, id == "shield_slam"])
-		if ring:
-			_fx_call("ground_shockwave", [rig.global_position, radius])
-		return
-	if ring:
-		_fx_call("spin_burst", [rig.global_position, radius])
-		_fx_call("blade_trail", [rig, 0.30])
-	elif id == "double_slash":
-		_fx_call("blade_trail", [rig, 0.24])
-	elif id == "lunge_thrust":
-		_fx_call("blade_trail", [rig, 0.18])
-	else:
-		var cues: Array = definition.get("cues", [])
-		var alternate := 1.0 if index % 2 == 0 else -1.0
-		if cues.size() <= 1:
-			alternate = 0.0
-		_fx_call("slash_arc", [rig.global_position,
-			forward.rotated(Vector3.UP, 0.32 * alternate), radius,
-			minf(arc, 200.0), AbilityFx.STEEL])
+	var run = actor.get("roguelite")
+	var family := AbilityRules.type_of(definition)
+	var strike_damage := damage
+	var extra := 0
+	if run != null:
+		strike_damage *= run.ability_damage_multiplier(family) \
+			* run.engine.melee_damage_multiplier()
+		extra = run.ability_cleave(family)
+	runner.combat.ability_strike_cleave(radius, arc, strike_damage,
+		float(effect.get("stagger", 0.0)), ring, not ring, victims, extra)
+	# Echo Cast pays a second beat at the same reach, through a fresh victim set
+	# so the recast is a real second cut and not a no-op against the first one.
+	if runner.take_recast():
+		runner.combat.ability_strike_cleave(radius, arc, strike_damage * 0.8,
+			float(effect.get("stagger", 0.0)), ring, not ring, {}, extra)
+
 
 
 # --- the three-strike wave -------------------------------------------------
@@ -383,39 +436,27 @@ func _melee_wave(actor, runner, definition: Dictionary, cue: String, index: int,
 	if cue != "wave":
 		return
 	var effect: Dictionary = definition.get("effect", {})
-	var rig = actor.rig
 	var scales: Array = effect.get("wave_scales", [])
-	var sides: Array = effect.get("wave_sides", [])
 	var share := float(scales[index]) if index < scales.size() else 1.0
-	var side := float(sides[index]) if index < sides.size() else 1.0
 	var radius := float(effect.get("radius", 2.4))
 	var arc := float(effect.get("arc_degrees", 130.0))
 	var per_wave := int(effect.get("victims_per_wave", 3))
-	var forward: Vector3 = runner.combat.aim_point - rig.global_position
-	forward.y = 0.0
-	if forward.length_squared() < 0.0001:
-		forward = -rig.global_basis.z
-	forward = forward.normalized()
-	runner.combat.ability_strike(radius, arc, damage * share,
-		float(effect.get("stagger", 0.0)), false, true, {}, per_wave)
-	# The wave leaves the blades: a crescent that sweeps through the arc it just
-	# cut and a ripple pair that runs out to the same reach, thrown off-centre by
-	# the hand that threw it. `side` turns the sweep the way the cut travels, so
-	# the right blade, the left blade and the two-handed finisher each read.
-	_fx_call("wave_ripple", [rig.global_position, forward, radius, arc, side,
-		WAVE_TINT])
-	# The light follows the blade that threw the wave: the right hand, the left,
-	# or both together on the finisher. A hand with nothing to swing trails
-	# nothing.
-	var hands: Array[String] = []
-	if is_zero_approx(side):
-		hands.assign(["right", "left"])
-	else:
-		hands.assign(["right" if side > 0.0 else "left"])
-	for hand in hands:
-		if str(rig.swing_weapon_class(hand)).is_empty():
-			continue
-		_fx_call("blade_trail_hand", [rig, 0.20, hand])
+	var run = actor.get("roguelite")
+	var family := AbilityRules.type_of(definition)
+	var strike_damage := damage * share
+	var extra := 0
+	if run != null:
+		strike_damage *= run.ability_damage_multiplier(family) \
+			* run.engine.melee_damage_multiplier()
+		extra = run.ability_cleave(family)
+	runner.combat.ability_strike(radius, arc, strike_damage,
+		float(effect.get("stagger", 0.0)), false, true, {}, per_wave + extra)
+	if index == 0 and runner.take_recast():
+		runner.combat.ability_strike(radius, arc, strike_damage * 0.8,
+			float(effect.get("stagger", 0.0)), false, true, {}, per_wave + extra)
+	# The wave's art is `AbilitySignatures`': a crescent through the arc it just cut
+	# and a ripple pair out to the same reach, turned by the hand that threw it,
+	# plus a ribbon on every blade that swung.
 
 
 ## Both weapons lit for the length of the skill: the held steel burns cold for
@@ -429,6 +470,9 @@ func _weapon_glow(actor, seconds: float) -> void:
 		return
 	if not rig.has_method("get_blade_base") or not rig.has_method("swing_weapon_class"):
 		return
+	var parent := _fx_parent()
+	if parent == null:
+		return
 	var hold := clampf(seconds, 0.2, 2.0)
 	var lit := AbilityFx.glow_material(WAVE_TINT, 2.6, 0.9)
 	for hand in ["right", "left"]:
@@ -437,7 +481,7 @@ func _weapon_glow(actor, seconds: float) -> void:
 			continue
 		# The beat that lights a blade also leaves its ribbon, so a dual pair
 		# reads as two blades working for the whole skill.
-		_fx_call("blade_trail_hand", [rig, hold, hand])
+		AbilityFx.blade_trail(parent, rig, hold, AbilityFx.STEEL, hand)
 		var light := AbilityFx.flash_light(WAVE_TINT, 1.8, 1.6)
 		rig.add_child(light)
 		light.position = rig.to_local(rig.get_blade_base(hand))
@@ -457,41 +501,96 @@ func _weapon_glow(actor, seconds: float) -> void:
 						mesh.material_override = previous)
 
 
-# --- helpers ---------------------------------------------------------------
+# --- the venom -------------------------------------------------------------
 
-## One `AbilityFx` beat with the world as its parent. The FX helpers add Node3D
-## children, so a missing world (a bare test harness) silently skips the show
-## instead of erroring on a `Node` parent. The dispatch is spelled out because
-## these are static functions on a script resource, not methods of an object.
-func _fx_call(method: String, args: Array) -> void:
+## The poison's own clock. One quarter-second beat, on the only node every skill's
+## cue passes through, so a dose keeps working after its skill has finished and
+## the arena and the run tick it the same way. A guest never lays a dose - the
+## arrow's `on_hit` is the authority's - so its list stays empty.
+func _physics_process(delta: float) -> void:
+	if _venoms.is_empty():
+		return
+	var keep: Array = []
+	for entry in _venoms:
+		var venom: Dictionary = entry
+		var target = venom.get("target")
+		if target == null or not is_instance_valid(target) \
+				or target.get("alive") == false:
+			continue
+		var dps := float(venom.get("dps", 0.0))
+		var left := float(venom.get("left", 0.0))
+		var clock := float(venom.get("clock", 0.0)) + maxf(delta, 0.0)
+		while clock >= POISON_TICK and left > 0.0 and dps > 0.0:
+			clock -= POISON_TICK
+			var step := minf(left, POISON_TICK)
+			left -= step
+			if target.has_method("take_damage"):
+				target.take_damage(dps * step, int(venom.get("source", -1)), false)
+			# A body the venom put down is credited like any other kill of the
+			# run's: the dose is the blow that finished it.
+			if target.get("alive") == false:
+				var run = venom.get("run")
+				if run != null and is_instance_valid(run) \
+						and run.has_method("proc_hit"):
+					run.proc_hit(target, true, dps * step)
+				left = 0.0
+		if left <= 0.0:
+			continue
+		venom["left"] = left
+		venom["clock"] = clock
+		keep.append(venom)
+	_venoms = keep
+
+
+## The shot's landing, with the skill's venom laid on the body it opens. The
+## wrapped hook is the arrow's own `on_hit`, so the run's on-hit chain still
+## resolves first and a poisoned starter reads as the same shot plus a dose.
+func _poisoned(inner: Callable, run, dps: float, seconds: float,
+		source: int) -> Callable:
+	return func(target, at: Vector3, damage: float, crit: bool,
+			proc: float) -> void:
+		if inner.is_valid():
+			inner.call(target, at, damage, crit, proc)
+		_lay_poison(target, at, dps, seconds, source, run)
+
+
+## One dose on one body. A second dose refreshes the clock and only ever raises
+## the rate, so the figure the skill advertises is what the body loses each
+## second rather than a stack of twin poisons.
+func _lay_poison(target, at: Vector3, dps: float, seconds: float, source: int,
+		run) -> void:
+	if dps <= 0.0 or seconds <= 0.0:
+		return
+	if target == null or not is_instance_valid(target):
+		return
+	if not target.has_method("take_damage") or target.get("alive") == false:
+		return
+	var left := maxf(seconds, POISON_TICK)
+	for entry in _venoms:
+		var venom: Dictionary = entry
+		if venom.get("target") != target:
+			continue
+		venom["dps"] = maxf(float(venom.get("dps", 0.0)), dps)
+		venom["left"] = maxf(float(venom.get("left", 0.0)), left)
+		venom["source"] = source
+		if run != null:
+			venom["run"] = run
+		_poison_bloom(at, 0.55)
+		return
+	_venoms.append({"target": target, "dps": dps, "left": left, "clock": 0.0,
+		"source": source, "run": run})
+	_poison_bloom(at, 1.0)
+
+
+## The green bloom at the wound. Presentation only: nothing here reads health.
+func _poison_bloom(at: Vector3, scale: float) -> void:
 	var parent := _fx_parent()
 	if parent == null:
 		return
-	match method:
-		"blade_trail":
-			AbilityFx.blade_trail(parent, args[0], float(args[1]))
-		"blade_trail_hand":
-			AbilityFx.blade_trail(parent, args[0], float(args[1]), AbilityFx.STEEL,
-				str(args[2]))
-		"lunge_wake":
-			AbilityFx.lunge_wake(parent, args[0], float(args[1]))
-		"smoke_puff":
-			AbilityFx.smoke_puff(parent, args[0], float(args[1]), bool(args[2]))
-		"shield_impact":
-			AbilityFx.shield_impact(parent, args[0], args[1], float(args[2]), bool(args[3]))
-		"ground_shockwave":
-			AbilityFx.ground_shockwave(parent, args[0], float(args[1]))
-		"spin_burst":
-			AbilityFx.spin_burst(parent, args[0], float(args[1]))
-		"slash_arc":
-			AbilityFx.slash_arc(parent, args[0], args[1], float(args[2]),
-				float(args[3]), args[4])
-		"wave_ripple":
-			AbilityFx.wave_ripple(parent, args[0], args[1], float(args[2]),
-				float(args[3]), float(args[4]), args[5])
-		"backstab_flash":
-			AbilityFx.backstab_flash(parent, args[0], args[1])
+	AbilityFx.burst(parent, at, POISON_TINT, clampf(scale, 0.4, 1.2))
 
+
+# --- helpers ---------------------------------------------------------------
 
 func _fx_parent() -> Node3D:
 	if _world != null and is_instance_valid(_world):
@@ -509,8 +608,10 @@ func _space() -> PhysicsDirectSpaceState3D:
 	return world.direct_space_state
 
 
+## The blink's arrival smoke. The departure burst and every other beat belong to
+## `AbilitySignatures`; a missing world (a bare test harness) skips the show.
 func _puff(at: Vector3) -> void:
-	_fx_call("smoke_puff", [at, 1.0, true])
+	AbilityFx.smoke_puff(_fx_parent(), at, 1.0, true)
 
 
 ## Keep the missile list valid and bounded: a shot that freed itself (an impact,

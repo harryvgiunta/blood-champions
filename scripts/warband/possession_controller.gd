@@ -46,6 +46,11 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
+## How long a held fire button waits before it asks for a dropped draw again.
+## Long enough that a guest's round trip lands first, short enough to read as the
+## bow coming straight back up after a roll.
+const DRAW_RESUME_RETRY := 0.2
+
 ## The peer whose soul this process owns. 1 is the host, matching ENet.
 var local_peer_id := 1
 ## The eye of the soul. Rebuilt in `setup`.
@@ -108,6 +113,10 @@ var _tick := 0
 var _query := PhysicsRayQueryParameters3D.new()
 var _last_step_frame := -1
 var _drawing := false
+## Seconds until a held fire button may ask for the draw again, so a refused draw
+## (an empty quiver) or a guest waiting on the host's phase is not re-sent every
+## frame. `_resume_draw` is the only reader.
+var _draw_retry := 0.0
 var _throw_held := false
 ## Which side the next one-handed cut starts from; the locals alternate.
 var _next_swing_side := 1
@@ -143,8 +152,6 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_state_changed.connect(_on_body_state_changed)
 		if not _warband.souls.body_unregistered.is_connected(_on_body_unregistered):
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
-		if not _warband.anointed.is_connected(_on_piece_anointed):
-			_warband.anointed.connect(_on_piece_anointed)
 		# Welding an annointment changes the copy's steel: the body holding it is
 		# dressed again, so the marks and the modifiers both land now and not at
 		# the next spawn.
@@ -278,11 +285,10 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 		},
 	}
 	var annoints := _warband_annoints(merc_id)
-	# The player's own key order rides beside the kit: it changes the slot a
-	# skill fires from, never which skills the kit grants.
-	SeatLoadout.apply(actor.rig, loadout,
-		_warband.cruor.anointed_among([main_id, off_id]), annoints,
-		_warband.roster.hotbar_order_of(merc_id))
+	# The player's equipped ability list rides beside the kit. The rig filters it
+	# by the hands it is about to hold, so a stowed weapon's skills wait.
+	SeatLoadout.apply(actor.rig, loadout, annoints,
+		_warband.roster.hotbar_order_of(merc_id), _peer_driven(actor))
 	# The rig holds the stats; the body owns the maxima and the runtime, so it is
 	# told with an empty stat payload (the rig already has them) and the procs.
 	if actor.has_method("apply_annointments"):
@@ -297,7 +303,6 @@ func _warband_annoints(merc_id: int) -> Dictionary:
 	if _warband == null or not _warband.has_method("annointment_stats"):
 		return {}
 	return {"stats": _warband.annointment_stats(merc_id),
-		"skills": _warband.annointment_skills(merc_id),
 		"procs": _warband.annointment_procs(merc_id),
 		"hands": _warband.annointment_hands(merc_id),
 		"marks": _warband.annointment_marks(merc_id)}
@@ -363,6 +368,19 @@ func body_for_peer(peer_id: int) -> Actor:
 func merc_for_peer(peer_id: int) -> int:
 	return merc_of(body_for_peer(peer_id))
 
+
+## Whether a peer is inside this body. It decides one thing: the starter spell is
+## the *player's* key, and a squadmate that casts a three-metre blast every ten
+## seconds is a second caster nobody asked for. A body a player steps into is
+## re-dressed when the soul arrives, so the spell follows the soul.
+func _peer_driven(actor: Actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	for peer_id in possessing_peers():
+		if body_for_peer(int(peer_id)) == actor:
+			return true
+	return false
+
 ## The exact seat loadout applied to a mercenary's rig.
 ## The seat loadout *as it was applied at spawn*. It is the wire shape a scene
 ## registers, not the current kit: once a piece is looted or the paperdoll moves
@@ -381,12 +399,6 @@ func refresh_gear(merc_id: int) -> bool:
 		return false
 	_apply_gear(actor, merc_id)
 	return true
-
-## The altar woke a piece: every body wearing a copy is dressed again, so the
-## skill is on the rig that draws and fires it now rather than at the next spawn.
-func _on_piece_anointed(item_id: String, _ability: String) -> void:
-	_redress_wearers(item_id)
-
 
 ## The altar welded an annointment to a copy: the piece draws a new mark and its
 ## storage is bigger, so every body wearing that copy is dressed again. The signal
@@ -692,6 +704,7 @@ func _step_squad(delta: float) -> void:
 		Perf.begin("soul.drive")
 		_drive(actor)
 		Perf.end()
+		_resume_draw(delta)
 	if _authoritative:
 		for body in _spawned:
 			if not is_instance_valid(body):
@@ -1254,10 +1267,16 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 	match event.button_index:
 		MOUSE_BUTTON_LEFT:
 			if weapon == "bow":
-				_drawing = _act("draw", sample["point"], sample["origin"])
-				# A press that silently does nothing reads as a broken button, so a
-				# draw refused by an empty quiver is said out loud once per press.
-				if not _drawing and actor.combat.quiver_empty():
+				# The button is *held*, which is not the same as the bow being
+				# drawn: a press that lands in the release/recovery window is
+				# refused now and asked for again by `_resume_draw` the frame the
+				# string can come up. Holding through a shot is how a player
+				# keeps firing, and it must never need a second click.
+				_drawing = true
+				if not _act("draw", sample["point"], sample["origin"]) \
+						and actor.combat.quiver_empty():
+					# A press that silently does nothing reads as a broken button,
+					# so an empty quiver is said out loud once per press.
 					draw_refused.emit(local_peer_id)
 			elif weapon == "dual":
 				_melee("left", "diagonal_left", sample)
@@ -1286,6 +1305,34 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 			elif weapon in ["sword", "dagger", "dual"]:
 				var variant := "stab" if event.button_index == MOUSE_BUTTON_WHEEL_UP else "overhead"
 				_melee("right", variant, sample)
+
+## A held fire button is still an intent. A roll, a hand flip, a skill or a guard
+## can drop the string mid-draw - `Combat.stop` cancels the draw on purpose, a
+## committed roll should not carry a nocked arrow - but the player has not let go,
+## so the bow has to come back up by itself. The re-ask is rate limited: a guest
+## learns its body is drawing only when the host's phase arrives, and a draw that
+## is refused (an empty quiver) must not be asked for every frame.
+func _resume_draw(delta: float) -> void:
+	_draw_retry = maxf(0.0, _draw_retry - delta)
+	if not _drawing:
+		return
+	var actor := active_actor
+	if actor == null or not is_instance_valid(actor) or not actor.alive \
+			or bool(actor.get("downed")):
+		_drawing = false
+		return
+	if str(actor.rig.phase) in ["DRAWING", "HOLDING"]:
+		return
+	# `can_draw` already refuses an empty quiver, a stagger, a roll still under
+	# way and every phase that is not READY, so it is the only gate: the retry
+	# clock exists to keep a guest from sending an action every frame while it
+	# waits for the host's phase to come back.
+	if _draw_retry > 0.0 or not actor.combat.can_draw():
+		return
+	_draw_retry = DRAW_RESUME_RETRY
+	var sample := aim_sample()
+	_act("draw", sample["point"], sample["origin"])
+
 
 func _mouse_release(event: InputEventMouseButton) -> void:
 	var actor := active_actor

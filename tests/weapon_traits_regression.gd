@@ -16,6 +16,7 @@ extends SceneTree
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const State = preload("res://scripts/player_state.gd")
 const Catalog = preload("res://scripts/warband/annoint_catalog.gd")
@@ -271,6 +272,22 @@ func check_new_blows(holder: Node3D) -> void:
 		"on its authored second (%.3f s)" % float(rig.melee_seconds("right")))
 	rig.abort_melee("right")
 
+	# The axe's blade skills pay double as well, and only the axe's: the same cut
+	# is priced off the same row whichever hand holds it, but the hafted head
+	# carries weight the other classes do not, exactly as it does when thrown.
+	var cut: Dictionary = AbilityRules.by_id("quick_cut")
+	var axe_cut: float = AbilityRules.damage_for(cut, rig)
+	rig.set_sword(0)
+	var sword_cut: float = AbilityRules.damage_for(cut, rig)
+	rig.set_sword(3)
+	var club_cut: float = AbilityRules.damage_for(cut, rig)
+	check(sword_cut > 0.0, "the cut is priced above zero (%.1f)" % sword_cut)
+	check(is_equal_approx(axe_cut, sword_cut * 2.0),
+		"a blade skill with the axe is worth double (%.1f vs %.1f)"
+		% [axe_cut, sword_cut])
+	check(is_equal_approx(club_cut, sword_cut),
+		"and the blunt tier is priced as the sword is (%.1f)" % club_cut)
+
 
 # --- 3. the weld reaching the hand ----------------------------------------
 ## The production path from the warband's ledger to the rig: `SeatLoadout.apply`
@@ -282,7 +299,7 @@ func check_loadout_hands(holder: Node3D) -> void:
 	rig.set_physics_process(false)
 	var kit := {"main": CLUB, "off": "", "bow": 0, "sword": 3, "armor": 0,
 		"trinkets": {"neck": "", "ring1": "", "ring2": "", "off": ""}}
-	SeatLoadout.apply(rig, kit, [], {"hands": {"main":
+	SeatLoadout.apply(rig, kit, {"hands": {"main":
 		{"overhead_damage": 2.0, "overhead_speed": 0.5}}})
 	check(rig.swing_weapon_class("right") == "blunt",
 		"the loadout dresses the club (%s)" % rig.swing_weapon_class("right"))
@@ -293,7 +310,7 @@ func check_loadout_hands(holder: Node3D) -> void:
 		"and the blow it deals (%.2f)" % rig.swing_damage("right"))
 	rig.abort_melee("right")
 	# A kit dressed with no weld on that hand holds the plain clip again.
-	SeatLoadout.apply(rig, kit, [], {"hands": {"main": {}, "off": {}}})
+	SeatLoadout.apply(rig, kit, {"hands": {"main": {}, "off": {}}})
 	check(rig.begin_melee("right", "overhead"), "the plain club swings again")
 	check(is_equal_approx(float(rig.melee_seconds("right")), 0.9),
 		"and the hand holds no weld (%.3f s)" % float(rig.melee_seconds("right")))

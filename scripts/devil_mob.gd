@@ -393,6 +393,47 @@ func _visual_script():
 	return Visual
 
 
+## How long a body that has just been pointed at a party comes at it at a run.
+## Long enough to cross an island, short enough that a body which has arrived
+## drops the charge and fights on its own state machine.
+const CHARGE_SECONDS := 12.0
+## Seconds of the opening charge left. Counted down by the brain, set by `hunt`.
+var _charge_time := 0.0
+
+
+## Where the opening charge ends: the distance at which this body would rather
+## fight than close. The state machine takes over inside it, so a charge is an
+## arrival and never a new stance. An archer overrides this with its own ring.
+func _charge_reach() -> float:
+	return maxf(1.0, float(profile.get("reach", 2.2)) * 0.85)
+
+
+## Commit to a body and charge it. This is the scene's own verb for a body it has
+## just placed - a wave that lands on an island, a den that opens - and it is the
+## same verb `squad_drive.retarget` calls on every guard it owns. The forest's
+## watchers override it with their own wake rule; the charge window below is this
+## file's, and every family inherits it.
+func hunt(target: Node3D) -> void:
+	if not alive or not is_instance_valid(target) or target.get("alive") == false:
+		return
+	var body := target as CharacterBody3D
+	if body == null:
+		return
+	mob_wake()
+	player = body
+	_target = body
+	_charge_time = CHARGE_SECONDS
+	# A blow is not needed to start the pursuit: being pointed at a quarry is the
+	# sighting, and it is what turns the body onto it (`_face_intent`).
+	_senses.notice(body, body.global_position)
+
+
+## True while this body has a pursuit of its own. The squad's re-target asks this
+## before re-arming a hunt, so a devil already running somebody down is left alone.
+func hunting() -> bool:
+	return alive and _senses.aggressive()
+
+
 func _physics_process(delta: float) -> void:
 	if resting:
 		return
@@ -499,6 +540,25 @@ func _think(delta: float) -> void:
 	var direction := to_target.normalized() if distance > 0.001 else Vector3.FORWARD
 	# Town peace: a ranger inside the safe ring is never hunted, alerted or not.
 	var aggro := pursuit and _aggro_allowed(focus)
+	_charge_time = maxf(0.0, _charge_time - delta)
+	# The opening charge. A body that was just put on the island runs at the
+	# party from the frame it is placed: straight at it, at its run speed, instead
+	# of sizing it up from orbit distance. Only a body still choosing where to
+	# stand charges - a swing, a stagger or a cast owns its own clock - and the
+	# charge ends inside this body's own preferred range so the fight is normal
+	# the moment it arrives.
+	if aggro and _charge_time > 0.0 and state in ["IDLE", "RETURN", "CIRCLE"]:
+		var want := _charge_reach()
+		if distance > want:
+			_move_intent = _steer(direction)
+			_move_speed = float(profile.run_speed)
+			_face_intent = direction
+			if state != "CIRCLE":
+				_enter("CIRCLE", false)
+			_turn(delta)
+			_separate()
+			return
+		_charge_time = 0.0
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	# Only an aware mob turns toward its quarry. A calm mob keeps the facing it
@@ -1589,6 +1649,9 @@ func snapshot() -> Dictionary:
 		"g": is_on_floor(),
 		"s": state,
 		"t": _state_time,
+		# The scaled pool, because the host's difficulty (a wave's life) is not
+		# the authored number the guest built its copy with.
+		"m": max_health,
 		"h": health,
 		"a": alive,
 		# The death that took a piece: w = 1 is a head (xyz the arrow's flight),
@@ -1650,6 +1713,9 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	_ingest_pose(state,tick)
 	self.state = state.s
 	_state_time = state.t
+	# The pool the host scaled this body to: a wave's life rides on it, and a bar
+	# that only knew the authored pool would read a doubled body as half dead.
+	max_health = float(state.get("m", max_health))
 	health = state.h
 	alive = state.a
 	velocity = state.v

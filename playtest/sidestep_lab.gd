@@ -6,6 +6,7 @@ extends Node3D
 
 const Archer = preload("res://scripts/archer.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 const PLATEAU_RADIUS := 12.0
@@ -19,7 +20,7 @@ var camera_pitch := 0.08
 var camera_distance := 4.5
 var stamina := 100.0
 var _spawn := Vector3(0,0.15,0)
-var _cursor_free := false
+var _cursor_free := true
 var _jump_requested := false
 var _tracing := false
 var _trace_start := Vector3.ZERO
@@ -41,7 +42,7 @@ func _ready() -> void:
 	_build_player()
 	_build_camera()
 	_build_hud()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Released until the first click: a lab that comes up never takes the mouse.
 	print("IRONWOOD_SIDESTEP_LAB_READY distance=%.2f duration=%.2f" % [DodgeStep.TRAVEL,DodgeStep.DURATION])
 
 func _build_environment() -> void:
@@ -448,7 +449,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _set_cursor_free(value: bool) -> void:
 	_cursor_free = value
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
+	if value:
+		PointerGate.release()
+	else:
+		PointerGate.capture()
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and is_instance_valid(archer):

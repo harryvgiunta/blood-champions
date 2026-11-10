@@ -84,8 +84,9 @@ static func chest(parent: Node3D, at: Vector3, tier: String = "chest",
 
 # --- pedestal --------------------------------------------------------------
 
-## An item pedestal and the three choices standing over it. The offers are built
-## from the director's draft, so two peers see the same three names.
+## An item pedestal and the three choices standing over it. `offers` is the local
+## body's own row; the payload may carry the whole party's table, which is what
+## every machine reads its row from.
 static func pedestal(parent: Node3D, at: Vector3, offers: Array,
 		payload: Dictionary = {}) -> Node3D:
 	var root := Node3D.new()
@@ -129,7 +130,13 @@ static func pedestal(parent: Node3D, at: Vector3, offers: Array,
 		_label(card, display, Vector3(0.0, 0.16, 0.06), colour, 28, 0.004)
 		_label(card, str(row.get("rarity", "")).to_upper(), Vector3(0.0, -0.2, 0.06),
 			Color(0.85, 0.82, 0.74), 22, 0.004)
-	tag_prop(root, "pedestal", payload.merged({"offers": offers.duplicate()}, true))
+	# The payload is the wire's: a director hands the whole party's draft table
+	# here and the cards above are only the local body's row. A caller with no
+	# table to give still gets the three it drew stamped on the prop.
+	var wire := payload
+	if not wire.has("offers"):
+		wire = wire.merged({"offers": offers.duplicate()}, true)
+	tag_prop(root, "pedestal", wire)
 	return root
 
 
@@ -233,42 +240,147 @@ static func rack(parent: Node3D, at: Vector3, payload: Dictionary = {}) -> Node3
 
 # --- portal ----------------------------------------------------------------
 
-## A biome portal: a standing ring of stone around a lit sheet of the next
-## island's own colour, with the name of the place it opens on the lintel.
+## A gate out of a cleared level: the frame every faction builds its door on, and
+## then the faction's own body on the stone. The wood keeps its grey ring and the
+## green sheet it always had; the demons hang their gate in black rock, bone and
+## skulls; the blood clones stand a body turned inside out - red flesh, ribs, and
+## a heart in the lintel. All three lead one level on; the director reads which
+## was taken from the payload's `biome`.
 static func portal(parent: Node3D, at: Vector3, biome_id: String,
 		biome_name: String, payload: Dictionary = {}) -> Node3D:
 	var root := Node3D.new()
-	root.name = "Portal_%s" % biome_id
+	root.name = "Gate_%s" % biome_id
 	parent.add_child(root)
 	# Props are handed a world point and stand on it: the island they hang from
 	# has its own transform, so a local assignment would double it.
 	root.global_position = at
-	var colours := {
-		"wilderness": Color(0.48, 0.78, 0.52),
-		"caves": Color(0.95, 0.48, 0.24),
-		"arena": Color(0.86, 0.24, 0.22),
-	}
-	var glow: Color = colours.get(biome_id, Color(0.7, 0.7, 0.9))
-	var stone := Geo.material(Color(0.26, 0.25, 0.23), 0.0, 0.9)
-	var trim := Geo.material(glow, 0.4, 0.3)
-	trim.emission_enabled = true
-	trim.emission = glow
-	trim.emission_energy_multiplier = 1.2
+	match biome_id:
+		"caves":
+			_gate_demons(root)
+		"arena":
+			_gate_clones(root)
+		_:
+			_gate_watchers(root)
+	_label(root, biome_name, Vector3(0.0, 4.05, 0.0), gate_glow(biome_id), 40)
+	tag_prop(root, "portal", payload.merged({"biome": biome_id}, true))
+	return root
+
+
+## The colour a gate's sheet, light and lintel burn with.
+static func gate_glow(biome_id: String) -> Color:
+	match biome_id:
+		"caves":
+			return Color(0.98, 0.32, 0.10)
+		"arena":
+			return Color(0.94, 0.12, 0.14)
+	return Color(0.48, 0.78, 0.52)
+
+
+## The posts, the lintel and the sheet every gate is built on. A faction dresses
+## around it; none of them rewrites it, so the three stay one family of door.
+static func _gate_frame(root: Node3D, stone: Material, sheet: Material,
+		glow: Color, energy: float = 1.2) -> void:
 	for side in [-1.0, 1.0]:
 		Geo.box(root, Vector3(0.44, 3.3, 0.5), Vector3(float(side) * 1.3, 1.65, 0.0), stone)
 	Geo.box(root, Vector3(3.1, 0.5, 0.56), Vector3(0.0, 3.42, 0.0), stone)
-	Geo.box(root, Vector3(2.2, 2.9, 0.06), Vector3(0.0, 1.6, 0.02), trim)
-	for side in [-1.0, 1.0]:
-		Geo.box(root, Vector3(0.10, 3.0, 0.10), Vector3(float(side) * 1.12, 1.6, 0.06), trim)
+	Geo.box(root, Vector3(2.2, 2.9, 0.06), Vector3(0.0, 1.6, 0.02), sheet)
 	var light := OmniLight3D.new()
 	light.light_color = glow
 	light.light_energy = 2.0
 	light.omni_range = 10.0
 	light.position = Vector3(0.0, 1.7, 0.6)
 	root.add_child(light)
-	_label(root, biome_name, Vector3(0.0, 4.05, 0.0), glow, 40)
-	tag_prop(root, "portal", payload.merged({"biome": biome_id}, true))
-	return root
+	if energy > 0.0:
+		(sheet as StandardMaterial3D).emission_energy_multiplier = energy
+
+
+static func _glow_material(colour: Color, energy: float) -> StandardMaterial3D:
+	var mat := Geo.material(colour, 0.4, 0.3)
+	mat.emission_enabled = true
+	mat.emission = colour
+	mat.emission_energy_multiplier = energy
+	return mat
+
+
+## Watchers: the wood's own door - grey stone, a green sheet, two thin posts of
+## light. It is the gate the run has always opened on.
+static func _gate_watchers(root: Node3D) -> void:
+	var glow := gate_glow("wilderness")
+	var stone := Geo.material(Color(0.26, 0.25, 0.23), 0.0, 0.9)
+	var trim := _glow_material(glow, 1.2)
+	_gate_frame(root, stone, trim, glow)
+	for side in [-1.0, 1.0]:
+		Geo.box(root, Vector3(0.10, 3.0, 0.10), Vector3(float(side) * 1.12, 1.6, 0.06), trim)
+
+
+## Demons: black rock hung with bone. Skulls watch from both posts, ribs of bone
+## climb the lintel, and the sheet burns the colour of a forge mouth.
+static func _gate_demons(root: Node3D) -> void:
+	var glow := gate_glow("caves")
+	var rock := Geo.material(Color(0.05, 0.045, 0.05), 0.05, 0.95)
+	var core := _glow_material(Color(0.42, 0.06, 0.04), 0.5)
+	var bone := Geo.material(Color(0.84, 0.81, 0.70), 0.0, 0.55)
+	var dark := Geo.material(Color(0.03, 0.02, 0.02), 0.0, 0.9)
+	_gate_frame(root, rock, core, glow, 0.55)
+	# The sheet is a mouth in the dark rock, not a sheet of light: one ember line
+	# down its middle reads as the far side of the fire.
+	Geo.box(root, Vector3(0.14, 2.7, 0.09), Vector3(0.0, 1.6, 0.05), _glow_material(glow, 1.9))
+	for side in [-1.0, 1.0]:
+		var x := float(side) * 1.3
+		for step in 3:
+			var y := 1.05 + 0.95 * float(step)
+			# A skull: a cranium, a jaw under it, and the two holes it looks out of.
+			Geo.sphere(root, 0.17, Vector3(x, y, 0.34), bone)
+			Geo.box(root, Vector3(0.17, 0.07, 0.14), Vector3(x, y - 0.16, 0.34), bone)
+			for eye in [-1.0, 1.0]:
+				Geo.box(root, Vector3(0.05, 0.06, 0.05),
+					Vector3(x + float(eye) * 0.06, y + 0.02, 0.47), dark)
+		# Bone spurs jutting out of the post's back.
+		for step in 2:
+			var spur := Geo.cylinder(root, 0.035, 0.0, 0.5,
+				Vector3(x + float(side) * 0.3, 2.2 + 0.5 * float(step), -0.12), bone, 6)
+			spur.rotation.z = float(side) * 0.9
+	# Ribs of bone along the lintel, caught between the posts.
+	for step in 5:
+		var rib := Geo.cylinder(root, 0.04, 0.05, 0.62,
+			Vector3(-0.9 + 0.45 * float(step), 3.72, 0.0), bone, 6)
+		rib.rotation.x = 0.35
+	Geo.sphere(root, 0.2, Vector3(0.0, 3.36, 0.34), bone)
+
+
+## Blood clones: a body turned inside out. Dark maroon flesh for stone, a bright
+## blood sheet, ribs standing proud of both posts and a heart hanging off the
+## lintel with its veins drawn over the flesh.
+static func _gate_clones(root: Node3D) -> void:
+	var glow := gate_glow("arena")
+	var flesh := Geo.material(Color(0.26, 0.03, 0.04), 0.0, 0.55)
+	var sinew := Geo.material(Color(0.70, 0.26, 0.28), 0.0, 0.35)
+	var core := _glow_material(Color(0.62, 0.04, 0.05), 1.1)
+	var blood := _glow_material(glow, 1.8)
+	_gate_frame(root, flesh, core, glow, 1.1)
+	# Ribs: pale sinew over the dark flesh, six a side, each a step further out.
+	for side in [-1.0, 1.0]:
+		var x := float(side) * 1.3
+		for step in 6:
+			var y := 0.62 + 0.52 * float(step)
+			var rib := Geo.sphere(root, 0.115, Vector3(x, y, 0.30), sinew,
+				Vector3(1.7, 0.55, 1.2))
+			rib.rotation.z = 0.12 * float(side) * float(step) - 0.1 * float(side)
+		# The muscle the ribs are set in, a shade lighter than the frame.
+		Geo.box(root, Vector3(0.12, 2.9, 0.16), Vector3(x + float(side) * 0.16, 1.6, 0.22), sinew)
+	# The heart: out in front of the lintel where it can be read from the ground.
+	var heart := Geo.sphere(root, 0.24, Vector3(0.0, 3.30, 0.44), blood,
+		Vector3(1.0, 1.15, 0.85))
+	heart.rotation.z = 0.3
+	Geo.sphere(root, 0.11, Vector3(0.17, 3.48, 0.42), blood)
+	Geo.beam(root, Vector3(-0.05, 3.18, 0.40), Vector3(-1.22, 2.30, 0.34), 0.05, sinew)
+	Geo.beam(root, Vector3(0.05, 3.18, 0.40), Vector3(1.22, 2.30, 0.34), 0.05, sinew)
+	Geo.beam(root, Vector3(0.0, 3.52, 0.40), Vector3(0.0, 3.68, 0.20), 0.045, sinew)
+	# A seam of blood down the sheet: the body is open, and something is behind it.
+	Geo.box(root, Vector3(0.10, 2.6, 0.09), Vector3(0.0, 1.65, 0.06), blood)
+	for step in 4:
+		Geo.box(root, Vector3(0.34, 0.06, 0.07),
+			Vector3(-0.5 + 0.34 * float(step), 2.35 - 0.3 * float(step), 0.06), blood)
 
 
 # --- helpers ---------------------------------------------------------------

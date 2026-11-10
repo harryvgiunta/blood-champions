@@ -276,6 +276,14 @@ const VARIANTS := [
 ## Set before the body enters the tree: the pair Corvin fights are the thinned
 ## ones, everyone else gets the hardened pool.
 var health_pool := HARDENED_HEALTH
+## Multiplier a scene (or a wave) puts on the pool this body is born with. It is
+## read in `_ready`, after the runt rule, so the rule sees the authored pool and
+## the scale lands once on the finished number.
+var pool_scale := 1.0
+## The pool handed over before `pool_scale`. The runt rule and the thinned rows
+## read this, never the scaled pool: a level-one warden under a soft opening is
+## still a warden, and its body is still a hard one.
+var _authored_pool := -1.0
 ## The catalog piece in the right hand, or "" for an empty hand. `arm` writes it,
 ## `take_weapon_item` hands it back so the scene can drop it.
 var weapon_item := ""
@@ -287,9 +295,6 @@ var off_item := ""
 ## the wood does not read as a line of statue posts. Set by the scene before the
 ## body enters the tree (it is read in `_ready`).
 var patrol_radius := 0.0
-## True while the piece in the hand is already anointed: a rare body below
-## (`delve_loot.gd`). The drop it leaves carries that; an empty hand carries nothing.
-var weapon_anointed := false
 ## Armour a corpse is carrying. A scene may overwrite it (the road does).
 var armor_items: Array[String] = []
 ## What else is on the body when it falls: a dressing, a bundle, whatever the
@@ -350,6 +355,9 @@ func _ready() -> void:
 	var label := name
 	super()
 	name = label
+	# The pool handed over, before the wave's scale: the runt rule below and the
+	# thinned rows in `_pick_variant` read this, so neither can be moved by a level.
+	_authored_pool = health_pool
 	variant = _pick_variant()
 	# A runt is a third of a body whatever a scene left the pool at: it is only
 	# ever fielded as the wood's first fight, and a scene that spawns one and
@@ -358,6 +366,10 @@ func _ready() -> void:
 	# hard one and keeps it.
 	if mob_id == RUNT_ID and health_pool >= HARDENED_HEALTH:
 		health_pool = RUNT_HEALTH
+	# The scene's own scale, once, on the finished pool. The island's wave rides
+	# it, so a runt is a third of a pool at level one and a third of a larger one
+	# at level forty - the same share at every scale.
+	health_pool *= maxf(0.05, pool_scale)
 	_rng.seed = absi(mob_id.hash()) + _variant_slot * 977 + 17
 	collision_layer = WATCHER_LAYER
 	_shape_body()
@@ -403,6 +415,10 @@ func hunt(target: Node3D) -> void:
 	# watcher is, wherever it stands.
 	if not _enraged and MobSenses.in_safe_ring(safe_center, body.global_position):
 		return
+	# Pointed at a body is the sighting, and it is also the order to close: the
+	# watcher runs at the party from here (`devil_mob.CHARGE_SECONDS`) instead of
+	# taking up its orbit first.
+	_charge_time = CHARGE_SECONDS
 	_senses.notice(body, body.global_position)
 
 
@@ -435,7 +451,6 @@ func note_attacker(attacker: Node3D) -> void:
 ## would hold, hung off the hand bone, so the rig and the corpse agree.
 func arm(item_id: String) -> void:
 	weapon_item = item_id
-	weapon_anointed = false
 	if not is_node_ready():
 		return
 	_apply_weapon()
@@ -445,7 +460,6 @@ func arm(item_id: String) -> void:
 func take_weapon_item() -> String:
 	var item := weapon_item
 	weapon_item = ""
-	weapon_anointed = false
 	if is_node_ready():
 		_apply_weapon()
 	return item
@@ -558,7 +572,9 @@ func _pick_variant() -> Dictionary:
 	if mob_id == RUNT_ID:
 		out["guard"] = minf(float(out.get("guard", 0.5)), RUNT_GUARD)
 		return out
-	if health_pool >= HARDENED_HEALTH:
+	# The authored pool, not the scaled one: a warden on a soft opening is still
+	# a warden, and the thinning below belongs to the lesson's pair alone.
+	if _authored_pool >= HARDENED_HEALTH:
 		return out
 	# The pair Corvin fights are still their own bodies - their own paint, build
 	# and hand - and only thinner: a shiv or a club, never the limb it can barely

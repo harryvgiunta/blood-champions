@@ -98,10 +98,6 @@ static func detail_rows(item_id: String, item: Dictionary) -> Array:
 				rows.append({"label":"BODY GUARD", "value":"+%d%%" % guard})
 		"jewelry", "focus":
 			rows.append_array(TrinketStats.effect_rows(item_id))
-			var grant := TrinketStats.grant_for(item_id)
-			if not grant.is_empty():
-				rows.append({"label":"SKILL", "value":
-					grant.replace("_", " ").to_upper()})
 		"ammo":
 			rows.append({"label":"BUNCH", "value":"%d per purchase" % State.item_bundle(item_id)})
 		"misc":

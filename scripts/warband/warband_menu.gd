@@ -25,6 +25,7 @@ const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
 const KeybindPageScript = preload("res://scripts/ui/keybind_page.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 ## The index page and the two sub-pages it opens: the mix, and the controls sheet.
 const PAGE_MENU := "menu"
@@ -583,7 +584,12 @@ func _free_pointer() -> void:
 func _restore_pointer() -> void:
 	if DisplayServer.get_name() == "headless":
 		return
-	Input.mouse_mode = _prior_mouse_mode
+	# Whatever the scene had, the gate decides whether this window may have it
+	# back: an unfocused window must leave the desktop's cursor alone.
+	if _prior_mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		PointerGate.capture()
+	else:
+		PointerGate.release()
 
 
 func _note(message: String, data: Dictionary = {}) -> void:

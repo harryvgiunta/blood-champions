@@ -33,6 +33,9 @@ var active_victims: Dictionary = {}
 var cooldowns := PackedFloat32Array()
 var _cue_index := 0
 var _grant_ids: Array[String] = []
+## One extra beat this activation earned from Echo Cast / Chain Cast. The scene
+## consumes it once, so a six-cue barrage does not become twelve arrows.
+var recast_pending := false
 
 
 func setup(owner_actor, owner_rig, owner_combat, walk_speed: float) -> void:
@@ -73,11 +76,19 @@ func activate(slot: int = 0) -> Dictionary:
 	if AbilityRules.needs_standing(definition) and not _stand_before_melee():
 		return {"ok": false, "message": "Not enough headroom to stand for %s."
 			% str(definition.name).capitalize()}
-	var cost := float(definition.stamina_cost)
+	var family := AbilityRules.type_of(definition)
+	var run = actor.get("roguelite") if actor != null and is_instance_valid(actor) else null
+	var cooldown_mult := 1.0
+	if run != null and run.has_method("ability_cooldown_scale"):
+		cooldown_mult = float(run.ability_cooldown_scale(family))
+	var cost := _stamina_cost(definition)
 	var facing := _facing(definition)
 	actor.stamina = maxf(0.0, float(actor.stamina) - cost)
 	if slot >= 0 and slot < cooldowns.size():
-		cooldowns[slot] = float(definition.cooldown) * AbilityRules.cooldown_scale(rig)
+		cooldowns[slot] = float(definition.cooldown) \
+			* AbilityRules.cooldown_scale(rig) * cooldown_mult
+	recast_pending = run != null and run.has_method("ability_recast_roll") \
+		and bool(run.ability_recast_roll(family))
 	active = true
 	active_id = str(definition.id)
 	active_slot = slot
@@ -154,8 +165,9 @@ func _blocker(definition: Dictionary, slot: int) -> String:
 		return "Already using %s." % ability_name
 	if actor.get("alive") == false:
 		return "You are down."
-	if is_instance_valid(combat) and not combat.grounded:
-		return "Land before using %s." % ability_name
+	# A skill is performed with the hands, not the feet: a body at a run or in
+	# the air keeps its blade, its staff and its bow. A stagger, a guard, cover
+	# and a committed roll/step/slide still hold the key back.
 	if is_instance_valid(combat) and combat.stagger_time > 0.0:
 		return "Recover your footing before using %s." % ability_name
 	if is_instance_valid(combat) and combat.blocking:
@@ -165,13 +177,29 @@ func _blocker(definition: Dictionary, slot: int) -> String:
 	if float(rig._roll_progress) >= 0.0 or float(rig.slide_progress) >= 0.0 \
 			or float(rig._step_progress) >= 0.0:
 		return "Finish the movement before using %s." % ability_name
-	if str(rig.phase) != "READY" or rig.is_consuming():
+	# A bow skill never waits on the string: it can be started while the bow is
+	# drawn, held, or still settling from a shot. The key is the shot, so the
+	# activation fires at once and the unfinished draw is dropped.
+	var phase := str(rig.phase)
+	var bow_ready := AbilityRules.type_of(definition) == AbilityRules.TYPE_BOW \
+		and phase in ["DRAWING", "HOLDING", "RELEASE", "RECOVER"]
+	if (phase != "READY" and not bow_ready) or rig.is_consuming():
 		return "Finish the current action before using %s." % ability_name
 	if slot >= 0 and slot < cooldowns.size() and cooldowns[slot] > 0.0:
 		return "%s ready in %.1f s." % [ability_name, cooldowns[slot]]
-	if float(actor.stamina) < float(definition.stamina_cost):
+	if float(actor.stamina) < _stamina_cost(definition):
 		return "Not enough stamina for %s." % ability_name
 	return ""
+
+
+## The stamina a skill actually costs: the run's Light Hands writes a multiplier
+## the blocker and the spend both read.
+func _stamina_cost(definition: Dictionary) -> float:
+	var mult := 1.0
+	var run = actor.get("roguelite") if actor != null and is_instance_valid(actor) else null
+	if run != null and run.has_method("ability_stamina_scale"):
+		mult = float(run.ability_stamina_scale(AbilityRules.type_of(definition)))
+	return float(definition.stamina_cost) * mult
 
 
 func advance(delta: float) -> void:
@@ -251,20 +279,23 @@ func reset() -> void:
 	speed = 0.0
 	travel_seconds = 0.0
 	_cue_index = 0
+	recast_pending = false
 	cooldowns.fill(0.0)
 	if is_instance_valid(rig) and rig.is_ability():
 		rig.cancel_ability()
 
 
+## Consume this activation's extra beat, if any. The scene calls it after the
+## first effect it spawns, so one recast is one extra arrow, spell or cut.
+func take_recast() -> bool:
+	if not recast_pending:
+		return false
+	recast_pending = false
+	return true
+
+
 func velocity() -> Vector3:
 	return direction * speed if active and elapsed <= travel_seconds else Vector3.ZERO
-
-
-## Melee skills keep the owner's walking input; ranged casts, the unarmed
-## charge and the backstab blink plant the feet for the duration. Controllers
-## ask this instead of `active` before they drop the movement intent.
-func allows_movement() -> bool:
-	return active and bool(active_definition.get("move", false))
 
 
 ## Every hotbar slot in one pass. The HUD asks once a frame instead of walking
@@ -279,7 +310,7 @@ func hud_states() -> Array:
 
 
 func _hud_state(definition: Dictionary, slot: int) -> Dictionary:
-	var cost := float(definition.stamina_cost)
+	var cost := _stamina_cost(definition)
 	# A consumable has no runner activation of its own: the channel lives on the
 	# body, so the key reads active while that body is binding the same wound.
 	var running := active and active_slot == slot

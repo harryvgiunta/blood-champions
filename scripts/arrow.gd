@@ -32,12 +32,25 @@ var proc_coeff := 1.0
 ## the corpse's fall and the gore spray read the same figure.
 var impact_scale := 1.0
 var homing := 0.0
+## Corkscrew rate, radians a second, around the line it was loosed down. A bow's
+## Spiral Shot writes it; a plain shaft leaves it at zero.
+var spiral := 0.0
+var _spiral_axis := Vector3.FORWARD
 var homing_target: Node3D
 var homing_provider: Callable = Callable()
 var bounces := 0
+## The share of its damage a shaft keeps on each hop.
+var bounce_scale := 0.9
 var bounce_provider: Callable = Callable()
 ## The damage a pierced body adds to the next one (`Piercing Wave`: +15% a body).
 var pierce_growth := 0.0
+## How hard the shaft falls: Fast Shot flattens it, Big Shot does not. One is the
+## campaign's own arc.
+var gravity_scale := 1.0
+## `(impact_position) -> multiplier`, asked at the body it is about to land in.
+## Danger Close and Eagle Eye are the only rows that need it: a row that reads the
+## range cannot be priced at the string, only at the wound.
+var damage_filter: Callable = Callable()
 ## `(target, position, damage, crit, proc_coeff)` on the authority, for the run's
 ## on-hit chain. Never called on a replica: a guest draws the flight, the host
 ## rolls the consequence.
@@ -65,6 +78,7 @@ func _ready() -> void:
 func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_start: Vector3 = Vector3.INF, pierce_count: int = 0) -> void:
 	global_position = origin
 	velocity = direction.normalized() * speed
+	_spiral_axis = direction.normalized()
 	damage = shot_damage
 	pierce = maxi(pierce_count,0)
 	_query.collision_mask = hit_mask
@@ -94,8 +108,11 @@ func _fly(delta: float) -> void:
 		return
 	if homing > 0.0:
 		_steer_homing(delta)
-	var next := global_position + velocity * delta + GRAVITY * (0.5 * delta * delta)
-	velocity += GRAVITY * delta
+	if spiral != 0.0:
+		velocity = velocity.rotated(_spiral_axis, spiral * delta)
+	var fall := GRAVITY * maxf(gravity_scale, 0.0)
+	var next := global_position + velocity * delta + fall * (0.5 * delta * delta)
+	velocity += fall * delta
 	var from := global_position
 	_query.from = from
 	_query.to = next
@@ -131,7 +148,7 @@ func _fly(delta: float) -> void:
 				_note_impact(collider)
 				if pierced_headshot:
 					_note_headshot(collider)
-				collider.take_damage(damage, source_id, pierced_headshot)
+				collider.take_damage(_filtered(collider, hit.position), source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
 				_notify_hit(collider, hit.position)
 			pierce -= 1
@@ -159,7 +176,7 @@ func _fly(delta: float) -> void:
 				_note_impact(collider)
 				if headshot:
 					_note_headshot(collider)
-				collider.take_damage(damage, source_id, headshot)
+				collider.take_damage(_filtered(collider, hit.position), source_id, headshot)
 				applied_hit = true
 		if applied_hit:
 			BloodFx.impact(self, hit.position, velocity, damage, headshot)
@@ -223,11 +240,15 @@ func _try_bounce(collider: Object, at: Vector3) -> bool:
 	if not (found is Node3D) or not is_instance_valid(found):
 		return false
 	var target: Node3D = found
+	if not (target is CollisionObject3D):
+		return false
 	var direction: Vector3 = (target.global_position + Vector3.UP * 1.1) - at
 	if direction.length_squared() <= 0.0001:
 		return false
 	bounces -= 1
-	damage *= 0.9
+	# What a hop keeps of the blow. A campaign shaft keeps nine tenths of it; a
+	# run's Ricochet names its own share at the engine (`HOP_SCALE`, 0.7).
+	damage *= maxf(0.0, bounce_scale)
 	flying = true
 	global_position = at + direction.normalized() * 0.08
 	velocity = direction.normalized() * maxf(velocity.length(), 12.0)
@@ -246,6 +267,14 @@ func _notify_hit(collider: Object, at: Vector3) -> void:
 	if collider == null or not (collider is Node):
 		return
 	on_hit.call(collider, at, damage, crit, proc_coeff)
+
+
+## The wound's own price: the shooter's range rows are asked here, at the point
+## the shaft is about to open, and nowhere else.
+func _filtered(_target, at: Vector3) -> float:
+	if not damage_filter.is_valid():
+		return damage
+	return maxf(0.0, damage * maxf(0.0, float(damage_filter.call(at))))
 
 
 ## A body the shooter's frame put under this swept shaft, resolved now. The
@@ -272,7 +301,7 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 			_note_impact(candidate)
 			if headshot:
 				_note_headshot(candidate)
-			candidate.take_damage(damage,source_id,headshot)
+			candidate.take_damage(_filtered(candidate, point),source_id,headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
 			_notify_hit(candidate, point)
 		impacted.emit(true,point)

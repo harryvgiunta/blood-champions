@@ -34,8 +34,8 @@ var proc := 1.0
 ## A guest's copy: it draws the flight and touches nothing. The host owns every
 ## blow, and a visual that applied damage would double it on the wire.
 var visual_only := false
-## Called with `(target, is_kill)` after a blow lands, so the owner's runtime can
-## book a kill without this node knowing what a kill worth.
+## Called with `(target, is_kill, damage)` after a blow lands, so the owner's
+## runtime can book a kill without this node knowing what a kill is worth.
 var hit_callback: Callable = Callable()
 ## The target a homing blade was pointed at when it was spawned.
 var homing_target: Node3D
@@ -207,7 +207,7 @@ func _apply(collider: Object, at: Vector3) -> void:
 	BloodFx.impact(self, at, velocity.normalized(), applied, false)
 	var died: bool = unit.get("alive") == false
 	if hit_callback.is_valid():
-		hit_callback.call(unit, died)
+		hit_callback.call(unit, died, applied)
 	if kind == "dagger":
 		return
 	if pierce > 0:

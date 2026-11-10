@@ -14,8 +14,17 @@ extends CanvasLayer
 const Ledger = preload("res://scripts/ui/ledger_theme.gd")
 const Mods = preload("res://scripts/roguelite/mod_catalog.gd")
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 const LAYER := 7
+## How many carried upgrades the plate lists before it says "and more".
+const MOD_ROWS_SHOWN := 12
+## The draft card: one column of three, or two abreast past four offers. The card
+## wraps its own description, so the height is the row and not the panel.
+const CARD_HEIGHT := 108
+const CARD_WIDTH := 322
+const PANEL_SINGLE := 660.0
+const PANEL_GRID := 720.0
 const INK := Color(0.94, 0.88, 0.72)
 const MUTED := Color(0.70, 0.64, 0.52)
 const BRASS := Color(0.85, 0.72, 0.42)
@@ -30,6 +39,7 @@ var _island_label: Label
 var _wave_label: Label
 var _party_label: Label
 var _purse_label: Label
+var _luck_label: Label
 var _boss_label: Label
 var _mod_box: VBoxContainer
 var _mod_title: Label
@@ -74,6 +84,7 @@ func _build() -> void:
 	_wave_label = _top_label("", 19, BRASS)
 	_party_label = _top_label("", 16, MUTED)
 	_purse_label = _top_label("", 17, GOOD)
+	_luck_label = _top_label("", 17, BRASS)
 	_boss_label = _top_label("", 17, BLOOD)
 
 	_mod_box = VBoxContainer.new()
@@ -164,9 +175,8 @@ func _top_label(text: String, size: int, colour: Color) -> Label:
 
 func _process(_delta: float) -> void:
 	_refresh()
-	var wanted := Input.MOUSE_MODE_VISIBLE if open_panels() else Input.MOUSE_MODE_CAPTURED
-	if open_panels() and Input.mouse_mode != wanted:
-		Input.mouse_mode = wanted
+	if open_panels():
+		PointerGate.release()
 
 
 func _refresh() -> void:
@@ -190,14 +200,18 @@ func _refresh() -> void:
 	_wave_label.text = "LEVEL %d   ·   ISLAND %d%s" % [level, island, tag]
 	_party_label.text = "ALIVE %d  ·  HOSTILES %d" % [
 		int(state.get("party", 1)) - _downed_count(), int(state.get("living", 0))]
-	_purse_label.text = "%d CRYSTALS   ·   %d KEYS" % [
-		int(state.get("crystals", 0)), _banked_keys()]
+	_purse_label.text = "%d GOLD   ·   %d KEYS" % [
+		int(state.get("gold", 0)), _banked_keys()]
+	var local = _local_player()
+	# Luck is the one number a body buys that changes the loot rather than the
+	# fight, so it is written where the purse is: a plate, not a card.
+	var held_luck: int = int(local.luck()) if local != null and is_instance_valid(local) else 0
+	_luck_label.text = "LUCK %d" % held_luck if held_luck > 0 else ""
 	if bool(state.get("boss_level", false)):
 		_boss_label.text = "BOSS LEVEL"
 		_boss_label.visible = true
 	else:
 		_boss_label.text = ""
-	var local = _local_player()
 	if local != null and is_instance_valid(local):
 		var line := _mods_line(local)
 		if line != _last_mods:
@@ -249,14 +263,30 @@ func _write_mods(run) -> void:
 			_mod_box.remove_child(child)
 			child.queue_free()
 	var count := 0
+	var family := ""
+	# A body can carry rows from five families by the end of an island, so the
+	# list names the family a run of rows belongs to instead of making the player
+	# read the card again to know whether a name is a shot or a hand.
 	for row in run.engine.mod_list():
-		if count >= 12:
+		if count >= MOD_ROWS_SHOWN:
 			var more := Label.new()
 			more.text = "…and more"
 			more.add_theme_color_override("font_color", MUTED)
 			more.add_theme_font_size_override("font_size", 15)
 			_mod_box.add_child(more)
 			break
+		var held := str(row.get("family", ""))
+		if held != family:
+			family = held
+			var header := Label.new()
+			header.text = str(Mods.FAMILY_LABEL.get(held, ""))
+			header.add_theme_color_override("font_color", MUTED)
+			header.add_theme_font_size_override("font_size", 13)
+			header.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+			header.add_theme_constant_override("shadow_offset_x", 1)
+			header.add_theme_constant_override("shadow_offset_y", 1)
+			header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_mod_box.add_child(header)
 		var label := Label.new()
 		label.text = "%s  ×%d" % [str(row.get("name", row.get("id", ""))),
 			int(row.get("stacks", 1))]
@@ -283,22 +313,65 @@ func open_draft(serial: int, offers: Array) -> void:
 	_clear_overlay()
 	_overlay_serial = serial
 	_overlay_title.text = "CHOOSE AN UPGRADE"
+	var local = _local_player()
+	# Seven offers is the ceiling (three, Big Chests' two and luck's two) and seven
+	# 64-pixel rows would run off the panel: past four, the cards go two abreast.
+	var grid: Container = null
+	if offers.size() > 4:
+		grid = GridContainer.new()
+		grid.columns = 2
+		grid.add_theme_constant_override("h_separation", 8)
+		grid.add_theme_constant_override("v_separation", 8)
+		_overlay_body.add_child(grid)
 	for index in offers.size():
 		var mod_id := str(offers[index])
 		var row: Dictionary = Mods.get_mod(mod_id)
+		var carried := 0
+		if local != null and is_instance_valid(local):
+			carried = int(local.engine.stacks_of(mod_id))
+		var badge := "    ×%d" % carried if carried > 0 else ""
+		# The tier is the colour, the family is the line under the name: 161 rows
+		# is why the card has to say which hand a name belongs to.
 		var button := Button.new()
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = "%s\n%s" % [str(row.get("name", mod_id)),
+		button.text = "%s%s\n%s  ·  %s\n%s" % [
+			str(row.get("name", mod_id)), badge,
+			Mods.family_label_of(mod_id), Mods.rarity_of(mod_id).to_upper(),
 			str(row.get("description", ""))]
 		button.add_theme_color_override("font_color",
 			Mods.RARITY_COLOUR.get(str(row.get("rarity", "common")), INK))
 		button.add_theme_font_size_override("font_size", 17)
-		button.custom_minimum_size = Vector2(0, 64)
+		# 161 rows means descriptions long enough to run off a card: every card
+		# wraps, and the panel is sized to the grid rather than to the text.
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.custom_minimum_size = Vector2(CARD_WIDTH if grid != null else 0,
+			CARD_HEIGHT)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_on_draft_pressed.bind(index))
-		_overlay_body.add_child(button)
+		if grid != null:
+			grid.add_child(button)
+		else:
+			_overlay_body.add_child(button)
 		_draft_buttons.append(button)
+	var rows := ceili(float(offers.size()) / 2.0) if grid != null else offers.size()
+	_resize_overlay(maxf(1, rows) * (CARD_HEIGHT + 8), PANEL_GRID if grid != null
+		else PANEL_SINGLE)
 	_overlay_hint.text = "The pedestal offers one upgrade for this run. Choose with the mouse or Escape to step away."
 	_overlay.visible = true
+
+
+## The panel grows with its cards instead of clipping them: three is the old
+## height and anything past it is the card's own row plus the panel's padding.
+func _resize_overlay(body_height: float, width: float) -> void:
+	var panel = _overlay.get_node_or_null("DraftPanel")
+	if panel == null:
+		return
+	var height := clampf(maxf(340.0, body_height + 150.0), 340.0, 760.0)
+	panel.custom_minimum_size = Vector2(width, height)
+	panel.offset_left = -width * 0.5
+	panel.offset_right = width * 0.5
+	panel.offset_top = -height * 0.5
+	panel.offset_bottom = height * 0.5
 
 
 func _on_draft_pressed(index: int) -> void:
@@ -314,13 +387,13 @@ func _on_draft_pressed(index: int) -> void:
 func open_shop(serial: int, wares: Array) -> void:
 	_clear_overlay()
 	_overlay_serial = serial
-	_overlay_title.text = "THE SHOP  ·  %d CRYSTALS" % int(
-		director.state().get("crystals", 0) if director != null else 0)
+	_overlay_title.text = "THE SHOP  ·  %d GOLD" % int(
+		director.state().get("gold", 0) if director != null else 0)
 	for index in wares.size():
 		var ware: Dictionary = wares[index]
 		var button := Button.new()
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = "%s  ·  %d crystals" % [str(ware.get("name", "?")),
+		button.text = "%s  ·  %d gold" % [str(ware.get("name", "?")),
 			int(ware.get("price", 0))]
 		button.add_theme_color_override("font_color",
 			Mods.RARITY_COLOUR.get(str(ware.get("rarity", "common")), INK))
@@ -332,7 +405,8 @@ func open_shop(serial: int, wares: Array) -> void:
 		button.pressed.connect(_on_shop_pressed.bind(index))
 		_overlay_body.add_child(button)
 		_shop_buttons.append(button)
-	_overlay_hint.text = "The party's crystals buy the wares; the rack beside the stall takes the boss keys. Escape steps away."
+	_resize_overlay(maxf(1, wares.size()) * 52, PANEL_SINGLE)
+	_overlay_hint.text = "The party's gold buys the wares; the rack beside the stall takes the boss keys. Escape steps away."
 	_overlay.visible = true
 
 

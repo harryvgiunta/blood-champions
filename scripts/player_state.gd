@@ -74,7 +74,7 @@ const ITEMS := {
 	"axe_makeshift": {"name":"Makeshift Axe", "short":"Msh Axe", "kind":"sword", "index":5, "price":18,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A hafted iron head lashed to a straight branch, still balanced to throw",
-		"detail":"14 damage / 1.0 s swing / 1.75 m reach / x2 thrown damage"},
+		"detail":"14 damage / 1.0 s swing / 1.75 m reach / x2 thrown and x2 skill damage"},
 	"shield_wood": {"name":"Wooden Shield", "short":"Wood Shld", "kind":"shield", "index":3, "price":5,
 		"category":"shield", "slot":"off",
 		"summary":"Planks off a hut wall, lashed to a forearm",
@@ -125,7 +125,7 @@ const ITEMS := {
 	"hatchet_makeshift": {"name":"Makeshift Hatchet", "short":"Hatchet", "kind":"sword", "index":5, "price":5,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A flint wedge lashed to a short haft, made to bite and made to throw",
-		"detail":"14 damage / 1.0 s swing / 1.75 m reach / the arena's starter melee"},
+		"detail":"14 damage / 1.0 s swing / 1.75 m reach / x2 skill damage / the arena's starter melee"},
 	"xbow_heavy": {"name":"Heavy Crossbow", "short":"Hvy Xbow", "kind":"bow", "index":4, "price":360,
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"A windlass crossbow of iron and horn",
@@ -137,7 +137,7 @@ const ITEMS := {
 	"throwing_axe": {"name":"Throwing Axe", "short":"Throw Axe", "kind":"sword", "index":5, "price":45,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A short-hafted axe balanced to turn end over end",
-		"detail":"14 damage / 1.0 s swing / three throws on a short recharge / high gore"},
+		"detail":"14 damage / 1.0 s swing / x2 skill damage / three throws on a short recharge / high gore"},
 	"dagger_throwing": {"name":"Throwing Knife", "short":"Throw Knf", "kind":"dagger", "index":2, "price":60,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A thin balanced knife with a wrapped grip and no guard",
@@ -197,7 +197,7 @@ const ITEMS := {
 	"neck_shield": {"name":"Amulet of Energy Shield", "short":"Shield Amulet", "kind":"neck", "index":2, "price":340,
 		"category":"jewelry", "slot":"neck",
 		"summary":"A yellow lodestone humming on a woven cord",
-		"detail":"Neck only / grants Energy Shield as a hotbar skill / 1 min"},
+		"detail":"Neck only / +30 stamina and +2% guard / the ward is now an unlock"},
 	"neck_heartstone": {"name":"Heartstone Amulet", "short":"Heartst Aml", "kind":"neck", "index":3, "price":300,
 		"category":"jewelry", "slot":"neck",
 		"summary":"A red stone that beats once for every breath you take",
@@ -225,7 +225,7 @@ const ITEMS := {
 	"ring_dash": {"name":"Ring of Dash", "short":"Dash Ring", "kind":"ring", "index":3, "price":260,
 		"category":"jewelry", "slot":"ring",
 		"summary":"A cold iron band that leans the moment you look away",
-		"detail":"Ring slot only / grants the Dash skill on the hotbar"},
+		"detail":"Ring slot only / +6% movement speed / the dash is now an unlock"},
 	"ring_health": {"name":"Ring of Health", "short":"Health Ring", "kind":"ring", "index":4, "price":180,
 		"category":"jewelry", "slot":"ring",
 		"summary":"Warm as a pulse you can hold",
@@ -466,12 +466,11 @@ static func item_bundle(id: String) -> int:
 	return maxi(int((ITEMS.get(id, {}) as Dictionary).get("bundle", 1)), 1)
 
 ## Build the exact loadout shape consumed by Archer.apply_loadout(). Pure:
-## derives everything from the ids and the armor index map.
-## `anointed_ids` are the catalog ids the altar has anointed: a held piece in
-## that list carries its skill onto the rig (`anointed`); every other piece,
-## stock steel included, is plain.
+## derives everything from the ids and the armor index map. The skills a body
+## fires are the player's equipped list, applied beside this by `SeatLoadout`;
+## no piece carries a skill of its own any more.
 static func build_loadout(main_id: String, off_id: String, armor_pieces: Dictionary,
-		trinket_ids: Dictionary = {}, anointed_ids: Array = []) -> Dictionary:
+		trinket_ids: Dictionary = {}, starter_ability: bool = false) -> Dictionary:
 	var armor := {}
 	for slot in ArmorData.SLOTS:
 		armor[slot] = int(armor_pieces.get(slot, ArmorData.NONE))
@@ -515,20 +514,11 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
 			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
-		"anointed":{"main":anointed_skill(main_id, 0, anointed_ids),
-			"off":anointed_skill(off_id, 1, anointed_ids)},
+		# The family starters are not equips: the marker rides beside the equipped
+		# list so a later dressing or a stowed piece cannot drop them. An AI body
+		# is dressed without it and gets no starter.
+		"starter":AbilityRules.STARTER_GRANT if starter_ability else "",
 	}
-
-## The skill a held piece carries onto the rig: its own, fired from the hand it
-## is held in, and only while the altar's ledger lists it. An off-hand blade
-## carries nothing, because its skill is a main-hand one.
-static func anointed_skill(item_id: String, slot: int, anointed_ids: Array) -> String:
-	if item_id.is_empty() or not anointed_ids.has(item_id):
-		return ""
-	var entry: Dictionary = ITEMS.get(item_id, {})
-	if AbilityRules.hand_slot(entry) != slot:
-		return ""
-	return str(AbilityRules.skill_for(entry).get("id", ""))
 
 func _note(message: String, data: Dictionary = {}) -> void:
 	var log := get_node_or_null("/root/Log")

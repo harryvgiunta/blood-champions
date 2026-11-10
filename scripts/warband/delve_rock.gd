@@ -83,15 +83,23 @@ static var _vault: FastNoiseLite = null
 
 ## The room's skin - its walls, the lintels over its lower ways out and its roof -
 ## as one mesh in the cave's frame. Built on first ask and kept.
-static func skin(index: int) -> ArrayMesh:
-	if _skins.has(index):
-		return _skins[index]
+##
+## `sealed` closes the room's own ways out: every stretch of its perimeter is
+## drawn as wall, including the ones the plan cut as an opening into a neighbour,
+## and no lintel spans them. It is the same rock, cut by the same field - the
+## aim of the mouth and the way's head are dropped, so the wall runs straight
+## through where a passage used to be - which is what a hall whose ways on have
+## fallen in looks like. The delve never asks for it; the arena's chamber does.
+static func skin(index: int, sealed: bool = false) -> ArrayMesh:
+	var key := _key(index, sealed)
+	if _skins.has(key):
+		return _skins[key]
 	_noises()
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
 	var rows := _rows(Floor.low(index) - BURY, ceiling(index))
-	for run in wall_runs(index):
+	for run in wall_runs(index, sealed):
 		var points: PackedVector2Array = run["points"]
 		var dirs: PackedVector2Array = run["dirs"]
 		var open: PackedFloat32Array = run["open"]
@@ -104,8 +112,9 @@ static func skin(index: int) -> ArrayMesh:
 				var push := relief(index, points[i].x, y, points[i].y, open[i], arch[i])
 				grid[i * rows.size() + j] = Vector3(points[i].x + dirs[i].x * push, y, points[i].y + dirs[i].y * push)
 		_sheet(grid, points.size(), rows.size(), verts, normals, indices)
-	for lintel in lintels(index):
-		_lintel(index, lintel, verts, normals, indices)
+	if not sealed:
+		for lintel in lintels(index):
+			_lintel(index, lintel, verts, normals, indices)
 	_roof(index, verts, normals, indices)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
@@ -114,8 +123,13 @@ static func skin(index: int) -> ArrayMesh:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	_skins[index] = mesh
+	_skins[key] = mesh
 	return mesh
+
+
+## A mesh cache's key for a room's skin: the room, and whether its ways are shut.
+static func _key(index: int, sealed: bool) -> String:
+	return "%d|%d" % [index, 1 if sealed else 0]
 
 
 ## The rock's height over a room, in the cave's frame: the room's authored height
@@ -134,12 +148,22 @@ static func ceiling(index: int) -> float:
 ## `arch` (the head height of the way out at that nearer jamb, in the cave's own
 ## frame - the ceiling of the lower room at that jamb). A run ends where a way out
 ## begins - at a jamb - and turns with the room's own corners.
-static func wall_runs(index: int) -> Array:
-	if _runs.has(index):
-		return _runs[index]
+##
+## `sealed` has no ways out, so it has no jamb to end a run at either: the whole
+## perimeter is **one** run, read with no fade (`open` and `arch` both `INF`), and
+## the room's own field carries straight through where a passage used to open - not
+## a seam at every jamb, because the rock is one sheet round the room.
+static func wall_runs(index: int, sealed: bool = false) -> Array:
+	var cache := _key(index, sealed)
+	if _runs.has(cache):
+		return _runs[cache]
 	var height := ceiling(index)
-	var stretches := _grouped(_perimeter(index))
 	var out: Array = []
+	if sealed:
+		out.append(_run_of(_perimeter(index), false, INF, INF))
+		_runs[cache] = out
+		return out
+	var stretches := _grouped(_perimeter(index))
 	for order in stretches.size():
 		var run: Dictionary = stretches[order]
 		if int(run["key"]) >= 0:
@@ -149,33 +173,40 @@ static func wall_runs(index: int) -> Array:
 		var after := int(stretches[(order + 1) % stretches.size()]["key"])
 		var arch_start := minf(height, ceiling(before)) if before >= 0 else height
 		var arch_end := minf(height, ceiling(after)) if after >= 0 else height
-		var segments: Array = run["segments"]
-		var points := PackedVector2Array()
-		var dirs := PackedVector2Array()
-		var along := PackedFloat32Array()
-		var lattice: Array[Vector2i] = [segments[0][0]]
-		for segment in segments:
-			lattice.append(segment[1])
-		var metres := 0.0
-		for k in lattice.size():
-			var cell: Vector2i = lattice[k]
-			var fallback: Vector2 = segments[mini(k, segments.size() - 1)][3]
-			var point := Layout.lattice(cell.x, cell.y)
-			if k > 0:
-				metres += point.distance_to(points[k - 1])
-			points.append(point)
-			dirs.append(_push(cell.x, cell.y, fallback))
-			along.append(metres)
-		var open := PackedFloat32Array()
-		var arch := PackedFloat32Array()
-		for k in along.size():
-			var from_start := along[k]
-			var from_end := metres - along[k]
-			open.append(minf(from_start, from_end))
-			arch.append(arch_start if from_start <= from_end else arch_end)
-		out.append({"points": points, "dirs": dirs, "along": along, "open": open, "arch": arch})
-	_runs[index] = out
+		out.append(_run_of(run["segments"], true, arch_start, arch_end))
+	_runs[cache] = out
 	return out
+
+
+## One run's columns from its segments: the lattice points in order, the way each is
+## pushed out, its distance from the run's start, and - when `jambed` - how far it
+## is from the nearer jamb and that jamb's head. A wall with no jamb reads `INF` for
+## both, which is a wall the room's field runs along without fading anywhere.
+static func _run_of(segments: Array, jambed: bool, arch_start: float, arch_end: float) -> Dictionary:
+	var points := PackedVector2Array()
+	var dirs := PackedVector2Array()
+	var along := PackedFloat32Array()
+	var lattice: Array[Vector2i] = [segments[0][0]]
+	for segment in segments:
+		lattice.append(segment[1])
+	var metres := 0.0
+	for k in lattice.size():
+		var cell: Vector2i = lattice[k]
+		var fallback: Vector2 = segments[mini(k, segments.size() - 1)][3]
+		var point := Layout.lattice(cell.x, cell.y)
+		if k > 0:
+			metres += point.distance_to(points[k - 1])
+		points.append(point)
+		dirs.append(_push(cell.x, cell.y, fallback))
+		along.append(metres)
+	var open := PackedFloat32Array()
+	var arch := PackedFloat32Array()
+	for k in along.size():
+		var from_start := along[k]
+		var from_end := metres - along[k]
+		open.append(minf(from_start, from_end) if jambed else INF)
+		arch.append(arch_start if from_start <= from_end else arch_end)
+	return {"points": points, "dirs": dirs, "along": along, "open": open, "arch": arch}
 
 
 ## A point `s` metres along a wall run: `{point, dir, tangent, open, arch}` - where

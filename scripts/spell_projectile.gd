@@ -28,6 +28,12 @@ var authoritative_damage := true
 var crit := false
 var proc_coeff := 1.0
 var on_hit: Callable = Callable()
+## A ranged bounce budget, shared by the bow and staff rows. A spell that folds
+## to another body deals its direct hit there instead of detonating on the first.
+var bounces := 0
+var bounce_scale := 0.8
+var bounce_provider: Callable = Callable()
+var _bounced: Dictionary = {}
 var source_rig
 ## The caster's body; mobs read it through `note_attacker`.
 var shooter: Node3D
@@ -108,6 +114,14 @@ func _handle_hit(hit: Dictionary, next: Vector3) -> void:
 		and not is_shield
 	var enemy_hit := is_unit and collider.has_method("take_damage")
 	global_position = hit.position
+	if is_unit and not visual_only \
+			and not _victims.has(unit.get_instance_id()) and bounces > 0:
+		_victims[unit.get_instance_id()] = true
+		if authoritative_damage:
+			_apply_direct(unit, hit.position)
+		if _try_bounce(unit, hit.position):
+			impacted.emit(enemy_hit, hit.position)
+			return
 	if is_unit and not visual_only and not _victims.has(unit.get_instance_id()) and pierce > 0:
 		_victims[unit.get_instance_id()] = true
 		pierce -= 1
@@ -130,6 +144,35 @@ func _handle_hit(hit: Dictionary, next: Vector3) -> void:
 			AbilityFx.burst(get_parent() as Node3D, global_position, AbilityFx.BONE, 0.9)
 		detonated.emit(global_position, velocity.normalized())
 	queue_free()
+
+
+## Fold to the next body instead of detonating. The spell keeps one projectile's
+## worth of life and loses `bounce_scale` of its damage on each hop.
+func _try_bounce(collider: Object, at: Vector3) -> bool:
+	if bounces <= 0 or not bounce_provider.is_valid():
+		return false
+	if collider != null and collider is Node:
+		_bounced[(collider as Node).get_instance_id()] = true
+	var found: Variant = bounce_provider.call(at, _bounced, 12.0)
+	if not (found is Node3D) or not is_instance_valid(found):
+		return false
+	var target: Node3D = found
+	if not (target is CollisionObject3D):
+		return false
+	var direction: Vector3 = (target.global_position + Vector3.UP * 1.1) - at
+	if direction.length_squared() <= 0.0001:
+		return false
+	bounces -= 1
+	damage *= maxf(0.0, bounce_scale)
+	flying = true
+	global_position = at + direction.normalized() * 0.08
+	velocity = direction.normalized() * maxf(velocity.length(), 12.0)
+	look_at(global_position + velocity, Vector3.UP)
+	var rid: RID = target.get_rid()
+	if not _excluded.has(rid):
+		_excluded.append(rid)
+	_query.exclude = _excluded
+	return true
 
 
 func _apply_direct(unit: Node3D, at: Vector3) -> void:

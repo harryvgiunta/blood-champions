@@ -20,8 +20,9 @@ signal meta_changed
 signal announcement(text: String)
 
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
-const SAVE_VERSION := 2
+const SAVE_VERSION := 3
 const DEFAULT_SAVE_PATH := "user://roguelite_meta.json"
 const RANGED_SLOT := "ranged"
 const MELEE_SLOT := "melee"
@@ -37,6 +38,11 @@ const STARTING_KEYS := 0
 
 var keys := STARTING_KEYS
 var unlocked: Array[String] = []
+## The combat abilities this player has opened, by `AbilityRules` id. A weapon is
+## unlocked once and equipped on the rack; an ability is unlocked once and then
+## equipped on a body whose hands fit its family. Neither is ever welded to a
+## piece, so a wipe keeps both.
+var unlocked_abilities: Array[String] = []
 var loadout := {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
 var runs := 0
 var best_level := 0
@@ -57,6 +63,7 @@ func _ready() -> void:
 func reset(persist: bool = true) -> void:
 	keys = STARTING_KEYS
 	unlocked.clear()
+	unlocked_abilities.clear()
 	loadout = {RANGED_SLOT: DEFAULT_RANGED, MELEE_SLOT: DEFAULT_MELEE}
 	runs = 0
 	best_level = 0
@@ -178,6 +185,43 @@ func unlock_cost_of(weapon_id: String) -> int:
 	return maxi(1, int(Weapons.get_weapon(weapon_id).get("unlock_cost", 3)))
 
 
+## The starter spell and the bare-hand fallback are the body's own; they are
+## never bought and never need a key.
+func is_ability_unlocked(ability_id: String) -> bool:
+	if AbilityRules.is_automatic(ability_id):
+		return true
+	if AbilityRules.by_id(ability_id).is_empty():
+		return false
+	return unlocked_abilities.has(ability_id)
+
+
+## Open one named ability for this player, at the price on its row. The rack calls
+## this for a locked row; the ability is then equippable on every body whose hands
+## fit its family. There is no pool and no roll.
+func ability_unlock_cost(ability_id: String) -> int:
+	return AbilityRules.unlock_cost_of(ability_id)
+
+
+func unlock_ability(ability_id: String) -> Dictionary:
+	var definition := AbilityRules.by_id(ability_id)
+	if definition.is_empty() or AbilityRules.is_automatic(ability_id):
+		return {"ok": false, "message": "That skill cannot be unlocked."}
+	var display := str(definition.get("name", ability_id)).capitalize()
+	if unlocked_abilities.has(ability_id):
+		return {"ok": false, "message": "%s is already open." % display}
+	var price := ability_unlock_cost(ability_id)
+	if keys < price:
+		return {"ok": false, "message": "%s wants %d keys. You carry %d." % [
+			display, price, keys]}
+	spend_keys(price)
+	unlocked_abilities.append(ability_id)
+	save_meta()
+	meta_changed.emit()
+	var text := "%s is open. Equip it on the rack." % display
+	announcement.emit(text)
+	return {"ok": true, "id": ability_id, "name": display, "message": text}
+
+
 func unlock_weapon(weapon_id: String) -> Dictionary:
 	if not Weapons.has(weapon_id):
 		return {"ok": false, "message": "That weapon is not in the armory."}
@@ -216,6 +260,7 @@ func save_meta() -> void:
 		"version": SAVE_VERSION,
 		"keys": keys,
 		"unlocked": unlocked,
+		"abilities": unlocked_abilities,
 		"loadout": loadout,
 		"runs": runs,
 		"best_level": best_level,
@@ -257,6 +302,15 @@ func load_meta() -> void:
 			var id := str(entry)
 			if Weapons.has(id) and not Weapons.is_default(id) and not unlocked.has(id):
 				unlocked.append(id)
+	unlocked_abilities.clear()
+	var raw_abilities: Variant = data.get("abilities", [])
+	if raw_abilities is Array:
+		for entry in raw_abilities:
+			var id := str(entry)
+			if AbilityRules.by_id(id).is_empty() or AbilityRules.is_automatic(id):
+				continue
+			if not unlocked_abilities.has(id):
+				unlocked_abilities.append(id)
 	var raw_loadout: Variant = data.get("loadout", {})
 	if raw_loadout is Dictionary:
 		var saved: Dictionary = raw_loadout
@@ -278,6 +332,6 @@ func _ensure_defaults() -> void:
 
 
 func describe() -> String:
-	return "%d key%s  ·  %d/%d weapons open  ·  best level %d" % [
+	return "%d key%s  ·  %d/%d weapons open  ·  %d/%d skills open  ·  best level %d" % [
 		keys, "" if keys == 1 else "s", unlocked_ids().size(), Weapons.all_ids().size(),
-		best_level]
+		unlocked_abilities.size(), AbilityRules.unlockable_ids().size(), best_level]

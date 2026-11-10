@@ -776,7 +776,7 @@ static func den_members(den: Dictionary, mode: String = "") -> Array:
 	if melee.is_empty():
 		return out
 	var inner := (ROOMS[index]["rect"] as Rect2).grow(-CROWD_WALL)
-	var keep_out := _crowd_keep_out(index)
+	var keep_out := crowd_keep_out(index)
 	var spots: Array[Vector2] = []
 	var z := inner.position.y
 	while z <= inner.end.y + 0.001:
@@ -841,9 +841,12 @@ static func _narrow(gaps: PackedFloat32Array, spots: Array[Vector2], at: Vector3
 		gaps[index] = minf(gaps[index], spots[index].distance_to(flat))
 
 
-## `[point, radius]` pairs (cave x/z) no crowd body may stand inside in one room:
-## its doors, and every light and prop on its floor.
-static func _crowd_keep_out(index: int) -> Array:
+## `[point, radius]` pairs (cave x/z) no body may stand inside in one room: the
+## room's ways out, and every light and prop the plan stands on its floor. The
+## crowd keeps off them (`den_members`) and so does anything else that has to find
+## a spot in a room of this plan standing in the room as it was cut - the arena's
+## own chamber (`arena_cave.gd`), which builds one room of it and nothing else.
+static func crowd_keep_out(index: int) -> Array:
 	var out: Array = []
 	var list := doors()
 	for door_index in doors_of(index):

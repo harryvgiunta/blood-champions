@@ -52,10 +52,11 @@ const KEY_RESERVE := "reserve"
 ## falls back to a bandage under 30%, a bow gives ground when crowded and looses
 ## again. The automatic arming reads the same field when it picks a piece.
 const KEY_DISPOSITION := "disposition"
-## The player's own hotbar sequence for this body: ability ids in the order they
-## laid the ten keys out (`Warband.hotbar_layout`). `[]` means the kit's own
-## order. An id whose piece is stowed is kept here and skipped by
-## `AbilityRules.granted`, so a swap does not erase the place the player gave it.
+## The skills the player has equipped on this body, in key order. The unlock is
+## the player's; this list is the body's. An id whose family the current hands do
+## not fit is kept here and skipped by `AbilityRules.granted`, so a weapon swap
+## does not erase the place the player gave it. `[]` means the bar is the starter
+## spell, the consumables and nothing else.
 const KEY_HOTBAR := "hotbar_order"
 ## The slots the player filled by hand, in the order they did it. A pinned slot
 ## is the player's: the loot arming never fills it, the band's arming pass never
@@ -111,19 +112,22 @@ static func sanitise_manual(value: Variant) -> Array[String]:
 	return out
 
 
-## A saved hotbar layout in the shape the game writes: ability ids, each once,
-## at most one per key. A record written before the player could reorder the
-## keys has none, and plays in kit order, which is what `[]` means.
+## A saved equipped list in the shape the game writes: real catalog ability ids,
+## each once, automatic ids and consumables dropped, capped at the seven keys a
+## body has beside the starter spell. A record from before the ability book has
+## none, and the bar falls back to the starter, which is what `[]` means.
 static func sanitise_hotbar(value: Variant) -> Array[String]:
 	var out: Array[String] = []
 	if not value is Array:
 		return out
 	for item in value:
 		var id := str(item) if typeof(item) == TYPE_STRING else ""
-		if id.is_empty() or out.has(id):
+		if id.is_empty() or out.has(id) or AbilityRules.is_automatic(id):
+			continue
+		if AbilityRules.by_id(id).is_empty():
 			continue
 		out.append(id)
-		if out.size() >= AbilityRules.SLOT_COUNT:
+		if out.size() >= AbilityRules.MAX_EQUIPPED:
 			break
 	return out
 

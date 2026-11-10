@@ -1,0 +1,62 @@
+{
+  "generator": "tools/fx_textures.py",
+  "license": "CC BY-NC-SA 4.0 (section 3 of LICENSE.md)",
+  "textures": [
+    {
+      "file": "flame_8x1.png",
+      "id": "flame",
+      "h_frames": 8,
+      "v_frames": 1,
+      "use": "fire plume flipbook, white-hot base"
+    },
+    {
+      "file": "smoke_8x1.png",
+      "id": "smoke",
+      "h_frames": 8,
+      "v_frames": 1,
+      "use": "rolling smoke flipbook"
+    },
+    {
+      "file": "spark_4x4.png",
+      "id": "spark",
+      "h_frames": 4,
+      "v_frames": 4,
+      "use": "ember, glint, ash, chip"
+    },
+    {
+      "file": "crescent.png",
+      "id": "crescent",
+      "h_frames": 1,
+      "v_frames": 1,
+      "use": "tapered blade crescent"
+    },
+    {
+      "file": "glint.png",
+      "id": "glint",
+      "h_frames": 1,
+      "v_frames": 1,
+      "use": "upright swing streak"
+    },
+    {
+      "file": "shock_ring.png",
+      "id": "shock_ring",
+      "h_frames": 1,
+      "v_frames": 1,
+      "use": "force ring"
+    },
+    {
+      "file": "rune_ring.png",
+      "id": "rune_ring",
+      "h_frames": 1,
+      "v_frames": 1,
+      "use": "ward rune circle"
+    },
+    {
+      "file": "splat.png",
+      "id": "splat",
+      "h_frames": 1,
+      "v_frames": 1,
+      "use": "blood splat"
+    }
+  ]
+}

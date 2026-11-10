@@ -4,6 +4,7 @@ extends RefCounted
 
 const BladeTrail = preload("res://scripts/blade_trail.gd")
 const LungeWake = preload("res://scripts/lunge_wake.gd")
+const Vfx = preload("res://scripts/vfx_library.gd")
 
 const FIRE := Color("ff8a3c")
 const FIRE_CORE := Color("ffd9a0")
@@ -116,42 +117,7 @@ static func spark_particles(color: Color, amount: int, speed_min: float,
 ## Billboard smoke on the cached soft sprite: wider, slower and rotated puffs
 ## instead of the old flat untextured quads. Callers still own the lifetime.
 static func smoke_particles(color: Color, amount: int, lifetime: float) -> CPUParticles3D:
-	var particles := CPUParticles3D.new()
-	particles.amount = clampi(amount, 1, 96)
-	particles.lifetime = lifetime
-	particles.one_shot = true
-	particles.explosiveness = 0.55
-	particles.local_coords = false
-	particles.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	particles.emission_sphere_radius = 0.42
-	particles.flatness = 0.35
-	particles.direction = Vector3(0.0, 1.0, 0.0)
-	particles.spread = 62.0
-	particles.gravity = Vector3(0.16, 0.34, 0.10)
-	particles.initial_velocity_min = 0.35
-	particles.initial_velocity_max = 1.15
-	particles.damping_min = 0.35
-	particles.damping_max = 0.95
-	particles.scale_amount_min = 1.2
-	particles.scale_amount_max = 1.7
-	particles.scale_amount_curve = smoke_growth_curve()
-	particles.angle_min = 0.0
-	particles.angle_max = 360.0
-	particles.angular_velocity_min = -16.0
-	particles.angular_velocity_max = 16.0
-	var gradient := Gradient.new()
-	gradient.offsets = PackedFloat32Array([0.0, 0.18, 0.62, 1.0])
-	gradient.colors = PackedColorArray([
-		Color(color.r, color.g, color.b, 0.0),
-		Color(color.r, color.g, color.b, 0.62),
-		Color(color.r * 0.62, color.g * 0.58, color.b * 0.55, 0.38),
-		Color(color.r * 0.28, color.g * 0.26, color.b * 0.24, 0.0),
-	])
-	particles.color_ramp = gradient
-	var quad := smoke_quad(1.0)
-	(quad.material as StandardMaterial3D).billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	particles.mesh = quad
-	particles.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var particles := Vfx.smoke_particles(color, amount, lifetime, 0.55)
 	return particles
 
 
@@ -442,6 +408,17 @@ static func explosion(parent: Node3D, at: Vector3, radius: float,
 	ring.material_override = ring_material
 	ring.scale = Vector3(0.15, 0.5, 0.15)
 	root.add_child(ring)
+	# The fire itself: a crown of painted flame frames over the additive core, so
+	# the blast has tongues and flicker instead of a smooth orange gradient.
+	var flames := Vfx.flame_particles(color, 22, 2.2, 6.4, 0.62, radius * 0.28)
+	flames.position = Vector3(0.0, 0.18, 0.0)
+	flames.emitting = true
+	root.add_child(flames)
+	var embers := Vfx.smoke_particles(Color(0.34, 0.30, 0.28), 14, 1.35,
+		radius * 0.34)
+	embers.position = Vector3(0.0, 0.3, 0.0)
+	embers.emitting = true
+	root.add_child(embers)
 	var sparks := soft_spark_particles(color, 64, 4.0, 11.0, 0.65, 0.075)
 	sparks.emitting = true
 	root.add_child(sparks)
@@ -483,6 +460,10 @@ static func ground_shockwave(parent: Node3D, origin: Vector3, radius: float) -> 
 	root.name = "AbilityShockwave"
 	parent.add_child(root)
 	root.global_position = origin + Vector3.UP * 0.08
+	# The painted force ring, laid flat under the dust. It is the shape the eye
+	# reads as a shockwave; the dust and debris only give it weight.
+	Vfx.decal(parent, origin + Vector3.UP * 0.06, Vfx.RING,
+		Vector2.ONE * radius * 2.2, Color(DUST.r, DUST.g, DUST.b, 0.30), 0.42)
 	var ring_mesh := TorusMesh.new()
 	ring_mesh.inner_radius = 0.9
 	ring_mesh.outer_radius = 1.0
@@ -634,38 +615,13 @@ static func sprite_tint(sprite: MeshInstance3D) -> StandardMaterial3D:
 ## cooling tail, sized in metres rather than a tessellated ball.
 static func soft_spark_particles(color: Color, amount: int, speed_min: float,
 		speed_max: float, lifetime: float, size: float, one_shot: bool = true) -> CPUParticles3D:
-	var particles := CPUParticles3D.new()
-	particles.amount = clampi(amount, 1, 160)
-	particles.lifetime = lifetime
-	particles.one_shot = one_shot
-	particles.explosiveness = 1.0 if one_shot else 0.0
-	particles.local_coords = false
-	particles.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	particles.emission_sphere_radius = 0.12
-	particles.direction = Vector3.UP
-	particles.spread = 180.0
-	particles.gravity = Vector3(0.0, -7.0, 0.0)
-	particles.initial_velocity_min = speed_min
-	particles.initial_velocity_max = speed_max
-	particles.damping_min = 0.5
-	particles.damping_max = 1.6
-	particles.scale_amount_min = 0.7
-	particles.scale_amount_max = 1.5
-	var gradient := Gradient.new()
-	gradient.offsets = PackedFloat32Array([0.0, 0.3, 0.72, 1.0])
-	gradient.colors = PackedColorArray([
-		Color(1.0, 0.99, 0.94, 1.0),
-		Color(color.r, color.g, color.b, 0.9),
-		Color(color.r * 0.88, color.g * 0.4, color.b * 0.2, 0.5),
-		Color(color.r * 0.4, color.g * 0.16, color.b * 0.1, 0.0),
-	])
-	particles.color_ramp = gradient
-	var quad := QuadMesh.new()
-	quad.size = Vector2.ONE * size * 2.6
-	quad.material = particle_sprite_material(soft_dot_texture(), color, true)
-	particles.mesh = quad
-	particles.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return particles
+	# Painted sparks: the 4x4 atlas gives each particle its own ember, glint, ash
+	# flake or chip, which is the difference between a burst and a handful of dots.
+	var painted := Vfx.spark_burst(color, amount, speed_min, speed_max, lifetime,
+		size * (2.6 / 3.0))
+	painted.one_shot = one_shot
+	painted.explosiveness = 1.0 if one_shot else 0.0
+	return painted
 
 
 ## Flat additive ribbon in the local XZ plane opening toward -Z, unit radius and

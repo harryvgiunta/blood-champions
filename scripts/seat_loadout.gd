@@ -7,7 +7,6 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
-const TrinketStats = preload("res://scripts/trinket_stats.gd")
 
 const TRINKET_SLOTS := ["neck", "ring1", "ring2"]
 
@@ -20,10 +19,8 @@ static func hand(value: Variant, slot: String) -> String:
 		return ""
 	return id
 
-## Stats ride the rig's own trinket dictionary; skills replace the hand gates,
-## so every welded skill on a held piece fires from the hand that holds it. A
-## hand with no weld keeps the stock skill `apply_loadout` put there, and a hand
-## with several welds keeps all of them.
+## Stats ride the rig's own trinket dictionary. A weld is a number or a proc
+## now; skills are the player's equipped list, not the steel's.
 static func _apply_annoints(rig, annoints: Dictionary) -> void:
 	if rig == null or annoints.is_empty():
 		return
@@ -35,27 +32,26 @@ static func _apply_annoints(rig, annoints: Dictionary) -> void:
 	var hand_stats: Variant = annoints.get("hands", {})
 	if hand_stats is Dictionary and rig.has_method("set_hand_annointments"):
 		rig.set_hand_annointments(hand_stats)
-	var skills: Variant = annoints.get("skills", {})
 	var marks: Variant = annoints.get("marks", {})
 	if marks is Dictionary and rig.has_method("set_annoint_marks"):
 		rig.set_annoint_marks(marks)
-	if not skills is Dictionary:
-		return
-	var current: Variant = rig.get("anointed")
-	var held: Dictionary = current if current is Dictionary else {}
-	var hands := {
-		"main": AbilityRules.skill_ids(held.get("main", "")),
-		"off": AbilityRules.skill_ids(held.get("off", "")),
-	}
-	# The worn trinkets weld their own skills: a necklace carries its cord's
-	# skill the same way a hand carries its steel's.
-	for slot in TrinketStats.ABILITY_ORDER:
-		hands[slot] = AbilityRules.skill_ids(held.get(slot, ""))
-	for hand in skills.keys():
-		var welded := AbilityRules.skill_ids((skills as Dictionary).get(hand, ""))
-		if not welded.is_empty():
-			hands[str(hand)] = welded
-	rig.anointed = hands
+
+## Every unlocked combat skill whose family fits the kit, in catalog order, capped
+## at the seven keys a body has beside its starter. Used only for a body with no
+## player's list behind it.
+static func _default_abilities(loadout: Dictionary) -> Array[String]:
+	var main: Dictionary = State.ITEMS.get(str(loadout.get("main", "")), {})
+	var off: Dictionary = State.ITEMS.get(str(loadout.get("off", "")), {})
+	var out: Array[String] = []
+	for id in AbilityRules.unlockable_ids():
+		var definition := AbilityRules.by_id(id)
+		if definition.is_empty() or not AbilityRules.fits_gear(definition, main, off):
+			continue
+		out.append(id)
+		if out.size() >= AbilityRules.MAX_EQUIPPED:
+			break
+	return out
+
 
 ## The worn kit travels beside the hands. Each id must be a real catalog item
 ## legal in its slot; anything else becomes an empty slot.
@@ -68,24 +64,27 @@ static func trinkets(value: Variant) -> Dictionary:
 		kit[slot] = hand(source.get(slot,""),slot)
 	return kit
 
-## `anointed` is the altar ledger's list of anointed catalog ids. It is a local,
-## trusted argument and never read from `loadout`: a seat loadout can arrive over
-## the wire, and a peer must not be able to claim a skill its steel was never given.
-## `annoints` is the same kind of trusted-local argument as `anointed`: the
-## warband's own ledger, never a loadout field. `{stats: Dictionary,
-## skills: {main, off, neck, ring1, ring2}, marks: {main, off},
-## hands: {main, off}}`; a bare dictionary leaves the rig alone. `marks` is how
-## many annointments each held copy carries, which the rig draws on the piece,
-## and `hands` the welds that ride one hand's steel (`overhead_damage` and its
-## like) rather than the body's whole kit. `hotbar_order` is the player's
-## own sequence for the ten keys, read off the mercenary's record: it changes the
-## slot a skill fires from and never which skills the kit grants, so it rides
-## beside the loadout too.
-static func apply(rig, loadout: Dictionary, anointed: Array = [],
-		annoints: Dictionary = {}, hotbar_order: Array = []) -> void:
+## `annoints` is the warband's own trusted-local ledger, never a loadout field:
+## `{stats: Dictionary, marks: {main, off}, hands: {main, off}}`; a bare
+## dictionary leaves the rig alone. `marks` is how many annointments each held
+## copy carries, which the rig draws on the piece, and `hands` the welds that
+## ride one hand's steel (`overhead_damage` and its like) rather than the body's
+## whole kit. `ability_loadout` is the player's equipped ability ids for this
+## body, read off the mercenary's record; `gain` shows only the families its
+## current hands fit. `starter_ability` is the caller's reading of whether a
+## player is inside the body being dressed: only then is it given the starter
+## spell, so a squadmate never gains a caster it never had.
+static func apply(rig, loadout: Dictionary, annoints: Dictionary = {},
+		ability_loadout: Array = [], starter_ability: bool = false) -> void:
 	if rig == null or loadout.is_empty():
 		return
-	rig.set("hotbar_order", AbilityRules.skill_ids(hotbar_order))
+	var equipped := AbilityRules.equipped_ids(ability_loadout)
+	# A warband body nobody is inside - a squadmate, a borrowed seat - has no
+	# player to lay out its keys. Give it every skill its own hands fit, so the
+	# band fights with its kit instead of standing on the starter alone.
+	if equipped.is_empty() and not starter_ability:
+		equipped = _default_abilities(loadout)
+	rig.set("ability_loadout", equipped)
 	var bow: Variant = loadout.get("bow")
 	var sword: Variant = loadout.get("sword")
 	var armor: Variant = loadout.get("armor")
@@ -105,9 +104,12 @@ static func apply(rig, loadout: Dictionary, anointed: Array = [],
 		# Hub kits carry the whole paperdoll; the state script derives the
 		# weapon mode, staff, focus, shield and off-hand from the validated ids.
 		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
-		# hand falls through instead of wiping a valid seat.
+		# hand falls through instead of wiping a valid seat. `starter_ability` is
+		# the caller's own reading of whether a *player* is inside this body: the
+		# starter spell is the player's key, not a squadmate's.
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else rig.armor_pieces.duplicate()
-		rig.apply_loadout(State.build_loadout(main,off,pieces,worn,anointed))
+		rig.apply_loadout(State.build_loadout(main,off,pieces,worn,
+			starter_ability))
 		_apply_annoints(rig, annoints)
 		return
 	# A kit that omits the hands still carries its worn trinkets.

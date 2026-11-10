@@ -12,7 +12,6 @@ extends Node
 signal changed
 ## A piece just woke into its skill at the altar. Whatever dresses bodies off the
 ## roster listens, so every body already holding a copy carries the skill at once.
-signal anointed(item_id: String, ability: String)
 ## A copy's annointment list changed: `[entry ids]`, in weld order.
 signal annointed_state(item_id: String, entries: Array)
 ## The warband armed itself out of the pool: these mercenaries' kits changed, so
@@ -50,8 +49,8 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## checkpoint bookmark (`checkpoint`), the autosave that remembers which stretch
 ## of the world the warband has already played; v5 carried a campaign ledger that
 ## v17 deleted - the game has no quests, and a file that still names one opens with
-## no orders at all; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
-## steel that has been given its skill; v7 dropped the expedition's battle ledger
+## no orders at all; v6 added the altar's anointed pieces (retired in v18: a skill
+## is the player's unlock, never a piece's); v7 dropped the expedition's battle ledger
 ## (`runs`, `run_totals`); v8 added the delve (`delve`): the inventory packed at
 ## the Hollow's mouth and, while a party is below, who went down; v9 added the
 ## party's mode (`party_mode`), how the squad picks its fights; v10 added the
@@ -62,7 +61,9 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## pool and rate the floor is built with; v13 added each record's hotbar layout
 ## (`hotbar_order`), the sequence of ability ids the player has laid on the ten
 ## keys; v16 added each record's hand-set slots (`manual`), the pieces automatic
-## arming may never touch. Older files still load: a record with no sets puts
+## arming may never touch; v18 makes `hotbar_order` the equipped ability list
+## (player-level unlocks, family-filtered on the bar) and clears pre-v18 layouts,
+## which were reorders of skills anointed onto steel. Older files still load: a record with no sets puts
 ## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file still carrying a
 ## ledger ignores it, a file without anointings carries plain steel, a file
@@ -73,7 +74,7 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## hotbar layout fires every skill from the key the kit's own order gives it, a
 ## file without a delve mode goes down an easy Hollow, and a file without hand-set
 ## slots leaves every slot to the arming, as it always did.
-const SAVE_VERSION := 17
+const SAVE_VERSION := 18
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -1102,17 +1103,12 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 	var committed := false
 	var skill := ""
 	match outcome:
-		AnnointRoll.Outcome.ADD_ABILITY, AnnointRoll.Outcome.ADD_PASSIVE:
+		AnnointRoll.Outcome.ADD_PASSIVE:
 			committed = annoints.add(item_id, copy, added)
 		AnnointRoll.Outcome.REMOVE:
 			committed = annoints.remove_id(item_id, copy, removed)
 		AnnointRoll.Outcome.REPLACE:
 			committed = annoints.replace(item_id, copy, removed, added)
-	if committed and not added.is_empty():
-		var entry := AnnointCatalog.by_id(added)
-		if entry != null and int(entry.kind) == AnnointCatalog.Kind.ABILITY:
-			skill = str(entry.ability)
-			anointed.emit(item_id, skill)
 	annointed_state.emit(item_id, annoints.ids(item_id, copy))
 	_notify()
 	var message := str(rolled["message"])
@@ -1246,9 +1242,6 @@ func weld(item_id: String, ordinal: int, entry_id: String) -> Dictionary:
 		stash.add(CruorScript.BASIC_REAGENT, vials)
 		return {"ok": false, "message": "The piece refused the weld.", "item_id": item_id}
 	var skill := ""
-	if int(entry.kind) == AnnointCatalog.Kind.ABILITY:
-		skill = str(entry.ability)
-		anointed.emit(item_id, skill)
 	annointed_state.emit(item_id, annoints.ids(item_id, copy))
 	_notify()
 	var line := "%s takes %s  [%d / %d]" % [str(item.get("name", item_id)),
@@ -1447,25 +1440,11 @@ func annointment_hands(merc_id: int) -> Dictionary:
 		out[slot] = annoints.hand_stats_for(item_id, annoint_copy(merc_id, slot))
 	return out
 
-## The skills this body's annointments wake, one list per worn slot: a copy may
-## carry several ability welds and every one of them reaches the hotbar - a hand's
-## from the hand that holds it, a necklace's from the neck that wears it.
-func annointment_skills(merc_id: int) -> Dictionary:
-	var kit := roster.equipped_of(merc_id)
-	var out := {"main": [], "off": []}
-	for slot in AnnointCatalog.JEWELRY_SLOTS:
-		out[slot] = []
-	for slot in ["main", "off"] + AnnointCatalog.JEWELRY_SLOTS:
-		var item_id := str(kit.get(slot, ""))
-		if item_id.is_empty():
-			continue
-		out[slot] = annoints.skills_of(item_id, annoint_copy(merc_id, slot))
-	return out
-
 ## The procs this body's annointments arm: `AnnointRuntime` reads this once per
 ## dress and rolls the verbs itself.
 func annointment_procs(merc_id: int) -> Array:
 	return annoints.procs_for(annoint_refs(merc_id))
+
 
 ## How many annointments each held copy carries, per worn slot. The rig draws a
 ## hand's as inlaid marks on the weapon; the preview draws the necklace's on its
@@ -1482,123 +1461,150 @@ func annointment_marks(merc_id: int) -> Dictionary:
 		out[slot] = annoints.count(item_id, annoint_copy(merc_id, slot))
 	return out
 
-## How much this body wants its own annointed kit, 0..1, for the arming pass.
-func annointment_want(merc_id: int, disposition: String) -> float:
-	return annoints.want_for(annoint_refs(merc_id), disposition)
+
+## The ability book for one body: every catalog ability, its family, whether the
+## player owns it, whether it fits the kit that body is wearing, and whether the
+## player has it on the bar. The rack draws the locked rows; the paperdoll draws
+## the equipped ones.
+func ability_book(merc_id: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var meta = get_node_or_null("/root/Roguelite")
+	var gear := roster.equipped_of(merc_id) if roster.has(merc_id) else {}
+	var main_row: Dictionary = State.ITEMS.get(str(gear.get("main", "")), {})
+	var off_row: Dictionary = State.ITEMS.get(str(gear.get("off", "")), {})
+	var equipped := roster.hotbar_order_of(merc_id) if roster.has(merc_id) else []
+	for id in AbilityRules.catalog_ids():
+		var definition := AbilityRules.by_id(id)
+		if definition.is_empty():
+			continue
+		var automatic := AbilityRules.is_automatic(id)
+		var unlocked := automatic or (meta != null and bool(meta.is_ability_unlocked(id)))
+		out.append({
+			"id": id,
+			"name": str(definition.get("name", id)),
+			"type": AbilityRules.type_of(definition),
+			"types": AbilityRules.families_of(definition),
+			"description": str(definition.get("description", "")),
+			"cost": AbilityRules.unlock_cost_of(id),
+			"unlocked": unlocked,
+			"automatic": automatic,
+			"fits": AbilityRules.fits_gear(definition, main_row, off_row),
+			"equipped": equipped.has(id),
+		})
+	return out
+
+
+## Put one ability on or take it off a body's bar. The unlock is the player's;
+## the equip is the body's, and it keeps bow and sword skills side by side until
+## the 8-key kit is full. The bar itself hides the families the current hands do
+## not fit, so a stored row can wait for the other weapon set.
+func toggle_ability(merc_id: int, ability_id: String) -> Dictionary:
+	if not roster.has(merc_id):
+		return {"ok": false, "message": "No such mercenary.", "order": []}
+	var definition := AbilityRules.by_id(ability_id)
+	if definition.is_empty() or AbilityRules.is_automatic(ability_id):
+		return {"ok": false, "message": "That skill cannot be equipped.", "order": []}
+	var order := roster.hotbar_order_of(merc_id)
+	var equipped := order.has(ability_id)
+	if equipped:
+		order.erase(ability_id)
+	else:
+		if order.size() >= AbilityRules.MAX_EQUIPPED:
+			return {"ok": false,
+				"message": "The bar holds seven equipped skills beside the family starters.",
+				"order": []}
+		var gear := roster.equipped_of(merc_id)
+		var main_row: Dictionary = State.ITEMS.get(str(gear.get("main", "")), {})
+		var off_row: Dictionary = State.ITEMS.get(str(gear.get("off", "")), {})
+		if not AbilityRules.fits_gear(definition, main_row, off_row):
+			return {"ok": false,
+				"message": "Hold a %s to equip %s." % [
+					AbilityRules.requirement_label(definition),
+					str(definition.get("name", ability_id)).capitalize()],
+				"order": []}
+		order.append(ability_id)
+	var result := set_hotbar_order(merc_id, order)
+	if bool(result.get("ok", false)):
+		result["message"] = "%s %s." % [str(definition.get("name", ability_id)),
+			"taken off the bar" if equipped else "equipped"]
+	return result
+
 
 # --- the hotbar -------------------------------------------------------------
 #
-# The altar decides which skills a kit grants; the player decides which of the
-# ten keys each one sits on. The layout is a sequence of ability ids stored per
-# mercenary (`WarbandRoster.KEY_HOTBAR`), and `AbilityRules.granted` lays the kit
-# out through it, so the HUD, the runner and the paperdoll all read one order.
-# The layout never grants a skill: an id the kit does not wake is skipped.
+# The player equips an ability once, on the rack; every body carries the same
+# player-level unlock list and its own equipped sequence. A body's current hands
+# decide which of those equipped skills are actually on its keys: a bow skill
+# waits while the sword is out and comes back with the bow. The starter spell
+# follows the equipped list only when the hands fit its staff family, the
+# bare-hand charge after that when there is no main hand, and the bandage and
+# potion keep the last two keys.
 
-## The skill ids this body's kit grants right now, in kit order. Mirrors the
-## dressing `SeatLoadout` runs, without a rig: a roster record may have no body
-## at all (a reserve, a name the scene never spawned) and the paperdoll still
-## has to draw the keys that body would fire.
+## The skill ids this body's bar carries right now, in key order. Mirrors the
+## dressing `SeatLoadout` runs, without a rig: a roster record may have no body at
+## all (a reserve, a name the scene never spawned) and the paperdoll still has to
+## draw the keys that body would fire.
 func hotbar_kit(merc_id: int) -> Array[String]:
 	var out: Array[String] = []
 	var gear := roster.equipped_of(merc_id)
 	var main_id := str(gear.get("main", ""))
 	var off_id := str(gear.get("off", ""))
-	var main := ""
-	var off := ""
-	var hands := {"main": [], "off": []}
-	if not main_id.is_empty():
-		main = AbilityRules.stock_item(State.ITEMS.get(main_id, {}))
-		hands["main"] = _hotbar_hand(main_id, "main", merc_id)
-	# The off hand only performs a skill while it holds a shield: an off-hand
-	# blade is a dual-wield partner, and `AbilityRules.off_item` grants nothing
-	# for it either.
-	if str(State.ITEMS.get(off_id, {}).get("category", "")) == "shield":
-		off = AbilityRules.stock_item(State.ITEMS.get(off_id, {}))
-		hands["off"] = _hotbar_hand(off_id, "off", merc_id)
-	var trinkets := {"neck": str(gear.get("neck", "")),
-		"ring1": str(gear.get("ring1", "")), "ring2": str(gear.get("ring2", ""))}
-	# A worn necklace or ring wakes the skills the altar welded to that copy,
-	# exactly as the rig hears it through `SeatLoadout`; the stock grant rides
-	# alongside whichever ids the cord carries.
-	for slot in AnnointCatalog.JEWELRY_SLOTS:
-		var worn_id := str(gear.get(slot, ""))
-		if worn_id.is_empty():
+	var main_row: Dictionary = State.ITEMS.get(main_id, {})
+	var off_row: Dictionary = State.ITEMS.get(off_id, {})
+	for id in roster.hotbar_order_of(merc_id):
+		var definition := AbilityRules.by_id(id)
+		if definition.is_empty() or AbilityRules.is_automatic(id) or out.has(id):
 			continue
-		var welded := annoints.skills_of(worn_id, annoint_copy(merc_id, slot))
-		if not welded.is_empty():
-			hands[slot] = welded
-	for definition in AbilityRules.grants_for(main, off, hands, trinkets):
-		var id := str(definition.get("id", ""))
-		if id.is_empty() or out.has(id):
+		if not AbilityRules.fits_gear(definition, main_row, off_row):
 			continue
 		out.append(id)
-	# The two consumables every body carries, after the kit's own skills - the
-	# same order `AbilityRules.granted` lays on the rig, so the page's row and
-	# the keys a fight fires cannot disagree about where the bandage sits.
+	# The body's own family starters. The roster cannot tell an AI seat from the
+	# player's, so the page draws every starter its hands earn and the rig decides
+	# whether to grant them.
+	for id in AbilityRules.starter_ids_for_gear(main_row, off_row):
+		if not out.has(id):
+			out.append(id)
+	if main_id.is_empty() and not out.has("charge"):
+		out.append("charge")
+	var kit_slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
+	if out.size() > kit_slots:
+		out.resize(kit_slots)
 	for id in AbilityRules.CONSUMABLE_IDS:
 		if not out.has(id):
 			out.append(id)
 	return out
 
 
-## The skills one hand of this body's kit wakes: the copy's own welds when the
-## altar welded any, otherwise the piece's catalog anointing - the same two
-## sources `SeatLoadout.apply` reads for the live rig.
-func _hotbar_hand(item_id: String, hand: String, merc_id: int) -> Array[String]:
-	var welded := annoints.skills_of(item_id, annoint_copy(merc_id, hand))
-	if not welded.is_empty():
-		return welded
-	var skill := State.anointed_skill(item_id, 1 if hand == "off" else 0,
-		cruor.anointed_among([item_id]))
-	var out: Array[String] = []
-	if not skill.is_empty():
-		out.append(skill)
-	return out
-
-
-## The body's kit skills in the player's own sequence, one per hotbar slot. The
-## layout ranks the kit and the eight keys before the consumables take the first
-## eight, the same cap `AbilityRules.granted` applies - so a kit with more welds
-## than keys draws the same row on the HUD and in the paperdoll. The bandage and
-## the potion are not the kit's and are laid by `hotbar_layout`.
-func hotbar_skills(merc_id: int) -> Array[String]:
-	var kit: Array[String] = []
-	for id in hotbar_kit(merc_id):
-		if not AbilityRules.CONSUMABLE_IDS.has(id):
-			kit.append(id)
-	var ordered := AbilityRules.ordered_ids(kit, roster.hotbar_order_of(merc_id))
-	var slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
-	var out: Array[String] = []
-	for index in mini(ordered.size(), slots):
-		out.append(ordered[index])
-	return out
-
-
-## The ten keys exactly as the HUD draws them: the kit's sequence on the first
-## eight, the bandage on key 9 and the potion on key 0, "" for a key that fires
-## nothing. The two consumables keep their keys whatever the kit or the saved
-## sequence says, which is the same rule `AbilityRules._layout` applies to the
-## rig - the page and the fight cannot disagree about where the bandage sits.
+## The ten keys exactly as the HUD draws them: the body's kit on the first eight,
+## the bandage on key 9 and the potion on key 0, "" for a key that fires nothing.
 func hotbar_layout(merc_id: int) -> Array[String]:
-	var kit := hotbar_skills(merc_id)
+	var kit := hotbar_kit(merc_id)
 	var kit_slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
 	var out: Array[String] = []
 	for index in AbilityRules.SLOT_COUNT:
 		out.append("")
-	for index in mini(kit.size(), kit_slots):
-		out[index] = kit[index]
-	var granted := hotbar_kit(merc_id)
+	var kit_index := 0
+	var consumables := {}
+	for id in kit:
+		if AbilityRules.CONSUMABLE_IDS.has(id):
+			consumables[id] = true
+			continue
+		if kit_index >= kit_slots:
+			continue
+		out[kit_index] = id
+		kit_index += 1
 	for offset in AbilityRules.CONSUMABLE_IDS.size():
 		var id := str(AbilityRules.CONSUMABLE_IDS[offset])
-		if granted.has(id):
+		if consumables.has(id) and kit_slots + offset < out.size():
 			out[kit_slots + offset] = id
 	return out
 
 
-## Lay the body's skills out on the ten keys. `order` is a sequence of ability
-## ids; ids this body's kit does not grant are dropped, and every grant the
-## sequence leaves out is appended in kit order, so what is stored is always a
-## permutation of what the body can actually fire. Answers `{ok, message, order}`.
+## Lay the body's equipped skills out in the player's own order. `order` is the
+## full sequence of ability ids: queued ids are validated against the catalog,
+## the automatic starters/consumables are dropped (they have their own keys),
+## and the list is capped at `AbilityRules.MAX_EQUIPPED`. Answers
+## `{ok, message, order}`.
 func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 	if lent:
 		if ask_gear("hotbar_order", [merc_id, order]):
@@ -1607,37 +1613,29 @@ func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 		return _lent_refusal({"order": []})
 	if not roster.has(merc_id):
 		return {"ok": false, "message": "No such mercenary.", "order": []}
-	var kit := hotbar_kit(merc_id)
 	var laid: Array[String] = []
 	for item in order:
 		var id := str(item)
-		if id.is_empty() or not kit.has(id) or laid.has(id):
+		if id.is_empty() or laid.has(id) or AbilityRules.is_automatic(id):
 			continue
-		if AbilityRules.CONSUMABLE_IDS.has(id):
+		if AbilityRules.by_id(id).is_empty():
 			continue
+		if laid.size() >= AbilityRules.MAX_EQUIPPED:
+			break
 		laid.append(id)
-	for id in kit:
-		if laid.has(id) or AbilityRules.CONSUMABLE_IDS.has(id):
-			continue
-		laid.append(id)
-	# The last two keys are the consumables' own: the sequence arranges the kit,
-	# and the bandage and the potion ride after it wherever the caller named them.
-	for id in AbilityRules.CONSUMABLE_IDS:
-		if kit.has(id) and not laid.has(id):
-			laid.append(id)
 	roster.set_hotbar_order(merc_id, laid)
 	# The body in the world is dressed from the record, so its own key order
 	# follows the write; a body nobody is inside picks it up at its next spawn.
 	armed.emit([merc_id])
 	_notify()
-	return {"ok": true, "message": "The keys are laid out.", "order": laid}
+	return {"ok": true, "message": "The ability keys are laid out.", "order": laid}
 
 
-## Move the skill on key `from_slot` to key `to_slot`, swapping whatever was
-## there. Slots are the ten keys the number row fires, not indices into the
-## stored sequence, so moving a skill into an empty key closes the row up
-## behind it. The bandage and the potion keep the last two keys and are not
-## movable: a body always has them. Answers `{ok, message, order}`.
+## Move the equipped skill on key `from_slot` to key `to_slot`, swapping whatever
+## was there. Slots are the ten keys the number row fires, not indices into the
+## stored sequence. The starter spell and the two consumables keep their keys and
+## are not movable; skills whose family the current hands do not fit are not drawn
+## on this row, so a move among the visible keys leaves them in the stored list.
 func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary:
 	if lent:
 		if ask_gear("hotbar_move", [merc_id, from_slot, to_slot]):
@@ -1657,24 +1655,45 @@ func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary
 		return {"ok": false, "message": "The bandage keeps key 9 and the potion key 0.",
 			"order": []}
 	var layout := hotbar_layout(merc_id)
+	if AbilityRules.is_automatic(layout[from_slot]) \
+			or AbilityRules.is_automatic(layout[to_slot]):
+		return {"ok": false,
+			"message": "The starter spell (when it fits) and the consumables keep their keys.",
+			"order": []}
 	if layout[from_slot].is_empty() and layout[to_slot].is_empty():
 		return {"ok": false, "message": "Both keys are empty.", "order": []}
-	var held := layout[from_slot]
-	layout[from_slot] = layout[to_slot]
-	layout[to_slot] = held
-	var order: Array[String] = []
-	for id in layout:
-		if not id.is_empty():
-			order.append(id)
-	var result := set_hotbar_order(merc_id, order)
+	var visible: Array[String] = []
+	var swapped := layout.duplicate()
+	var held: String = str(swapped[from_slot])
+	swapped[from_slot] = str(swapped[to_slot])
+	swapped[to_slot] = held
+	for index in kit_slots:
+		var id := str(swapped[index])
+		if not id.is_empty() and not AbilityRules.is_automatic(id):
+			visible.append(id)
+	var full := roster.hotbar_order_of(merc_id)
+	var out: Array[String] = []
+	var next := 0
+	for id in full:
+		if layout.has(id) and not AbilityRules.is_automatic(id):
+			if next < visible.size():
+				out.append(visible[next])
+				next += 1
+		else:
+			out.append(id)
+	while next < visible.size():
+		out.append(visible[next])
+		next += 1
+	var result := set_hotbar_order(merc_id, out)
 	if bool(result.get("ok", false)):
 		result["message"] = "Skills swapped." if not layout[from_slot].is_empty() \
 			and not layout[to_slot].is_empty() else "Skill moved."
 	return result
 
 
-## Drop the player's layout: the keys follow the kit again - the main hand, the
-## off hand, then the necklace, ring 1 and ring 2.
+## Drop the player's equipped list. The automatic rows stay - the starter when
+## the hands fit it, and the two consumables; the ability book is where a new row
+## is laid.
 func reset_hotbar(merc_id: int) -> Dictionary:
 	if lent:
 		if ask_gear("hotbar_reset", [merc_id]):
@@ -1686,18 +1705,10 @@ func reset_hotbar(merc_id: int) -> Dictionary:
 	roster.set_hotbar_order(merc_id, [])
 	armed.emit([merc_id])
 	_notify()
-	return {"ok": true, "message": "The keys follow the kit again.", "order": []}
+	return {"ok": true,
+		"message": "The ability keys are clear; the automatic rows remain.",
+		"order": []}
 
-## A piece found already anointed - a rare watcher's steel below (`delve_loot.gd`)
-## - wakes into its skill the moment the warband takes it, and `anointed` dresses
-## the bodies already holding a copy, exactly as the altar's rite does. Nothing is
-## spent. False for a lent warband, a piece with no skill, and one already awake.
-func grant_anointing(item_id: String) -> bool:
-	if lent or not cruor.grant_anointing(item_id):
-		return false
-	anointed.emit(item_id, cruor.anointed_skill(item_id))
-	_notify()
-	return true
 
 func hire(merc_name: String = "") -> Dictionary:
 	if lent:
@@ -2392,7 +2403,14 @@ func load_state() -> bool:
 	if int(parsed.get("version", 0)) > SAVE_VERSION:
 		push_warning("Warband: %s is from a newer build" % save_path)
 		return false
+	var version := int(parsed.get("version", 0))
 	from_dict(parsed)
+	# Before v18 the hotbar was a reordering of skills anointed onto steel. The
+	# anoint grant is gone; a clean cutover empties those lists rather than
+	# silently equipping old welds as if the player had unlocked them.
+	if version < 18:
+		for merc_id in roster.ids():
+			roster.set_hotbar_order(int(merc_id), [])
 	# A party still below in the file never climbed out: the game was left while
 	# it was down there (a quit, an exit, a crash). That is a fall, not a pause -
 	# otherwise leaving the game would be the way to keep what a fall costs.

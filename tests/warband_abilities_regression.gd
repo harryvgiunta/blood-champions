@@ -153,20 +153,19 @@ func _check_number_row(actor) -> void:
 	actor.ability.cooldowns[0] = 0.0
 	actor.stamina = actor.max_stamina
 
-	# The kit's skills take the first eight keys; the bandage and the potion keep
-	# the last two. A bow with every bow weld plus the shield pool and the amulet's
-	# ward is more grants than the eight keys before the consumables, so the
-	# surplus waits and the two consumables are always on the bar.
+	# The equipped skills take the first keys; the bandage and the potion keep
+	# the last two. The list is capped at seven beside the starter.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
-	actor.rig.anointed = {"main": AbilityRules.skill_ids([
+	actor.rig.set_ability_loadout([
 		"barrage", "triple_volley", "piercing_shot", "rain_of_ash", "skewer",
-		"shield_bash", "shield_charge", "shield_slam", "rebuke", "energy_shield",
-	]), "off": []}
+		"dash", "energy_shield", "three_strike",
+	])
 	var grants: Array = AbilityRules.granted(actor.rig)
 	check(grants.size() == AbilityRules.SLOT_COUNT,
-		"ten grants fill ten slots")
-	check(not grants[7].is_empty(),
-		"the eighth key is the kit's last skill, got %s" % str(grants[7].get("id", "")))
+		"the hotbar is always ten slots")
+	check(_granted_ids(grants).size() == 9,
+		"seven equipped skills and the two consumables fill nine keys, got %s"
+		% str(_granted_ids(grants)))
 	check(str(grants[8].get("id", "")) == "bandage"
 			and str(grants[9].get("id", "")) == "healing_potion",
 		"the last two keys are the bandage and the potion, got %s / %s"
@@ -193,6 +192,7 @@ func _check_number_row(actor) -> void:
 ## The HUD reads the possessed body: stamina beside health, and one hotbar tile
 ## per slot labelled with the key that actually fires it.
 func _check_hud(world: Node3D, actor) -> void:
+	actor.rig.set_ability_loadout([])
 	var hud := HudScript.new()
 	hud.name = "Hud"
 	world.add_child(hud)
@@ -221,53 +221,51 @@ func _check_hud(world: Node3D, actor) -> void:
 	check(tiles[1].visible and tile_id(tiles[1]).is_empty(),
 		"a hand with no grant keeps an empty numbered slot")
 
-	# Stock steel carries no skill: a dagger and a buckler off the shelf leave the
-	# hand slots empty, while the amulet's worn grant takes the first free slot.
+	# Stock steel carries no skill: a dagger and a buckler with no equipped list
+	# leave every kit slot empty; the consumables still take the last two.
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
 		{"neck": "neck_shield"}))
+	actor.rig.set_ability_loadout([])
 	actor.stamina = actor.max_stamina
 	hud.set_body(actor, "Probe", 1)
-	check(tile_id(tiles[0]) == "energy_shield",
-		"the worn amulet's grant takes slot 1, got %s" % tile_id(tiles[0]))
-	check(tile_id(tiles[1]).is_empty() and tile_key(tiles[1]) == "2",
-		"stock steel in both hands leaves the second slot empty and numbered")
+	check(tile_id(tiles[0]).is_empty() and tile_key(tiles[0]) == "1",
+		"stock steel leaves the first slot empty and numbered, got %s"
+		% tile_id(tiles[0]))
 
-	# The same kit anointed grants three skills: main hand, shield and amulet.
-	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
-		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
+	# Equipped on that dagger-and-shield kit: the dagger skill, the shield skill
+	# and an any-hand ward, then the consumables.
+	actor.rig.set_ability_loadout(["backstab", "shield_bash", "energy_shield"])
 	hud.set_body(actor, "Probe", 1)
-	var anointed_ids := ["backstab", "shield_bash", "energy_shield"]
-	check(_granted(tiles) == anointed_ids.size() + 2,
-		"an anointed kit fills three slots and the two consumables fill the last two, got %d"
+	var equipped_ids := ["backstab", "shield_bash", "energy_shield"]
+	check(_granted(tiles) == equipped_ids.size() + 2,
+		"three equipped skills and the two consumables fill five slots, got %d"
 		% _granted(tiles))
-	for index in anointed_ids.size():
-		check(tile_id(tiles[index]) == anointed_ids[index],
-			"slot %d draws %s, got %s" % [index, anointed_ids[index],
+	for index in equipped_ids.size():
+		check(tile_id(tiles[index]) == equipped_ids[index],
+			"slot %d draws %s, got %s" % [index, equipped_ids[index],
 			tile_id(tiles[index])])
 		check(tile_key(tiles[index]) == str(index + 1),
 			"tile %d is labelled %d, got %s" % [index, index + 1,
 			tile_key(tiles[index])])
 
-	# The bug this exists for: a piece can carry several welded skills and every
-	# worn trinket can grant one, so each has to take its own hotbar slot instead
-	# of being hidden behind the first.
+	# Every equipped skill takes its own hotbar slot in the order the player laid
+	# it, rather than being hidden behind the first.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR,
 		{"neck": "neck_shield", "ring1": "ring_dash"}))
-	actor.rig.anointed = {"main": AbilityRules.skill_ids(["barrage", "triple_volley"]),
-		"off": []}
+	actor.rig.set_ability_loadout(["barrage", "triple_volley", "energy_shield", "dash"])
 	hud.set_body(actor, "Probe", 1)
-	var welded_ids := ["barrage", "triple_volley", "energy_shield", "dash"]
-	check(_granted(tiles) == welded_ids.size() + 2,
-		"two welded skills, two trinkets and the two consumables fill six slots, got %d"
+	var bow_ids := ["barrage", "triple_volley", "energy_shield", "dash"]
+	check(_granted(tiles) == bow_ids.size() + 2,
+		"four equipped skills and the two consumables fill six slots, got %d"
 		% _granted(tiles))
-	for index in welded_ids.size():
-		check(tile_id(tiles[index]) == welded_ids[index],
-			"slot %d draws %s, got %s" % [index, welded_ids[index],
+	for index in bow_ids.size():
+		check(tile_id(tiles[index]) == bow_ids[index],
+			"slot %d draws %s, got %s" % [index, bow_ids[index],
 			tile_id(tiles[index])])
 		check(tile_key(tiles[index]) == str(index + 1),
 			"hotbar slot %d keeps its number, got %s" % [index + 1,
 			tile_key(tiles[index])])
-	check(tile_id(tiles[welded_ids.size()]).is_empty(),
+	check(tile_id(tiles[bow_ids.size()]).is_empty(),
 		"the rest of the kit's keys stay empty")
 	check(tile_id(tiles[AbilityRules.SLOT_COUNT - 2]) == "bandage"
 			and tile_id(tiles[AbilityRules.SLOT_COUNT - 1]) == "healing_potion",
@@ -279,12 +277,22 @@ func _check_hud(world: Node3D, actor) -> void:
 	# Hand the later checks a melee kit back: the guard checks below need a blade
 	# in the hand, and this test's last kit is a bow.
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
-		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
+		{"neck": "neck_shield"}))
 	actor.stamina = actor.max_stamina
 
 	hud.set_body(null, "", -1)
 	check(not tiles[0].visible, "no body hides every tile")
 	hud.queue_free()
+
+
+## The non-empty ids a grant list names, in key order.
+func _granted_ids(definitions: Array) -> Array:
+	var out := []
+	for definition in definitions:
+		var id := str(definition.get("id", ""))
+		if not id.is_empty():
+			out.append(id)
+	return out
 
 
 ## How many hotbar slots are drawing a skill this frame.
@@ -355,46 +363,139 @@ func _check_ability_node(world: Node3D, actor, controller) -> void:
 		"binding one body twice leaves one connection, got %d"
 		% abilities.bound_bodies().size())
 
-	# A stock bow carries nothing: slot 0 is empty and its key starts nothing.
+	# A stock bow with an empty equipped list carries nothing: slot 0 is empty
+	# and its key starts nothing.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
+	actor.rig.set_ability_loadout([])
 	check(AbilityRules.definition_for(actor.rig, 0).is_empty(), "a stock shortbow grants no skill")
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
 	check(not bool(actor.try_ability(0).get("ok", true)), "the stock bow's key starts nothing")
 
-	# Anointed, the same bow wakes into the Barrage, whose cue spawns arrows.
-	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR, {}, ["bow_short"]))
+	# Equipped, the same bow fires the Barrage: the whole fan leaves on the press
+	# itself - no draw, no nock, no wind-up to wait for.
+	actor.rig.set_ability_loadout(["barrage"])
 	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "barrage",
-		"the anointed shortbow grants the Barrage")
+		"the equipped shortbow grants the Barrage")
 	var outcome: Dictionary = actor.try_ability(0)
 	check(bool(outcome.get("ok", false)), "the Barrage starts")
-	actor.ability.cue.emit("barrage", "shot", 0)
-	check(abilities.missiles().size() == 1,
-		"one cue spawns one arrow, got %d" % abilities.missiles().size())
+	check(abilities.missiles().size() == 6,
+		"the whole barrage leaves on the press, got %d" % abilities.missiles().size())
 
 	# A body that does not own the simulation must not spawn a second one, even
 	# if its runner is still holding the skill.
 	actor.authoritative = false
 	actor.ability.cue.emit("barrage", "shot", 1)
-	check(abilities.missiles().size() == 1,
+	check(abilities.missiles().size() == 6,
 		"a replica's cue spawns nothing, got %d" % abilities.missiles().size())
 	actor.authoritative = true
 	actor.ability.cancel()
 
 	# A staff cast resolves through the same node: the spell projectile is the
-	# second missile, and its blast is wired to the body's own combat.
-	actor.rig.apply_loadout(State.build_loadout("staff_fire", "", ARMOR, {}, ["staff_fire"]))
+	# seventh missile, and its blast is wired to the body's own combat.
+	actor.rig.apply_loadout(State.build_loadout("staff_fire", "", ARMOR))
+	actor.rig.set_ability_loadout([])
+	actor.rig.starter_ability = AbilityRules.STARTER_GRANT
 	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "fireball",
-		"the anointed ember staff grants the Fireball")
+		"the starter spell rides any staff")
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
 	check(bool(actor.try_ability(0).get("ok", false)), "the Fireball starts")
 	actor.ability.advance(0.6)
-	check(abilities.missiles().size() == 2,
+	check(abilities.missiles().size() == 7,
 		"the cast cue spawns the spell, got %d missiles" % abilities.missiles().size())
 	actor.ability.cancel()
+
+	# A bow skill is castable while the string is being drawn. The activation
+	# takes the body into the skill's own bow beat; the half draw is dropped.
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
+	actor.rig.set_ability_loadout(["barrage"])
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+	actor.rig.begin_draw()
+	check(str(actor.rig.phase) == "DRAWING",
+		"the bow is drawing before the skill press (%s)" % str(actor.rig.phase))
+	var drawn: Dictionary = actor.try_ability(0)
+	check(bool(drawn.get("ok", false)),
+		"a bow skill starts while the string is drawn: %s"
+		% str(drawn.get("message", "")))
+	check(str(actor.rig.phase) == "ABILITY",
+		"and the skill takes the body into its own beat (%s)" % str(actor.rig.phase))
+	actor.ability.cancel()
+
+	# The previous shot's own recovery is not a lock on the key either: a bow
+	# skill fires from the bow's beat instead of waiting for it to finish.
+	actor.ability.cooldowns.fill(0.0)
+	actor.stamina = actor.max_stamina
+	actor.rig.phase = "RECOVER"
+	actor.rig._phase_time = 0.12
+	var recovering: Dictionary = actor.try_ability(0)
+	check(bool(recovering.get("ok", false)),
+		"a bow skill starts during the bow's recovery: %s"
+		% str(recovering.get("message", "")))
+	check(str(actor.rig.phase) == "ABILITY",
+		"and the shot takes the body out of the recovery (%s)" % str(actor.rig.phase))
+	actor.ability.cancel()
 	_check_necklace(world, actor, abilities)
+	_check_starter_venom(world, actor, abilities)
 	abilities.queue_free()
+
+
+## The starter bow's venom: the shot's own arrow carries the dose, a landed shaft
+## lays it on the body it opened, and the clock pays 5 a second for 5 s whether or
+## not the skill is still being performed.
+func _check_starter_venom(world: Node3D, actor, abilities) -> void:
+	var victim := fighter(world, 6, Vector3(4.0, 0.0, -4.0))
+	victim.health = 200.0
+	victim.max_health = 200.0
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
+	actor.rig.set_ability_loadout([])
+	actor.rig.starter_ability = AbilityRules.STARTER_GRANT
+	actor.ability.cancel()
+	actor.ability.cooldowns.fill(0.0)
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+
+	var effect: Dictionary = AbilityRules.by_id("snap_shot").get("effect", {})
+	check(is_equal_approx(float(effect.get("poison_dps", 0.0)), 5.0),
+		"the Snap Shot authors 5 dps, got %s" % str(effect.get("poison_dps")))
+	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "snap_shot",
+		"a bare bow draws the Snap Shot as its starter")
+	# The earlier beats' shafts are still tracked; this check counts only its own.
+	abilities._missiles.clear()
+	var started: Dictionary = actor.try_ability(0)
+	check(bool(started.get("ok", false)), "the Snap Shot starts: %s"
+		% str(started.get("message", "")))
+	var missiles: Array = abilities.missiles()
+	check(missiles.size() == 1, "one shaft leaves, got %d" % missiles.size())
+	if missiles.size() == 1:
+		var arrow = missiles[0]
+		check(arrow.on_hit.is_valid(), "the shaft carries an on-hit")
+		var before: float = victim.health
+		arrow.on_hit.call(victim, victim.global_position, 7.0, false, 1.0)
+		for _step in 20:
+			abilities._physics_process(0.25)
+		var lost: float = before - victim.health
+		check(absf(lost - 25.0) < 0.75,
+			"5 dps for 5 s took %.2f, expected 25" % lost)
+		var settled: float = victim.health
+		for _step in 8:
+			abilities._physics_process(0.25)
+		check(is_equal_approx(victim.health, settled),
+			"the dose stops when its clock runs out")
+		# A second hit refreshes the dose; it never stacks a twin on the body.
+		var rest: float = victim.health
+		arrow.on_hit.call(victim, victim.global_position, 7.0, false, 1.0)
+		arrow.on_hit.call(victim, victim.global_position, 7.0, false, 1.0)
+		for _step in 20:
+			abilities._physics_process(0.25)
+		check(absf((rest - victim.health) - 25.0) < 0.75,
+			"two doses on one body still pay 25, got %.2f"
+			% (rest - victim.health))
+	abilities._venoms.clear()
+	actor.ability.cancel()
+	actor.ability.cooldowns.fill(0.0)
+	victim.queue_free()
 
 
 ## The necklace's three words on a real rig and a real victim: a landed blow is
@@ -455,7 +556,7 @@ func _check_necklace(world: Node3D, actor, abilities) -> void:
 	# --- Stone Skin: a ward the cord itself performs, on any hand
 	actor.rig.apply_loadout(State.build_loadout("sword_short", "", ARMOR,
 		{"neck": "neck_bone"}))
-	actor.rig.anointed = {"main": [], "off": [], "neck": ["stone_skin"]}
+	actor.rig.set_ability_loadout(["stone_skin"])
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
 	var ward_slot := -1
@@ -484,7 +585,7 @@ func _check_necklace(world: Node3D, actor, abilities) -> void:
 		lineup.append(dummy)
 	actor.rig.apply_loadout(State.build_loadout("sword_short", "dagger_iron", ARMOR,
 		{"neck": "neck_bone"}))
-	actor.rig.anointed = {"main": [], "off": [], "neck": ["three_strike"]}
+	actor.rig.set_ability_loadout(["three_strike"])
 	var grants: Array = AbilityRules.granted(actor.rig)
 	var slot := -1
 	for index in grants.size():

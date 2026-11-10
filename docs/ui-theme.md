@@ -111,7 +111,7 @@ numerals preferred: `I`, `III`). Body copy never sits in Pirata One.
 | --- | --- |
 | Tutorial card | clamp 880 × 580, chapter name, drop-cap body, keycaps, chapter stamps, brass CONTINUE, step seal |
 | Warband (O) | ledger header (purse/worth), mercenary rows, state chips, brass CONTROL, recruiter rows |
-| Gear (P) | the frontier equipment page in the new skin: warband tabs on top, ten worn slots left, live ranger stage centre, trinket rail + KIT column right, collective stash as the grid underneath |
+| Gear (I) | the frontier equipment page in the new skin: warband tabs on top, ten worn slots left, live ranger stage centre, trinket rail + KIT column right, collective stash as the grid underneath |
 | Quick menu (ESC) | rubricated sections, resume primary, save/display secondary, two lacquer exits, last-writing block |
 | Title | wordmark, skull seal, plate stack, no clamp |
 | Quartermaster | narrow clamp, stock rows (mark, name, category, price, BUY), purse and held-count header |
@@ -127,7 +127,7 @@ Wired and verified in the running game:
 | Tutorial card | `LedgerFrame` + plate rack + bone keycaps + chapter stamps + step seal |
 | Quick menu (Esc) | `LedgerFrame`, rubricated sections, brass resume, lacquer exits |
 | Warband (O) | `LedgerFrame`, Pirata names, chip textures, brass CONTROL, recruiter |
-| Gear (P) | frontier layout in the new skin: tabs on top, worn slots with marks, live ranger preview stage, stash rows |
+| Gear (I) | frontier layout in the new skin: tabs on top, worn slots with marks, live ranger preview stage, stash rows |
 | Battle readout (HUD) | the same materials in the corners: the soul's plate (bust in `clamp.png`, health over stamina, the skill row) bottom left and the band's plate (purse on the header `rail.png`, one row per body with its disposition medallion) top right |
 | Quartermaster | `LedgerFrame`, purse in Pirata, stock rows with BUY plates |
 | Sacrificial altar | `LedgerFrame`, tier rail, three ritual columns, brass BURN THE SIGIL |
@@ -150,10 +150,19 @@ stretch), focus state = hover plate, keycaps wrapped by an `HFlowContainer`.
 ### Pointer
 
 A visible window owns the pointer. `LedgerFrame` keeps `Input.mouse_mode`
-`VISIBLE` for as long as it is visible (including a sub-page, whose
-open runs before `world_scene` captures the mouse in `_ready`), and every menu's
-`open()` sets it on the same frame as the press. Closing does not capture: the
-scene's own policy takes the pointer back once no panel is open.
+`VISIBLE` for as long as it is visible (including a sub-page), and every menu's
+`open()` sets it on the same frame as the press. Closing does not capture by
+itself: the world's own per-frame policy (`world_scene._tick_frame`,
+`town_hub._process`) asks `PointerGate.wanted(panel_open)` and writes the answer.
+
+`PointerGate` (`scripts/pointer_gate.gd`, autoload) decides capture, because Godot
+warps the cursor to the middle of the window on every capture transition -
+focused or not. It starts released and refuses a capture until the player has
+clicked in this window; it refuses while this window is not the focused one and
+releases on focus loss; `Esc` while captured hands the pointer back until the
+next click. `--no-mouse-capture` / `IRONWOOD_MOUSE_CAPTURE=0`, and every headless
+run, never capture at all - the way an unattended verification instance is
+launched beside a working desktop.
 
 ## Production plan (original)
 

@@ -1,8 +1,8 @@
 extends PanelContainer
-## The arena's board, and nothing else: three plates for how hard the ring is,
+## The arena's board, and nothing else: three plates for how hard the fight is,
 ## and one press to step into it.
 ##
-## It is deliberately thinner than the delve's page - the ring takes no pack and
+## It is deliberately thinner than the delve's page - the pit takes no pack and
 ## no party selection, because the whole field goes in and comes back - so the
 ## only two decisions are the tier and the press. The scene opens it; the
 ## `fight_requested` signal is the world's.
@@ -28,8 +28,15 @@ func configure(warband_state, arena) -> void:
 
 
 func _ready() -> void:
+	# The board hangs off the middle of the screen at its own size. The offsets are
+	# written out: anchors alone place a control that has not been laid out yet at
+	# its zero offsets, which is the corner, not the middle.
 	set_anchors_preset(Control.PRESET_CENTER)
-	custom_minimum_size = Vector2(420, 260)
+	custom_minimum_size = Vector2(420, 300)
+	offset_left = -210.0
+	offset_right = 210.0
+	offset_top = -150.0
+	offset_bottom = 150.0
 	visible = false
 	_build()
 
@@ -89,7 +96,7 @@ func _build() -> void:
 		_plates[tier] = plate
 
 	var fight := Button.new()
-	fight.text = "STEP INTO THE RING"
+	fight.text = "STEP INTO THE PIT"
 	fight.custom_minimum_size = Vector2(392, 46)
 	fight.pressed.connect(func() -> void: fight_requested.emit(_tier))
 	box.add_child(fight)
@@ -109,4 +116,7 @@ func _paint() -> void:
 		var plate: Button = _plates[tier]
 		plate.disabled = str(tier) == _tier
 	if _status != null:
-		_status.text = "THE RING  ·  %s" % _tier.to_upper()
+		var where := ""
+		if _arena != null and not str(_arena.room_label()).is_empty():
+			where = "  ·  " + str(_arena.room_label())
+		_status.text = "THE PIT  ·  %s%s" % [_tier.to_upper(), where]

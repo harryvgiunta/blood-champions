@@ -47,17 +47,53 @@ const BLADE_RANGE := 11.0
 ## through its own shot lane instead of backing off.
 const BOW_MIN_RANGE := 6.0
 
-const MAIN_POOL := [
-	"bow_short","bow_recurve","bow_long",
-	"sword_short","sword_arming","sword_great",
-	"dagger_iron","staff_fire","staff_bone",
+## What a clone is issued, one rung per depth block - one block is ten levels,
+## `stage_index + 1` in the director - so the kit steps on the same beat the run
+## does and never mid-block. A body in the first block carries what an unblooded
+## ranger can lift: a short bow, a plain blade, a dagger, leather or cloth. Mail
+## arrives in the second block, plate in the third, the long bow and the great
+## sword in the fourth, and the fire staff at the fifth and every block after.
+## `armor` indexes `ArmorData.SET_IDS` (0 leather, 1 mail, 2 plate, 3 cloth).
+const DEPTH_KIT := [
+	{  # depth 1 - levels 1..10
+		"main": ["bow_short", "sword_short", "dagger_iron"],
+		"armor": [0, 3],
+	},
+	{  # depth 2 - levels 11..20: the recurve, the arming sword, the bone staff
+		"main": ["bow_short", "bow_recurve", "sword_short", "sword_arming",
+			"dagger_iron", "staff_bone"],
+		"armor": [0, 1, 3],
+	},
+	{  # depth 3 - levels 21..30: the great sword, and plate on the body
+		"main": ["bow_short", "bow_recurve", "sword_short", "sword_arming",
+			"sword_great", "dagger_iron", "staff_bone"],
+		"armor": [0, 1, 2, 3],
+	},
+	{  # depth 4 - levels 31..40: the long bow
+		"main": ["bow_short", "bow_recurve", "bow_long", "sword_short",
+			"sword_arming", "sword_great", "dagger_iron", "staff_bone"],
+		"armor": [0, 1, 2, 3],
+	},
+	{  # depth 5 - levels 41 and on: the fire staff
+		"main": ["bow_short", "bow_recurve", "bow_long", "sword_short",
+			"sword_arming", "sword_great", "dagger_iron", "staff_fire",
+			"staff_bone"],
+		"armor": [0, 1, 2, 3],
+	},
 ]
 const OFF_POOL := ["shield_buckler","shield_kite","shield_tower"]
 const FOCUS_POOL := ["focus_tome","focus_skull"]
 
 var kind := KIND
 var clone_id := 0
+## How deep the body stands, and the only thing its kit is picked by: a shallow
+## clone is issued a short bow or a plain blade, a deep one the great weapons and
+## the plate. The run's own curve scales the pool, so depth is not a second pool.
 var depth := 1
+## What one of its blows is worth against a ranger's own. A clone carries a real
+## kit and hits with it; the island sets this so a wave of them is a fight and not
+## a firing squad.
+var damage_scale := 1.0
 var authoritative := true
 var replica := false
 var auto_ai := true
@@ -182,7 +218,7 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	aggro_range = 40.0 if mode == "direct" else 30.0
 	leash = 60.0 if mode == "direct" else 42.0
 	_roll_loadout()
-	max_health = MAX_HEALTH * (1.0 + 0.15 * float(depth - 1))
+	max_health = _pool_health()
 	health = max_health
 	stamina = Stamina.MAX
 	alive = true
@@ -396,10 +432,58 @@ func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
 	_wander.assign(shared, ring_slot, pack_group)
 
 
+## The pool this body is born with, before any scene's own scale. One place for
+## the formula, because `configure` and `apply_difficulty` both set it and two
+## copies of the curve are two curves that can drift apart. Depth is *not* in it:
+## it already picks the kit, and the run's `life` carries how deep the party is -
+## counting depth twice made a level-two clone worth two wardens.
+func _pool_health(life: float = 1.0) -> float:
+	return maxf(1.0, MAX_HEALTH * maxf(0.01, life))
+
+
+## The run's floor applied to the body: `life` multiplies the pool its depth gave
+## it, and the verb sets from the depth rather than compounding, so a body scaled
+## twice is the floor's body, not its square. `rate` is accepted for the shared
+## dialect with the devils; a clone's step and swing clocks are its brain's own.
+func apply_difficulty(life: float, _rate: float = 1.0) -> void:
+	if not alive:
+		return
+	max_health = _pool_health(life)
+	health = max_health
+
+
+## Commit to a body. A clone's own rule is proximity (`aggro_range`), so a scene
+## that hands it a quarry seats it in the roster the brain walks and wakes the
+## body: from there the chase, the guard and the swing are the brain's own.
+func hunt(target: Node3D) -> void:
+	if not alive or not is_instance_valid(target) or target.get("alive") == false:
+		return
+	mob_wake()
+	fallback_target = target
+	if not targets.has(target):
+		targets.append(target)
+	_target = target
+	# The brain re-picks its quarry on a timer; a body that has just been handed
+	# one takes it on its next tick instead of finishing the old interval.
+	_retarget = 0.0
+
+
+## True while this body is fighting somebody. `squad_drive.retarget` asks before
+## re-arming a hunt, exactly as it does of the watchers and the devils.
+func hunting() -> bool:
+	return alive and _engaged(_target)
+
+
 func _roll_loadout() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 9001 + clone_id * 7919 + depth * 131
-	_main_item = str(MAIN_POOL[rng.randi_range(0,MAIN_POOL.size() - 1)])
+	# The kit is the depth block's, not the die's and not the level's: a body in
+	# the first ten levels is issued what an unblooded clone can lift, and the
+	# great blades and the plate only come out in the blocks that follow.
+	var rung: Dictionary = DEPTH_KIT[clampi(depth - 1, 0, DEPTH_KIT.size() - 1)]
+	var kit: Array = rung.get("main", ["sword_short"])
+	var sets: Array = rung.get("armor", [0])
+	_main_item = str(kit[rng.randi_range(0,kit.size() - 1)])
 	var off := ""
 	if _main_item in ["sword_short","sword_arming","dagger_iron"]:
 		var roll := rng.randf()
@@ -409,7 +493,7 @@ func _roll_loadout() -> void:
 			off = str(FOCUS_POOL[rng.randi_range(0,FOCUS_POOL.size() - 1)])
 	var pieces := {}
 	for slot in ["head","chest","hands","legs","feet"]:
-		pieces[slot] = rng.randi_range(0,3)
+		pieces[slot] = int(sets[rng.randi_range(0,sets.size() - 1)])
 	rig.apply_loadout(State.build_loadout(_main_item,off,pieces))
 	_tint_rig()
 
@@ -642,10 +726,10 @@ func _resolve_melee() -> void:
 
 func _melee_damage() -> float:
 	if rig.weapon == "dagger":
-		return float(Archer.dagger_profile(0).damage)
+		return float(Archer.dagger_profile(0).damage) * damage_scale
 	if rig.weapon == "bow":
 		return 0.0
-	return float(Archer.SWORD_DATA[clampi(rig.sword_index,0,2)].damage)
+	return float(Archer.SWORD_DATA[clampi(rig.sword_index,0,2)].damage) * damage_scale
 
 
 func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
@@ -653,7 +737,7 @@ func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge:
 		return
 	if not direction.is_finite() or direction.length_squared() < 0.01:
 		return
-	var damage := Combat.damage_for(rig.bow_index,charge)
+	var damage := Combat.damage_for(rig.bow_index,charge) * damage_scale
 	var arrow := Arrow.new()
 	arrow.source_id = combat.source_id
 	arrow.shooter = self

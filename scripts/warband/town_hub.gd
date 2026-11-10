@@ -26,6 +26,7 @@ extends Node3D
 ## which one a standing body is next to (`interact_at`).
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
@@ -261,7 +262,8 @@ func _ready() -> void:
 		controller.transfer_refused.connect(_on_transfer_refused)
 		controller.possession_released.connect(_on_possession_released)
 		_enter_first_body()
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# The pointer is the gate's business (`_process`): a hub that comes up in
+		# the background must not take the desktop's cursor with it.
 		print("TOWN_HUB_READY bodies=%d gold=%d stakes=%d buildings=%d keepers=%d guards=%d"
 			% [bodies.size(), warband.gold(), palisade_stakes, BUILDINGS.size(),
 				keepers.size(), guards.size()])
@@ -313,7 +315,7 @@ func _step_world(delta: float) -> void:
 func _process(delta: float) -> void:
 	Perf.begin("town.process")
 	if host == null:
-		var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
+		var wanted := PointerGate.wanted(_panel_open())
 		if Input.mouse_mode != wanted:
 			Input.mouse_mode = wanted
 	Perf.end()
@@ -334,7 +336,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_TAB:
 			_swap_weapon_set()
 			get_viewport().set_input_as_handled()
-		KEY_P:
+		KEY_I:
 			if paperdoll.is_open():
 				paperdoll.close()
 			else:
@@ -768,7 +770,19 @@ func _build_services() -> void:
 	# the moment the coin lands rather than bound when the board was built.
 	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
 	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
-	# The arena board. It lives on its own layer above the HUD, like the stalls.
+	# The arena board. It lives on its own layer above the HUD, like the stalls,
+	# and it is built with the services rather than with the standalone square's
+	# panels: the world embeds the town and owns the HUD, so a board made there
+	# would never exist in the campaign - and the gate is in the campaign.
+	var arena_layer := CanvasLayer.new()
+	arena_layer.name = "ArenaLayer"
+	arena_layer.layer = 9
+	add_child(arena_layer)
+	arena_menu = ArenaMenuScript.new()
+	arena_menu.name = "ArenaMenu"
+	arena_menu.visible = false
+	arena_layer.add_child(arena_menu)
+	arena_menu.fight_requested.connect(_on_arena_fight_requested)
 	var forge_layer := CanvasLayer.new()
 	forge_layer.name = "ForgeLayer"
 	forge_layer.layer = 9
@@ -781,7 +795,7 @@ func _build_services() -> void:
 
 
 ## The arena's gate: four stone posts and two lintels, standing in the dirt east
-## of the fire. Placeholder stone, like the ring it opens - the press is the thing.
+## of the fire. Plain stone, like the gate to a pit - the press is the thing.
 func _build_arena_gate() -> Node3D:
 	var gate := Node3D.new()
 	gate.name = "ArenaGate"
@@ -991,11 +1005,6 @@ func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HudLayer"
 	add_child(layer)
-	arena_menu = ArenaMenuScript.new()
-	arena_menu.name = "ArenaMenu"
-	arena_menu.visible = false
-	layer.add_child(arena_menu)
-	arena_menu.fight_requested.connect(_on_arena_fight_requested)
 	hud = HudScript.new()
 	hud.name = "WarbandHud"
 	layer.add_child(hud)
@@ -1080,8 +1089,15 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 		"arena":
 			_hide_panels()
 			if arena_menu != null:
+				# The room is drawn and cut while the tiers are read, not on the
+				# press: a chamber that has never grown in this session costs a
+				# quarter of a second to stand up. The board then names the chamber
+				# the band is about to be put into.
+				if host != null and host.get("arena") != null:
+					host.arena.prepare()
+				arena_menu.configure(warband, host.get("arena") if host != null else null)
 				arena_menu.open()
-			hud.set_status("THE ARENA: pick how hard the ring is, then step in.", 4.0)
+			hud.set_status("THE ARENA: pick how hard the fight is, then step in.", 4.0)
 		"roguelite_rack":
 			_open_forge("rack")
 			hud.set_status("THE WEAPON RACK: %d keys. Open steel, then bind the two pieces the run carries." % _meta_keys(), 4.0)
@@ -1194,12 +1210,16 @@ func service_point(service: String) -> Vector3:
 			return run_portal.global_position if run_portal != null else Vector3.ZERO
 	return Vector3.ZERO
 
-## The board's press: the tier is the ring's own, and the ring is the world's.
+## The board's press: the tier is the pit's own, and the pit is the world's. The
+## room is drawn from the host's dice, so a guest does not open one of its own.
 ## A town standing alone (its own preview scene) has no campaign around it, so it
 ## says so rather than pretending.
 func _on_arena_fight_requested(tier: String) -> void:
 	if host == null or host.get("arena") == null:
-		hud.set_status("The ring needs the campaign around it.", 3.0)
+		hud.set_status("The pit needs the campaign around it.", 3.0)
+		return
+	if bool(host.get("_client")):
+		hud.set_status("Co-op: the host takes the band into the pit.", 3.0)
 		return
 	var result: Dictionary = host.arena.enter(tier)
 	if bool(result.get("ok", false)):

@@ -9,8 +9,11 @@ extends SceneTree
 ## Writes media/concept/game_hud.png. Art-direction verification only.
 
 const OUT := "res://media/concept/game_hud.png"
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 func _initialize() -> void:
+	# The shot frames the aiming HUD; the tool takes no pointer to get it.
+	PointerGate.preview_aim = true
 	var packed: PackedScene = load("res://scenes/warband_world.tscn")
 	var scene := packed.instantiate()
 	root.add_child(scene)

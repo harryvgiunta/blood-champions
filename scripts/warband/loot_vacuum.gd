@@ -116,14 +116,12 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1, dress: bool = tr
 	# Heard where the piece lay, before `collect()` takes the node out of the
 	# tree: one pickup is one sound, and the drop's position is about to go.
 	var at := pickup.global_position
-	var awoke := _book_piece(stash, item_id, collector_peer, pickup.anointed)
+	_book_piece(stash, item_id, collector_peer)
 	pickup.collect()
 	drop_taken.emit(item_id, at)
 	SfxScript.pickup(at)
 	_notify_warband()
 	var message := _dress_message(item_id, collector_peer if dress else 0)
-	if awoke:
-		message += " %s." % str(_warband.cruor.anoint_line(item_id))
 	return {"ok": true, "item_id": item_id, "message": message}
 
 ## The mercenary the pickup should be worn by, or -1. A callable that throws or
@@ -165,7 +163,7 @@ func sweep(survivors: Array) -> Dictionary:
 		# One chime per piece, at the drop itself. The node is about to leave the
 		# tree, so the position is read first.
 		var at: Vector3 = pickup.global_position
-		_book_piece(stash, pickup.item_id, 0, pickup.anointed)
+		_book_piece(stash, pickup.item_id, 0)
 		ids.append(pickup.item_id)
 		pickup.collect()
 		SfxScript.pickup(at)
@@ -476,15 +474,12 @@ func describe() -> String:
 ## The one way a piece enters the warband: a real stash row plus a line in the
 ## ledger the battle report reads. Every caller resolves the stash first, because
 ## refusing before anything is booked is the only honest answer to a missing one.
-## A piece that came out of the Hollow already anointed wakes into its skill as it
-## is booked (`Warband.grant_anointing`); answers true when it did.
-func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int, anointed: bool = false) -> bool:
+## A piece is booked as plain steel; skills are the player's unlocks now.
+func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int) -> bool:
 	stash.add(item_id, 1)
-	var awoke: bool = anointed and _warband != null and is_instance_valid(_warband) \
-		and _warband.has_method("grant_anointing") and bool(_warband.grant_anointing(item_id))
 	_gathered.append(item_id)
 	booked.emit(item_id, collector_peer)
-	return awoke
+	return true
 
 ## The line a taker reads, and the one hand-off the warband allows: a piece taken
 ## by a soul standing in a living body snaps into that body's hands instead of only

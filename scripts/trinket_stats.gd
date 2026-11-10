@@ -52,12 +52,12 @@ const STATS := {
 	"neck_heartstone": {"health":25.0},
 	"neck_fervor": {"melee_damage":0.08, "attack_speed":0.06},
 	"neck_luck": {"gold_find":0.25},
-	"neck_shield": {},
+	"neck_shield": {"stamina":30.0, "guard":0.02},
 	# Off hand
 	"focus_skull_life": {"heal_on_kill":15.0},
 	"focus_skull_death": {"stamina_on_kill":15.0},
 	# Rings
-	"ring_dash": {},
+	"ring_dash": {"move_speed":0.06},
 	"ring_health": {"health":25.0},
 	"ring_ranged": {"ranged_damage":0.10},
 	"ring_melee": {"melee_damage":0.10},
@@ -72,16 +72,6 @@ const STATS := {
 	"ring_echo": {"cooldown":0.15},
 	"ring_ironhide": {"health":20.0, "guard":0.02},
 }
-
-## Trinkets that grant a skill, read in slot order: the necklace, ring 1 and
-## ring 2 each hand their grant to its own hotbar slot. `AbilityRules` owns the
-## definitions and the slot assignment.
-const ABILITY_ORDER := ["neck", "ring1", "ring2"]
-const ABILITY_GRANTS := {
-	"neck_shield": "energy_shield",
-	"ring_dash": "dash",
-}
-
 
 static func definition(id: String) -> Dictionary:
 	return STATS.get(id, {})
@@ -121,10 +111,6 @@ static func kit(equipped: Dictionary) -> Dictionary:
 	for slot in SLOTS:
 		trinkets[slot] = str(equipped.get(slot, ""))
 	return trinkets
-
-
-static func grant_for(id: String) -> String:
-	return str(ABILITY_GRANTS.get(id, ""))
 
 
 static func max_health(base: float, stats: Dictionary) -> float:
@@ -246,7 +232,4 @@ static func effect_summary(id: String) -> String:
 	var parts := PackedStringArray()
 	for row in rows:
 		parts.append("%s %s" % [str(row.label), str(row.value)])
-	var grant := grant_for(id)
-	if not grant.is_empty():
-		parts.append("SKILL %s" % grant.replace("_", " ").to_upper())
 	return "  •  ".join(parts)

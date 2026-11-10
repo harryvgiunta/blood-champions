@@ -11,8 +11,11 @@ extends WarbandPaperdoll
 ## taken, so there is no second inventory to reconcile.
 ##
 ## Looting a body is a click, not an aim, so opening this screen takes the mouse
-## pointer and closing it hands back the mode the scene had. `is_open()` is the
-## base class's and answers for both modes.
+## pointer and closing it hands back the mode the scene had, as far as
+## `PointerGate` allows a background window to have it. `is_open()` is the base
+## class's and answers for both modes.
+
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 var _pointer_before := Input.MOUSE_MODE_CAPTURED
 var _pointer_taken := false
@@ -95,4 +98,9 @@ func _release_pointer() -> void:
 	if not _pointer_taken:
 		return
 	_pointer_taken = false
-	Input.mouse_mode = _pointer_before
+	# The screen gives the pointer back the way it found it, but only the gate
+	# may actually capture it: a background window keeps the visible cursor.
+	if _pointer_before == Input.MOUSE_MODE_CAPTURED:
+		PointerGate.capture()
+	else:
+		PointerGate.release()

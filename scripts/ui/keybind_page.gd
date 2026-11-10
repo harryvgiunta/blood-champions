@@ -99,7 +99,7 @@ const RIGHT_ACTIONS := [
 const BOTTOM_ACTIONS := [
 	["USE · LATCH", "G"],
 	["TAKE", "K"],
-	["GEAR", "P"],
+	["GEAR", "I"],
 	["WARBAND", "O"],
 	["MAP", "M"],
 	["PARTY MODE", "B"],

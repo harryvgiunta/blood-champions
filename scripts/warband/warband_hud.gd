@@ -37,6 +37,7 @@ const Looks = preload("res://scripts/warband/warband_looks.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 const LAYER := 6
 ## The soul's plate keeps the width the paperdoll corner always had; the hotbar
@@ -214,11 +215,12 @@ func set_status(text: String, seconds: float = 2.5) -> void:
 
 func _process(delta: float) -> void:
 	Perf.begin("hud")
-	# The reticle belongs to the aiming body, so it is up exactly while the pointer
-	# is captured: a panel opens, the cursor comes back, the crosshair goes away.
+	# The reticle belongs to the aiming body, so it is up exactly while the player
+	# holds the pointer: a panel opens, the cursor comes back, the crosshair goes
+	# away. A capture tool sets `PointerGate.preview_aim` to frame that look
+	# without taking the desktop's cursor for it.
 	if _reticle != null:
-		_reticle.visible = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
-			and _body != null
+		_reticle.visible = PointerGate.aiming() and _body != null
 	if _status_seconds > 0.0:
 		_status_seconds -= delta
 		if _status_seconds <= 0.0:
@@ -1025,7 +1027,7 @@ func _nearest_engaged(entries: Array, ids: Array) -> Dictionary:
 	return best
 
 ## The purse on the band's header rail. Arrows are unlimited, so gold is the only
-## wallet on the strip; the run's crystals and keys have their own line.
+## wallet on the strip; the run's gold and keys have their own line.
 func _refresh_purse() -> void:
 	if _purse_label == null:
 		return

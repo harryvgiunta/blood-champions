@@ -169,11 +169,16 @@ static func materials() -> Dictionary:
 ## small ones hug the wall. What grows is drawn from the room's own seed, so it is
 ## the same on every machine and every descent, and it is grown once per process
 ## (`_grow`): a later descent only places it again.
-static func dress_room(node: Node3D, index: int) -> void:
+##
+## `sealed` draws the room's rock with its ways out closed over (`Rock.skin`), for
+## a room that is built on its own instead of as one hall of the floor plan. What
+## still grows in it is the room's own growth - the same pieces, in the same places,
+## as the room in the plan below - because the cave is the same cave.
+static func dress_room(node: Node3D, index: int, sealed: bool = false) -> void:
 	var area := str(Layout.ROOMS[index]["area"])
 	var skin := MeshInstance3D.new()
 	skin.name = "Skin"
-	skin.mesh = Rock.skin(index)
+	skin.mesh = Rock.skin(index, sealed)
 	skin.material_override = stone(area)["wall"]
 	skin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(skin)
@@ -193,6 +198,13 @@ static func dress_room(node: Node3D, index: int) -> void:
 		_cylinder(solids, stop[0], float(stop[1]), float(stop[2]))
 	if float(CaveKit.AREAS.get(area, {}).get("wet", 0.0)) >= 0.3:
 		_drips(node, grown["tips"], index)
+
+
+## What grows in a room that stops a body: `[at, radius, tall]` per piece, in the
+## cave's frame (`_grow`). Anything that has to stand a body in this room without
+## putting it inside a spire reads this - the arena's chamber does, for its posts.
+static func grown_stops(index: int) -> Array:
+	return _grow(index)["stops"]
 
 
 ## What grows in a room, from the room's own seed: `{mesh, stops, tips}` - the

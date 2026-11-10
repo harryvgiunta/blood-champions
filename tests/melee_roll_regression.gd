@@ -192,6 +192,33 @@ func run() -> void:
 		advance(3.0)
 		check(victim.health == 100.0 and sweep_count == cancelled_samples, "Rolling cancels the swing and cannot emit damaging blade samples")
 		attacker.rig.set_roll(-1.0, Vector3.RIGHT)
+		# The feet never take the blade: a leap or a committed roll leaves a cut
+		# that is already in the air alone (`Combat.stop_for_airborne`,
+		# `Combat.stop(true)`), so the swing keeps its clock and its contact.
+		advance(6.0)
+		victim.health = 100.0
+		check(start_swing() and attacker.rig._right_melee_time < 0.1,
+			"A swing starts fresh before a leap")
+		advance(first_contact_time * 0.5)
+		var before_leap := sweep_count
+		attacker.combat.stop_for_airborne()
+		advance(first_contact_time * 2.0)
+		check(victim.health < 100.0 and sweep_count > before_leap,
+			"A leap keeps the swing and the contact it was owed")
+		advance(6.0)
+		victim.health = 100.0
+		check(start_swing() and attacker.rig._right_melee_time < 0.1,
+			"A swing starts fresh before a committed roll")
+		advance(first_contact_time * 0.5)
+		var before_roll := sweep_count
+		attacker.combat.stop(true)
+		attacker.rig.set_roll(0.2, Vector3.RIGHT)
+		advance(first_contact_time * 2.0)
+		attacker.rig.set_roll(-1.0, Vector3.RIGHT)
+		check(sweep_count > before_roll,
+			"A committed roll keeps the swing and the samples it was owed")
+		check(victim.health < 100.0,
+			"A committed roll keeps the contact the swing was owed")
 	var roll := Roll.new()
 	world.add_child(roll)
 	check(roll.press_jump(Vector3.RIGHT,Vector3.FORWARD,true,false),"Space performs a normal grounded jump")

@@ -2,11 +2,20 @@ extends Node3D
 ## GHOST OF THE WARBAND: the arena, and the warband it puts in the ring with you.
 ##
 ## The third door out of Hearthstead, and the only one that is a *fight* and
-## nothing else. `enter()` builds the ring (`arena_ring.gd`) far above the
-## campaign's own ground, moves the whole field into it and stands a mirrored
-## warband on the far arc: the same bodies, the same ten slots, the same skills -
-## a tank, a blade and a bow, dressed to the difficulty and driven by the same
-## honest rules a squadmate is.
+## nothing else. `enter()` cuts one chamber of the Weeping Hollow out of the
+## delve's own floor plan (`arena_cave.gd`), stands it far above the campaign's
+## ground, moves the whole field into it and stands a mirrored warband on the far
+## arc: the same bodies, the same ten slots, the same skills - a tank, a blade and
+## a bow, dressed to the difficulty and driven by the same honest rules a
+## squadmate is.
+##
+## **The chamber is drawn, not authored.** Every hall the Hollow is dug from can
+## host a bout - the watchers' den, the drowned gallery, the ossuary, the pale
+## garden, the black mere, the bone chapel, the rooted hall, the old workings, the
+## demons' ring, Gorehorn's lair - and `ArenaCave.pick_room` draws a different one
+## for each fight, never the one the last bout was fought in. The room comes with
+## its own ground, rock, dripstone, lights and props, exactly as the delve builds
+## it, and every way out of it is shut: a fight is a room with no way past.
 ##
 ## **Three tiers, three different fights.**
 ##
@@ -30,14 +39,14 @@ extends Node3D
 ## lords fight on the same one. This scene only dresses the bodies, hands the
 ## ladder its tier and writes the answer into the foe's hands.
 
-const RingScript = preload("res://scripts/warband/arena_ring.gd")
+const CaveScript = preload("res://scripts/warband/arena_cave.gd")
 const BodyScript = preload("res://scripts/warband/warband_body.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandLooks = preload("res://scripts/warband/warband_looks.gd")
 const DuelBrainScript = preload("res://scripts/warband/duel_brain.gd")
 const VoiceLibrary = preload("res://scripts/audio/voice_library.gd")
-const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
 const DIFFICULTIES := ["easy", "medium", "hard"]
 const DEFAULT_DIFFICULTY := "easy"
@@ -69,7 +78,7 @@ const KITS := {
 ## guard on, `beat` the pause it holds before a swing, `step` the seconds it
 ## spends circling between blows, `lead` how far it aims ahead of a moving body,
 ## `range` where it stops closing. These are the numbers `duel_brain.gd` fights
-## on; a temper without `window` swings on its beat alone, which is the ring's own
+## on; a temper without `window` swings on its beat alone, which is the pit's own
 ## rule - only the Hollow's duelists wait for an opening.
 const TEMPER = {
 	"easy": {"guard": 0.15, "beat": 0.85, "step": 0.35, "lead": 0.0, "range": 1.6},
@@ -81,27 +90,51 @@ const TEMPER = {
 const PURSE := {"easy": 40, "medium": 120, "hard": 300}
 
 var host = null
-var ring: Node3D = null
 var active := false
 var finished := ""
 var difficulty := DEFAULT_DIFFICULTY
 var foes: Array = []
 var party: Array = []
-## `{body: {position, bounds, mask}}` for the field as it was before the ring.
+## The chamber this bout is fought in (`ArenaCave`, null when no fight holds).
+var cave = null
+## The room the last chamber was cut from (`Layout.ROOMS` id): the next bout is
+## never fought in it while there is another room to draw.
+var room_id := ""
+## What the HUD calls the last chamber (`THE OSSUARY`), kept across the fight.
+var _room_label := ""
+## `{body: {position, bounds, mask}}` for the field as it was before the chamber.
 var _saved: Dictionary = {}
 ## `{foe: DuelBrain}` - each foe's own clock inside the fight's ladder.
 var _tracks: Dictionary = {}
-## The squad's own hostile list as it was before the ring borrowed it.
+## The squad's own hostile list as it was before the chamber borrowed it.
 var _squad_watchers = null
+## The squad's own map as it was before the chamber lent it the room's
+## (`arena_cave.gd`): the room's colliders, not the wood's ground.
+var _nav_before = null
+## Whether the map was lent at all - a squad with no map keeps none.
+var _nav_lent := false
+## `[light, was_visible]` for every directional light of the world's, so the sun
+## and moon can be put out for the fight and put back as they were.
+var _sun_states: Array = []
+## The dice the chamber is drawn from: a fresh room, and its growth, every bout.
+var _draw := RandomNumberGenerator.new()
 var _clock := 0.0
 
 
 func setup(world: Node3D) -> void:
 	host = world
+	_draw.randomize()
 
 
 func is_open() -> bool:
 	return active
+
+
+## What the HUD calls the place the fight is held: `THE OSSUARY`, `THE DEN`. The
+## last chamber's name stays after the fight is over, so the board can say where
+## the band has just been.
+func room_label() -> String:
+	return _room_label
 
 
 ## Which difficulty the ring will be fought on. Unknown words are refused.
@@ -112,37 +145,40 @@ func set_difficulty(tier: String) -> bool:
 	return true
 
 
-## Walk the field into the ring. The whole field goes: a demo that let a player
+## Walk the field into the chamber. The whole field goes: a demo that let a player
 ## leave two bodies at the gate would be a fight the warband wins with a roster
-## the ring never sees.
+## the chamber never sees.
 func enter(tier: String = "") -> Dictionary:
 	if active:
-		return {"ok": false, "message": "The ring is already holding a fight."}
+		return {"ok": false, "message": "The arena is already holding a fight."}
 	if host == null:
-		return {"ok": false, "message": "The ring needs a campaign."}
+		return {"ok": false, "message": "The arena needs a campaign."}
 	if not tier.is_empty():
 		set_difficulty(tier)
 	var built := _collect_party()
 	if built.is_empty():
-		return {"ok": false, "message": "No body to put in the ring."}
-	_build_ring()
-	_party_into_ring(built)
-	_foes_into_ring()
+		return {"ok": false, "message": "No body to put in the arena."}
+	if not _build_chamber():
+		return {"ok": false, "message": "The Hollow has no room to fight in."}
+	_party_into_chamber(built)
+	_foes_into_chamber()
 	_lend_the_squad()
 	active = true
+	_sync_eye(true)
 	finished = ""
 	_clock = 0.0
 	if host.hud != null:
-		host.hud.set_status("THE ARENA  ·  %s  ·  the gate is G when it is over" % difficulty.to_upper(), 4.0)
-	return {"ok": true, "message": "The ring holds %d." % foes.size()}
+		host.hud.set_status("THE ARENA  ·  %s  ·  %s  ·  the gate is G when it is over" % [
+			room_label(), difficulty.to_upper()], 4.0)
+	return {"ok": true, "message": "The chamber holds %d." % foes.size()}
 
 
-## Out of the ring, back to where the party stood. Safe to call when it is not
+## Out of the chamber, back to where the party stood. Safe to call when it is not
 ## open (a scene reload, a guest leaving).
 func leave() -> void:
-	if ring != null and is_instance_valid(ring):
-		ring.queue_free()
-	ring = null
+	if cave != null and is_instance_valid(cave):
+		cave.queue_free()
+	cave = null
 	for foe in foes:
 		if is_instance_valid(foe):
 			(foe as Node).queue_free()
@@ -163,6 +199,7 @@ func leave() -> void:
 	_tracks.clear()
 	party.clear()
 	active = false
+	_sync_eye(true)
 	finished = ""
 
 
@@ -172,11 +209,11 @@ func try_leave() -> bool:
 		return false
 	if finished.is_empty():
 		if host != null and host.hud != null:
-			host.hud.set_status("Not yet: somebody is still standing across the ring.", 2.5)
+			host.hud.set_status("Not yet: somebody is still standing across the room.", 2.5)
 		return true
 	leave()
 	if host != null and host.hud != null:
-		host.hud.set_status("THE ARENA  ·  out of the ring", 3.0)
+		host.hud.set_status("THE ARENA  ·  back out of the rock", 3.0)
 	return true
 
 
@@ -204,15 +241,15 @@ func tick(delta: float) -> void:
 	_clock += delta
 	_drive_foes(delta)
 	# The foes are bodies this scene owns, not the soul controller's: nothing else
-	# steps them, so the ring is where they are integrated - intent first, then
+	# steps them, so the chamber is where they are integrated - intent first, then
 	# the one `step()` a frame the controller gives its own squad.
 	var actors: Array = _actors()
 	for foe in foes:
 		if not is_instance_valid(foe):
 			continue
-		# A foe on its chest is out of the fight, and the ring is not a place to
-		# leave somebody bleeding: the body is finished where it lies so the ring
-		# reads as a ring and the loot window has a corpse to open.
+		# A foe on its chest is out of the fight, and the chamber is not a place to
+		# leave somebody bleeding: the body is finished where it lies so the pit
+		# reads as a pit and the loot window has a corpse to open.
 		if bool(foe.get("downed")):
 			foe.take_damage(1.0, 99)
 			continue
@@ -234,12 +271,12 @@ func _finish(result: String) -> void:
 		var purse := int(PURSE.get(difficulty, 0))
 		if host.warband != null and purse > 0:
 			host.warband.award_gold(purse)
-		host.hud.set_status("THE RING IS YOURS  ·  %d gold  ·  G at the gate" % purse, 6.0)
+		host.hud.set_status("%s IS YOURS  ·  %d gold  ·  G at the gate" % [room_label(), purse], 6.0)
 	else:
-		host.hud.set_status("THE RING TAKES THE BAND  ·  G at the gate", 6.0)
+		host.hud.set_status("%s TAKES THE BAND  ·  G at the gate" % room_label(), 6.0)
 
 
-# --- the ring and the field ------------------------------------------------
+# --- the chamber and the field ---------------------------------------------
 
 func _collect_party() -> Array:
 	var out: Array = []
@@ -254,20 +291,47 @@ func _collect_party() -> Array:
 	return out
 
 
-func _build_ring() -> void:
-	if ring != null and is_instance_valid(ring):
-		return
-	ring = RingScript.new()
-	ring.name = "ArenaRing"
-	# The ring's geometry is authored around its own origin; the pad's height is
-	# the node's position, so a body's post (`RingScript.entry_post`) is world
-	# space and the floor it lands on is exactly under it.
-	ring.position = RingScript.centre()
-	host.add_child(ring)
+## Cut this bout's chamber out of the Hollow's plan and stand it at the arena's
+## height: one room, drawn fresh, never the one the last bout was fought in.
+##
+## A room costs a fifth to a quarter of a second to cut when it has never been
+## grown in this session (the rock's skin, its dripstone, its map), so the board
+## calls this while a player is reading the tiers (`prepare`), and `enter` only
+## cuts one itself when nobody has.
+func _build_chamber() -> bool:
+	if cave != null and is_instance_valid(cave):
+		return true
+	var next := CaveScript.pick_room(_draw, room_id)
+	if next.is_empty():
+		return false
+	cave = CaveScript.new()
+	cave.name = "ArenaChamber"
+	# The chamber places itself at `ArenaCave.centre()`: the room's own floor is
+	# authored in the plan's frame, so its posts are world space and the ground a
+	# body lands on is exactly under it.
+	host.add_child(cave)
+	cave.build(next, _draw.randi())
+	room_id = next
+	_room_label = cave.room_label()
+	return true
 
 
-func _party_into_ring(field: Array) -> void:
+## Draw and cut the chamber the next bout will be fought in, ahead of the press.
+## Idempotent: a chamber already cut is the one that will be used. A guest cuts
+## nothing: the room is drawn from this machine's dice, so a guest that built its
+## own would be standing in a different chamber from the host.
+func prepare() -> bool:
+	if host == null or active or bool(host.get("_client")):
+		return false
+	return _build_chamber()
+
+
+func _party_into_chamber(field: Array) -> void:
 	party = field
+	var seats: Dictionary = cave.seat(field.size(), int(KITS.get(difficulty,
+		KITS[DEFAULT_DIFFICULTY]).size()))
+	var posts: Array = seats["party"]
+	var yaw := float(seats["party_yaw"])
 	for index in field.size():
 		var body = field[index]
 		_saved[body] = {
@@ -276,13 +340,12 @@ func _party_into_ring(field: Array) -> void:
 			"mask": int(body.combat.target_mask) if body.combat != null else 1,
 		}
 		# The campaign's bodies carry a 31.5 m square around the origin as their
-		# whole world, and the ring stands 260 m up and 26 m across: a body that
-		# kept its bound could not take a step in it.
+		# whole world, and the chamber stands 260 m up: a body that kept its bound
+		# could not take a step in it.
 		body.bounds = 6000.0
 		if body.combat != null:
 			body.combat.target_mask = 4
-		(body as Node3D).global_position = RingScript.entry_post(index, field.size())
-		(body as Node3D).velocity = Vector3.ZERO
+		_stand(body, posts[index], yaw)
 	if host.controller != null:
 		var soul_id: int = host.controller.merc_for_peer(host.controller.local_peer_id)
 		if soul_id > 0:
@@ -291,10 +354,13 @@ func _party_into_ring(field: Array) -> void:
 				host.controller.activate(host.controller.local_peer_id, soul_id)
 
 
-func _foes_into_ring() -> void:
+func _foes_into_chamber() -> void:
 	foes.clear()
 	_tracks.clear()
 	var kits: Array = KITS.get(difficulty, KITS[DEFAULT_DIFFICULTY])
+	var seats: Dictionary = cave.seat(party.size(), kits.size())
+	var posts: Array = seats["foes"]
+	var yaw := float(seats["foe_yaw"])
 	for index in kits.size():
 		var kit: Dictionary = kits[index]
 		var body = BodyScript.new()
@@ -304,14 +370,31 @@ func _foes_into_ring() -> void:
 		host.add_child(body)
 		body.authoritative = true
 		body.combat.damage_enabled = true
-		body.configure(index, "Foe %d" % (index + 1), RingScript.foe_post(index, kits.size()))
+		body.configure(index, "Foe %d" % (index + 1), posts[index])
 		body.bounds = 6000.0
 		body.combat.target_mask = 4
 		body.is_local = false
+		_stand(body, posts[index], yaw)
 		_dress(body, kit)
 		foes.append(body)
 		# One `DuelBrain` per foe: its own guard window, beat and circling side.
 		_tracks[body] = DuelBrainScript.new()
+
+
+## Stand one body on a post, facing `yaw`. A body this machine drives takes the
+## teleport through its own clock (`teleport_to`); a replica only takes the point,
+## because the host owns where it stands.
+func _stand(body, at: Vector3, yaw: float) -> void:
+	if bool(body.get("authoritative")) and body.has_method("teleport_to"):
+		body.teleport_to(at, yaw)
+	else:
+		(body as Node3D).global_position = at
+		var rig = body.get("rig")
+		if rig != null:
+			rig.global_basis = Basis(Vector3.UP, yaw)
+	var velocity = body.get("velocity")
+	if velocity != null:
+		(body as Node3D).velocity = Vector3.ZERO
 
 
 
@@ -328,15 +411,18 @@ func _dress(body, kit: Dictionary) -> void:
 			pieces[str(slot)] = set_index
 	var main_id := str(kit.get("main", ""))
 	var off_id := str(kit.get("off", ""))
-	var anointed: Array[String] = []
+	var abilities: Array[String] = []
 	var wanted := int(kit.get("annoints", 0))
-	if wanted > 0 and not main_id.is_empty():
-		for entry in AnnointCatalog.for_item(State.ITEMS.get(main_id, {})):
-			if anointed.size() >= wanted:
+	if wanted > 0:
+		var main_row: Dictionary = State.ITEMS.get(main_id, {})
+		var off_row: Dictionary = State.ITEMS.get(off_id, {})
+		for id in AbilityRules.unlockable_ids():
+			if abilities.size() >= wanted:
 				break
-			if int(entry.kind) == AnnointCatalog.Kind.ABILITY:
-				anointed.append(str(entry.id))
-	body.rig.apply_loadout(State.build_loadout(main_id, off_id, pieces, {}, anointed))
+			if AbilityRules.fits_gear(AbilityRules.by_id(id), main_row, off_row):
+				abilities.append(id)
+	body.rig.apply_loadout(State.build_loadout(main_id, off_id, pieces))
+	body.rig.ability_loadout = abilities
 
 
 # --- the foes' brains ------------------------------------------------------
@@ -405,9 +491,10 @@ func _velocity_of(target) -> Vector3:
 
 
 ## The band's own squad fights what is in front of it, and the world's one hostile
-## list is the wood's: the ring hands the allies the foes for the length of the
-## fight and takes them back afterwards, so a camp of wardens is not hunted
-## through a stone wall.
+## list is the wood's: the chamber hands the allies the foes and the room's own map
+## for the length of the fight and takes them back afterwards, so a camp of wardens
+## is not hunted through a stone wall and an ally walks round the dripstone of a
+## room it has never been in.
 func _lend_the_squad() -> void:
 	if host.squad == null:
 		return
@@ -415,6 +502,11 @@ func _lend_the_squad() -> void:
 	host.squad.watchers = foes
 	host.squad.following = true
 	host.squad.engage_radius = 60.0
+	if cave != null:
+		_nav_before = host.squad.nav
+		host.squad.nav = cave.nav
+		_nav_lent = true
+		host.squad.relocate()
 
 
 func _restore_the_squad() -> void:
@@ -423,9 +515,52 @@ func _restore_the_squad() -> void:
 	if _squad_watchers != null:
 		host.squad.watchers = _squad_watchers
 	_squad_watchers = null
+	if _nav_lent and host.squad != null:
+		host.squad.nav = _nav_before
+		host.squad.relocate()
+	_nav_lent = false
+	_nav_before = null
 
 
-## Every body in the ring, for the step's own collision and reach queries.
+## The rock's air over the eye while the chamber holds a fight, and the campaign's
+## own sky back when it does not: a cave under the wood's sun, at the wood's
+## ambient, is a cave that looks like a lit grey box. Every directional light the
+## campaign owns goes out with it - the world's sun, the town's moon - because a
+## light with no position in the sky reaches into the rock as well as out of it.
+func _sync_eye(force: bool = false) -> void:
+	if host == null:
+		return
+	var camera: Camera3D = host.get("camera")
+	if camera != null:
+		var air: Environment = cave.environment if active and cave != null else null
+		if force or camera.environment != air:
+			camera.environment = air
+	if active:
+		_darken_the_world()
+	else:
+		_relight_the_world()
+
+
+## Put every directional light the world owns out, remembering what it was.
+func _darken_the_world() -> void:
+	if not _sun_states.is_empty():
+		return
+	for node in host.find_children("*", "DirectionalLight3D", true, false):
+		var lamp := node as DirectionalLight3D
+		_sun_states.append([lamp, lamp.visible])
+		lamp.visible = false
+
+
+## Back the way they were: a sun that was already out stays out.
+func _relight_the_world() -> void:
+	for entry in _sun_states:
+		var lamp = entry[0]
+		if is_instance_valid(lamp):
+			(lamp as DirectionalLight3D).visible = bool(entry[1])
+	_sun_states.clear()
+
+
+## Every body in the chamber, for the step's own collision and reach queries.
 func _actors() -> Array:
 	var out: Array = []
 	for body in party:

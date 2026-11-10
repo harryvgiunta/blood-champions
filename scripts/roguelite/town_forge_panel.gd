@@ -12,6 +12,9 @@ extends Control
 
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
 const MetaScript = preload("res://scripts/roguelite/roguelite_meta.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityIndex = preload("res://scripts/roguelite/ability_index.gd")
+const State = preload("res://scripts/player_state.gd")
 
 const INK := Color(0.94, 0.88, 0.72)
 const MUTED := Color(0.70, 0.64, 0.52)
@@ -72,6 +75,19 @@ func _build() -> void:
 	column.add_child(_subtitle)
 	var rule := HSeparator.new()
 	column.add_child(rule)
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 8)
+	column.add_child(nav)
+	for page in [["rack", "WEAPON RACK"], ["abilities", "ABILITY BOOK"],
+			["portal", "START RUN"]]:
+		var page_button := Button.new()
+		page_button.text = str(page[1])
+		page_button.focus_mode = Control.FOCUS_NONE
+		page_button.custom_minimum_size = Vector2(0, 28)
+		page_button.add_theme_font_size_override("font_size", 14)
+		page_button.add_theme_color_override("font_color", MUTED)
+		page_button.pressed.connect(open.bind(str(page[0])))
+		nav.add_child(page_button)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 368)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -126,6 +142,10 @@ func _refresh() -> void:
 			_title.text = "THE START RUN PORTAL"
 			_subtitle.text = "Endless levels. A shop level stands right before every boss; the boss pays the keys the rack takes."
 			_portal_rows(meta)
+		"abilities":
+			_title.text = "THE ABILITY BOOK"
+			_subtitle.text = "%d keys. Unlock a skill once, then equip it on a body whose hands fit its family." % int(meta.keys)
+			_ability_rows(meta)
 		_:
 			_title.text = "THE WEAPON RACK"
 			_subtitle.text = "%d keys. Every weapon is here: press a locked row to open it and take it up." % int(meta.keys)
@@ -236,6 +256,127 @@ func _apply_to_bodies(slot: String, weapon_id: String) -> void:
 		return
 	if world.has_method("refresh_town_dress"):
 		world.refresh_town_dress()
+
+
+## The body whose hands decide what can be equipped. The rack is opened from the
+## square, so the controlled mercenary is the one the page works; a lent warband
+## goes through the same state verbs and sends the equip to its host.
+func _ability_context() -> Dictionary:
+	var world = town.get("host") if town != null else null
+	var warband = world.get("warband") if world != null else null
+	if warband == null:
+		return {}
+	var controller = world.get("controller")
+	var actor = controller.get("active_actor") if controller != null else null
+	var merc := -1
+	if controller != null and actor != null and controller.has_method("merc_of"):
+		merc = int(controller.merc_of(actor))
+	if merc <= 0:
+		var ids: Array = warband.roster.ids()
+		if not ids.is_empty():
+			merc = int(ids[0])
+	if merc <= 0:
+		return {}
+	var gear: Dictionary = warband.roster.equipped_of(merc)
+	return {"warband": warband, "merc": merc,
+		"name": str(warband.roster.name_of(merc)), "gear": gear}
+
+
+func _ability_rows(meta) -> void:
+	var context := _ability_context()
+	if context.is_empty():
+		_row("No body stands on the rack ground.", MUTED, 28)
+		return
+	var warband = context["warband"]
+	var merc := int(context["merc"])
+	var gear: Dictionary = context["gear"]
+	var book: Array = warband.ability_book(merc)
+	var order := {"any": 0, "unarmed": 1, "bow": 2, "sword": 3, "two_hand": 4,
+		"dagger": 5, "staff": 6, "shield": 7}
+	book.sort_custom(func(a, b):
+		var rank_a := int(order.get(str(a.get("type", "any")), 8))
+		var rank_b := int(order.get(str(b.get("type", "any")), 8))
+		if rank_a != rank_b:
+			return rank_a < rank_b
+		return str(a.get("name", "")) < str(b.get("name", "")))
+	var equipped := 0
+	for entry in book:
+		if bool(entry.get("equipped", false)) and not bool(entry.get("automatic", false)):
+			equipped += 1
+	_row("BODY  ·  %s  ·  %s" % [str(context["name"]),
+		_hand_summary(gear)], BRASS, 28)
+	_row("%d / %d equipped  ·  the eight kit keys hold the family starters and these; the last two are the bandage and potion." % [
+		equipped, AbilityRules.MAX_EQUIPPED], MUTED, 30)
+	var index := AbilityIndex.counts()
+	_row("%d active skills in this book  ·  %d ability upgrades live in the pool, not here." % [
+		int(index.active), int(index.upgrade)], MUTED, 28)
+	for entry in book:
+		var id := str(entry.get("id", ""))
+		var definition := AbilityRules.by_id(id)
+		var display := str(entry.get("name", id)).capitalize()
+		var types: Variant = entry.get("types", [])
+		var family := AbilityRules.family_labels(types if types is Array \
+			else [str(entry.get("type", "any"))])
+		var requirement := AbilityRules.requirement_label(definition)
+		var description := str(entry.get("description", ""))
+		if bool(entry.get("automatic", false)):
+			var automatic := "STARTER" if AbilityRules.is_starter(id) else "UNARMED"
+			if not bool(entry.get("fits", false)):
+				automatic += "  ·  NEEDS " + requirement
+			var label := _row("  %s  ·  %s  ·  %s" % [display, family, automatic], MUTED, 28)
+			label.tooltip_text = description
+			continue
+		if not bool(entry.get("unlocked", false)):
+			var price := int(entry.get("cost", 3))
+			var affordable := int(meta.keys) >= price
+			var unlock := _button("  %s  ·  %s   [LOCKED  ·  %d KEYS]" % [
+				display, family, price], BRASS if affordable else LOCKED,
+				_unlock_ability.bind(id))
+			unlock.tooltip_text = description
+			continue
+		if bool(entry.get("equipped", false)):
+			var take_off := _button("  %s  ·  %s   [EQUIPPED%s]" % [display, family,
+				"" if bool(entry.get("fits", false)) else "  ·  WAITING FOR " + requirement],
+				GOOD, _toggle_ability.bind(merc, id))
+			take_off.tooltip_text = description + "\nClick to take it off the bar."
+			continue
+		var fits := bool(entry.get("fits", false))
+		var equip := _button("  %s  ·  %s   %s" % [display, family,
+			"EQUIP" if fits else "[HOLD A %s]" % requirement], INK if fits else LOCKED,
+			_toggle_ability.bind(merc, id), not fits)
+		equip.tooltip_text = description
+
+
+func _hand_summary(gear: Dictionary) -> String:
+	var main := str(gear.get("main", ""))
+	var off := str(gear.get("off", ""))
+	var parts: Array[String] = []
+	parts.append(str((State.ITEMS.get(main, {}) as Dictionary).get("name", "empty hand")) if main else "empty hand")
+	if not off.is_empty():
+		parts.append("off: %s" % str((State.ITEMS.get(off, {}) as Dictionary).get("name", off)))
+	return "  +  ".join(PackedStringArray(parts))
+
+
+func _unlock_ability(ability_id: String) -> void:
+	var meta = _meta()
+	if meta == null:
+		return
+	var result: Dictionary = meta.unlock_ability(ability_id)
+	_message.text = str(result.get("message", ""))
+	_message.add_theme_color_override("font_color",
+		GOOD if bool(result.get("ok", false)) else BLOOD)
+	_refresh()
+
+
+func _toggle_ability(merc_id: int, ability_id: String) -> void:
+	var context := _ability_context()
+	if context.is_empty():
+		return
+	var result: Dictionary = context["warband"].toggle_ability(merc_id, ability_id)
+	_message.text = str(result.get("message", ""))
+	_message.add_theme_color_override("font_color",
+		GOOD if bool(result.get("ok", false)) else BLOOD)
+	_refresh()
 
 
 func _portal_rows(meta) -> void:

@@ -45,9 +45,10 @@ extends Node3D
 
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
-## The `P` panel is the corpse screen, which extends the paperdoll: a living body's
+## The `I` panel is the corpse screen, which extends the paperdoll: a living body's
 ## gear and a dead body's pockets are the same panel, so every equip path, the
 ## change signal and `is_open()` are unchanged.
 const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
@@ -62,6 +63,9 @@ const Perf = preload("res://scripts/perf_probe.gd")
 ## The arena loop: the director that runs a wave campaign and the plate it reads.
 const RogueliteDirectorScript = preload("res://scripts/roguelite/run_director.gd")
 const RogueliteHudScript = preload("res://scripts/roguelite/roguelite_hud.gd")
+## The thin bars over a wave's wounded bodies: one canvas item for the whole
+## island, drawn only for hostiles that have taken damage.
+const MobBarsScript = preload("res://scripts/roguelite/mob_health_bars.gd")
 ## The F12 overlay asks this world for its own line through the overlay's group.
 const PerfOverlayScript = preload("res://scripts/perf_overlay.gd")
 ## The scene half of the item skills: one node for the whole campaign, exactly
@@ -243,6 +247,7 @@ var arena
 ## Start Run Portal opens a run.
 var roguelite
 var roguelite_hud
+var mob_bars
 ## The three areas. Each is the same script its standalone preview uses.
 var wood
 var trail
@@ -333,7 +338,9 @@ func _ready() -> void:
 	_build_wilderness()
 	_attach_trail()
 	_build_brand()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# No capture here: `_tick_frame` asks `PointerGate` every frame, so a world
+	# that opens in the background (or before the player has clicked into this
+	# window) never warps the desktop's pointer into itself.
 	_write_prompt("")
 	_announce()
 	if flow != null:
@@ -392,7 +399,7 @@ func _tick_frame(delta: float) -> void:
 	if controller == null:
 		return
 	var panel_open := _panel_open()
-	var wanted := Input.MOUSE_MODE_VISIBLE if panel_open else Input.MOUSE_MODE_CAPTURED
+	var wanted := PointerGate.wanted(panel_open)
 	if Input.mouse_mode != wanted:
 		Input.mouse_mode = wanted
 	_tick_revive(delta)
@@ -519,7 +526,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_TAB:
 			_swap_weapon_set()
 			get_viewport().set_input_as_handled()
-		KEY_P:
+		KEY_I:
 			if paperdoll.is_open():
 				paperdoll.close()
 			else:
@@ -719,6 +726,9 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	paperdoll.run_armour = Callable(self, "_run_armour_for")
+	paperdoll.hands_for = Callable(self, "_hands_for")
+	paperdoll.swap_hands = Callable(self, "_swap_run_hands")
 	paperdoll.changed.connect(_on_paperdoll_changed)
 	tips = TipsScript.new()
 	tips.name = "Tips"
@@ -871,10 +881,18 @@ func _build_roguelite() -> void:
 	roguelite.name = "Roguelite"
 	add_child(roguelite)
 	roguelite.setup(self)
+	if paperdoll != null:
+		var refresh_page := Callable(paperdoll, "refresh")
+		if not roguelite.state_changed.is_connected(refresh_page):
+			roguelite.state_changed.connect(refresh_page)
 	roguelite_hud = RogueliteHudScript.new()
 	roguelite_hud.name = "RoguelitePlate"
 	add_child(roguelite_hud)
 	roguelite_hud.setup(self, roguelite)
+	mob_bars = MobBarsScript.new()
+	mob_bars.name = "HostileBars"
+	add_child(mob_bars)
+	mob_bars.setup(self, roguelite)
 	var ledger = get_node_or_null("/root/Roguelite")
 	if ledger != null and ledger.has_signal("announcement") \
 			and not ledger.announcement.is_connected(_on_roguelite_announcement):
@@ -1590,7 +1608,60 @@ func _on_possess_requested(merc_id: int) -> void:
 func _on_paperdoll_changed() -> void:
 	if paperdoll == null or paperdoll.selected_merc <= 0:
 		return
+	if roguelite != null and roguelite.is_running() \
+			and roguelite.run_of_merc(paperdoll.selected_merc) != null:
+		# The run dresses that body's rig from its own kit. A wardrobe edit is
+		# for the square after the run; re-dressing here would drop the chest's
+		# armour and the rack's hand off the body mid-fight.
+		return
 	controller.refresh_gear(paperdoll.selected_merc)
+	# The page names the hand the rig is holding, so the repaint has to come after
+	# the re-dress: the paint made by the equip itself still saw the old rig.
+	if paperdoll.is_open():
+		paperdoll.refresh()
+
+
+## The armour a live run has put on the body a mercenary is inside, for the
+## paperdoll's worn rows and its stage. `{}` in the town and after the run: the
+## wardrobe is then the whole truth.
+func _run_armour_for(merc_id: int) -> Dictionary:
+	if roguelite == null or not roguelite.is_running():
+		return {}
+	return roguelite.armor_for_merc(merc_id)
+
+
+## The pair a body's hands are holding, for the paperdoll's two hand rows and its
+## stage: the run's own pair while a run owns the body, and the rack's piece while
+## the body stands inside the walls still holding the piece the square dressed it
+## in. `{}` when the wardrobe's kit is what it holds - the road, the Hollow, or a
+## square body the page has since dressed by hand. The page reads this over the
+## roster for the same reason it reads the run's armour: a hand the player fights
+## with is not the wardrobe's.
+func _hands_for(merc_id: int) -> Dictionary:
+	if roguelite == null:
+		return {}
+	var hands: Dictionary = roguelite.hands_for_merc(merc_id)
+	if not hands.is_empty():
+		return hands
+	if controller == null or town == null:
+		return {}
+	var body = controller.body_of(merc_id)
+	if body == null or not is_instance_valid(body) or not town.in_square(body):
+		return {}
+	var square: Dictionary = roguelite.square_hands()
+	if square.is_empty() or not roguelite.body_holds(body, str(square.get("main", ""))):
+		return {}
+	return square
+
+
+## The page's TAB, on the body it is showing: inside a run the pair's other hand
+## comes up exactly as the world's own TAB brings it. Returns `{ok, message}`.
+func _swap_run_hands(merc_id: int) -> Dictionary:
+	var run = roguelite.run_of_merc(merc_id) if roguelite != null else null
+	if run == null or run.body == null or not is_instance_valid(run.body):
+		return {"ok": false, "message": "The hands are not the run's to swap."}
+	roguelite.swap_hands(run.body)
+	return {"ok": true, "message": "The other hand comes up."}
 
 
 # --- the fight the world keeps ---------------------------------------------
@@ -1630,11 +1701,9 @@ func spawn_pickup(item_id: String, at: Vector3, announced: bool = false):
 ## A fallen enemy lets go of what it was holding. The piece comes out of its
 ## hand, lands on the dirt in front of the body, and joins the one loot list a
 ## soul reaches with `K` and a squadmate walks to. What the body still wears is
-## the corpse screen's, so nothing is on offer twice. A rare watcher below holds
-## its steel already anointed (`delve_loot.gd`), and the drop carries that - read
-## before the hand is emptied.
+## the corpse screen's, so nothing is on offer twice. Steel is plain: a skill is
+## the player's unlock, never a piece's.
 func drop_held_weapon(enemy) -> bool:
-	var anointed: bool = is_instance_valid(enemy) and enemy.get("weapon_anointed") == true
 	var dropped := false
 	# The off hand first, so the blade is the last thing to hit the dirt - the same
 	# order a warband body lets go in (`WarbandGearDrop.strip_hands`).
@@ -1645,8 +1714,6 @@ func drop_held_weapon(enemy) -> bool:
 		var at: Vector3 = (enemy as Node3D).global_position
 		var pickup = spawn_pickup(item_id, GearDropScript.drop_point(at,
 			GearDropScript.forward_of(enemy)))
-		if pickup != null and anointed and not off:
-			pickup.anoint()
 		dropped = true
 	return dropped
 
@@ -2179,6 +2246,12 @@ func _reload_checkpoint() -> bool:
 ## a body that walks back out is re-dressed from the roster, so the campaign's
 ## kit is exactly what it was before the player stepped inside. While a run is
 ## live the island owns the hands and this does nothing.
+##
+## The dress is the square's presentation, not a lock: the page's own wardrobe
+## verbs and the campaign's TAB still dress a body inside the walls (a stashed
+## blade goes into a square hand, a test rig is dressed for its own mechanic),
+## and the page reads the rig back (`RunDirector.body_holds`) rather than
+## assuming the rack's piece is what is held.
 func _sync_town_dress() -> void:
 	if roguelite == null or controller == null or town == null:
 		return
@@ -2195,7 +2268,7 @@ func _sync_town_dress() -> void:
 			continue
 		var inside: bool = bool(town.in_square(body))
 		if inside and not _town_dressed.has(body):
-			roguelite.dress_body_ranged(body)
+			roguelite.dress_town_body(body)
 			_town_dressed[body] = true
 		elif not inside and _town_dressed.has(body):
 			_town_dressed.erase(body)
@@ -2204,8 +2277,10 @@ func _sync_town_dress() -> void:
 				controller.refresh_gear(merc)
 
 
-## The rack changed the pair: put every body in the square back into the new
-## ranged piece on this very frame, rather than waiting for one to walk out and in.
+## The rack changed the pair: put every body in the square into the new piece on
+## this very frame, rather than waiting for one to walk out and in. The square's
+## dress is made once per body, so the bookkeeping has to be cleared for the new
+## piece to be seen at all.
 func refresh_town_dress() -> void:
 	_town_dressed.clear()
 	_sync_town_dress()
@@ -2638,7 +2713,7 @@ func _update_prompt() -> void:
 				line = "%s  ·  LEVEL %d  ·  SHOP BEFORE THE BOSS" % [
 					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
 			elif bool(run_state.get("cleared", false)):
-				line = "%s  ·  LEVEL %d CLEARED  ·  THE PORTAL WAITS" % [
+				line = "%s  ·  LEVEL %d CLEARED  ·  THE GATES WAIT" % [
 					str(run_state.get("biome_name", "")), int(run_state.get("level", 0))]
 		_write_prompt(line)
 		return
@@ -2655,7 +2730,7 @@ func _update_prompt() -> void:
 	# The ring is not on the map: its own fight is the only line worth reading
 	# there.
 	if arena != null and arena.is_open():
-		text = "THE ARENA  ·  %s" % arena.difficulty.to_upper()
+		text = "THE ARENA  ·  %s  ·  %s" % [arena.room_label(), arena.difficulty.to_upper()]
 	if text.is_empty() and town != null and town.in_square(actor):
 		text = town.prompt_line(actor)
 	_write_prompt(text)

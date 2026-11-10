@@ -20,6 +20,16 @@ const STANCE_SPEED := 6.0
 const PROBE_HEIGHT := 0.65
 const CROUCH_HEIGHT := 1.12
 const STAND_HEIGHT := 1.8
+## How much of the capsule's own skin the headroom probe gives back. A body that
+## walks into a wall, a trunk or a crate rests exactly its own radius away from
+## it; a probe of that same radius then reads the bark the player is leaning on as
+## a ceiling and folds the body into a crouch the moment it arrives, which is the
+## report "some trees make you crouch". Every standing body needs the room *above*
+## the crouched head and nothing else: what stands beside a torso is not headroom.
+const HEADROOM_INSET := 0.08
+## How long a blocked headroom has to persist before the body actually ducks, so a
+## graze while strafing past an overhang never drops the stance for a frame.
+const HEADROOM_GRACE := 0.1
 const PEEK_DISTANCE := 0.45
 const PEEK_EXTENTS := [PEEK_DISTANCE,0.55,0.65]
 const FIRING_RADIUS := 0.05
@@ -37,6 +47,8 @@ var lean := Vector3.ZERO
 var crouch_requested := false
 var crouched := false
 var crouch_amount := 0.0
+## How long the band above a crouched head has been blocked this frame.
+var _headroom_blocked := 0.0
 var _peek_offset := Vector3.ZERO
 var _peek_side := 0
 var _side_extents := Vector2(PEEK_DISTANCE,PEEK_DISTANCE)
@@ -61,9 +73,13 @@ func setup(body: CharacterBody3D, collider: CollisionShape3D) -> void:
 	_collider = collider
 	_capsule = collider.shape as CapsuleShape3D
 	_ray.collision_mask = 1
-	_standing_shape.radius = _capsule.radius
-	# Test only the added headroom, not the existing capsule against a sloping floor.
-	_standing_shape.height = STAND_HEIGHT-CROUCH_HEIGHT+2.0*_capsule.radius
+	_standing_shape.radius = maxf(0.05, _capsule.radius - HEADROOM_INSET)
+	# The band standing adds over crouching: from the crouched head to the standing
+	# one, and nothing below it. A capsule's extremes are its centre plus or minus
+	# half its height, so this shape reaches exactly `CROUCH_HEIGHT..STAND_HEIGHT`
+	# once `_can_stand` centres it. The torso beneath is already filled by the
+	# crouched capsule, and testing it again is what made a trunk a ceiling.
+	_standing_shape.height = STAND_HEIGHT-CROUCH_HEIGHT
 	_clearance.shape = _standing_shape
 	_clearance.collision_mask = body.collision_mask
 	_clearance.margin = 0.002
@@ -401,7 +417,9 @@ func apply_snapshot(state: Variant) -> void:
 	_apply_height()
 
 func _update_stance(delta: float, wants_crouch: bool) -> void:
-	crouched = wants_crouch or not _can_stand()
+	var blocked := not _can_stand()
+	_headroom_blocked = (_headroom_blocked+delta) if blocked else 0.0
+	crouched = wants_crouch or _headroom_blocked >= HEADROOM_GRACE
 	crouch_amount = move_toward(crouch_amount,1.0 if crouched else 0.0,STANCE_SPEED*delta)
 	_apply_height()
 
@@ -411,8 +429,14 @@ func _apply_height() -> void:
 		_capsule.height = height
 		_collider.position.y = height*0.5
 
+## True when the body can stand: the band only a standing body needs - the crouched
+## head's height up to the standing one - is clear. Nothing below that band is
+## asked about, because the crouched capsule already fills it; asking again made
+## the trunk a body leans on, the wall it walks into and every round prop beside it
+## read as a ceiling and duck the player without a reason.
 func _can_stand() -> bool:
-	_clearance.transform = Transform3D(Basis.IDENTITY,_body.global_position+Vector3.UP*((STAND_HEIGHT+CROUCH_HEIGHT)*0.5-_capsule.radius))
+	_clearance.transform = Transform3D(Basis.IDENTITY,
+		_body.global_position+Vector3.UP*((STAND_HEIGHT+CROUCH_HEIGHT)*0.5))
 	return _body.get_world_3d().direct_space_state.intersect_shape(_clearance,1).is_empty()
 
 # The surface the body is attached to, including on replicated actors whose

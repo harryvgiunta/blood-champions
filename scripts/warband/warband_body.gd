@@ -35,6 +35,7 @@ const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const AbilitySignatures = preload("res://scripts/ability_signatures.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
@@ -650,10 +651,13 @@ func try_ability(slot: int = 0) -> Dictionary:
 func press_jump(roll_requested: bool) -> void:
 	var grounded := is_on_floor()
 	peek_requested = false
-	if not alive or downed or ability.active or not cover.prepare_jump():
+	if not alive or downed or not cover.prepare_jump():
 		return
 	_exposure_tick = -1
-	combat.stop()
+	# A leap ends the guard, the swing and the cover latch, but never the hands:
+	# a body that jumps with a bow drawn - or a skill under way - keeps it
+	# (`stop_for_airborne`).
+	combat.stop_for_airborne()
 	dodge.reset()
 	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,grounded,roll_requested) or jump_requested
 	if jump_requested or roll.active:
@@ -661,7 +665,10 @@ func press_jump(roll_requested: bool) -> void:
 		rig.set_slide(-1.0,Vector3.FORWARD)
 	if roll.active:
 		jump_requested = false
-		combat.stop()
+		# A committed roll takes the feet: the string is dropped (the controller
+		# brings it back while the button is held) and the guard ends, but a blade
+		# already swinging keeps its clock.
+		combat.stop(true)
 
 func set_block(pressed: bool, forward: Vector3) -> void:
 	if not authoritative or not alive or downed:
@@ -981,7 +988,25 @@ func roguelite_melee_swing(damage: float, _hand: String = "",
 		"damage": damage * float(answer.get("damage_scale", 1.0)),
 		"crit": bool(answer.get("crit", false)),
 		"knockback": float(answer.get("knockback", 1.0)),
+		# Big Claws' own metre, so `Combat` can widen one hand's sweep.
+		"reach": float(answer.get("reach", 0.0)),
 	}
+
+
+## The run's own movement multiplier, for the walk that carries a body across the
+## island. A campaign body answers one.
+func roguelite_move_scale() -> float:
+	if roguelite == null:
+		return 1.0
+	return float(roguelite.move_scale())
+
+
+## Danger Close and Eagle Eye ask this at the body a blow is landing on, from the
+## shared melee resolver.
+func roguelite_proximity(at: Vector3) -> float:
+	if roguelite == null:
+		return 1.0
+	return float(roguelite.proximity_multiplier(at))
 
 
 ## Swing again at `rate` times the speed, asked by the runtime on the frame after
@@ -1039,6 +1064,21 @@ func _tick_ward(delta: float) -> void:
 	if ward_seconds <= 0.0:
 		rig.set_ward(false)
 
+## A share of the pool a body pays for something it *did*, not for something that
+## hit it: no armour, no dodge, no ward and no downing blow in the way, because the
+## charge is a price and not an attack. The run's out-of-bounds penalty is the one
+## caller - it must take exactly a share of what the body has left, whatever gear
+## it is wearing. Returns the life actually paid.
+func pay_cost(fraction: float) -> float:
+	if not authoritative or not alive or downed or fraction <= 0.0:
+		return 0.0
+	var paid := maxf(0.0, health * clampf(fraction, 0.0, 1.0))
+	if paid <= 0.0:
+		return 0.0
+	health = maxf(0.0, health - paid)
+	DamageNumbers.spawn(get_parent(),global_position,paid,"self" if is_local else "hit",false,false)
+	return paid
+
 ## A campaign body dies by the ground, never by the blow: a lethal hit leaves it
 ## DOWNED for the whole bleed clock, any blow that lands on it there ends it, and
 ## a body that does die keeps its corpse where it fell.
@@ -1071,7 +1111,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	# number is still the blow's own.
 	if roguelite != null:
 		var answer: Dictionary = roguelite.filter_incoming(amount, source_id)
-		if bool(answer.get("dodged", false)):
+		if bool(answer.get("dodged", false)) or bool(answer.get("blocked", false)):
 			return
 		amount = float(answer.get("damage", amount))
 	# A lethal save and an absorb move the *incoming* figure before the armour
@@ -1134,6 +1174,10 @@ func _advance_consumable(delta: float) -> void:
 				consume_kind = ""
 				_consume_elapsed = 0.0
 				rig.end_consumable()
+				# The channel's last tick is the beat the player was waiting for:
+				# the binding knot closes, the draught goes down. Presentation
+				# only, drawn by the shared signature table against the rig.
+				AbilitySignatures.consume(get_parent() as Node3D, rig, kind)
 				if roguelite != null and roguelite.blocks_passive_healing():
 					return
 				if kind == "bandage":
@@ -1232,14 +1276,11 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 		_tick_ward(delta)
 		annoint_playback.tick(delta)
 	if ability.active:
-		# A melee skill keeps the walking intent, but sprint, jump, peek and
-		# slide stay off for the duration. Any other skill plants the fighter.
-		run_requested = false
-		jump_requested = false
+		# A skill is done with the hands: the walk, the sprint and the leap stay
+		# the player's for its duration. Only the peek and the slide belong to
+		# the stance the skill overwrites.
 		peek_requested = false
 		slide.reset()
-		if not ability.allows_movement():
-			move_direction = Vector2.ZERO
 	if input_age > 0.65:
 		move_direction = Vector2.ZERO
 		run_requested = false
@@ -1305,7 +1346,7 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dictionary:
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
-	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01 and not ability.active
+	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
 	# A raised guard is held with the whole body and drains faster than the pool
 	# knits back (13/s), so guarding is a timed trade, never a resting stance. The
 	# blow the guard actually stops is charged again in `receive_melee`.
@@ -1336,7 +1377,7 @@ func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dicti
 	elif _exposure_tick < 0:
 		_exposure_tick = simulation_tick
 	update_cover_aim_readiness()
-	var walk_speed: float = (2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5) * float(rig.move_scale())
+	var walk_speed: float = (2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5) * float(rig.move_scale()) * roguelite_move_scale()
 	var committed: Variant = null
 	if slide.active:
 		committed = slide_velocity
@@ -1356,19 +1397,14 @@ func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dicti
 		"pos": position}
 	_last_running = running
 	if ability.active:
-		# Committed travel replaces the walk while it lasts; otherwise a moving
-		# melee skill keeps the normal velocity and a planted one holds still.
-		jump_requested = false
+		# Committed travel replaces the walk while it lasts. Every other beat of
+		# a skill leaves the feet to the player: the walk target caps the
+		# residual travel instead of gliding a lane past the authored distance.
 		var ability_velocity: Vector3 = ability.velocity()
 		if not ability_velocity.is_zero_approx():
 			record["replace"] = ability_velocity
-		elif not ability.allows_movement():
-			record["replace"] = Vector3.ZERO
 		else:
-			# Hand the dash back to the feet: the walk target caps the residual
-			# travel instead of gliding a lane past the authored distance.
 			record["cap"] = walk_speed
-	record["jump"] = jump_requested
 	return record
 
 ## Applies one motion record. `live` is the running simulation: replay passes

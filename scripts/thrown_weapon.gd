@@ -44,6 +44,9 @@ var impact_scale := 1.0
 var gravity_scale := 1.0
 ## `(target, position, damage, crit, proc_coeff)` on the authority.
 var on_hit: Callable = Callable()
+## `(impact_position) -> multiplier`, asked at the body the blade is about to land
+## in. Danger Close and Eagle Eye are the only rows that read it.
+var damage_filter: Callable = Callable()
 ## Backward reconciliation for a blade a client threw (see `arrow.gd`).
 var lag_comp = null
 var lag_ticks := 0
@@ -119,7 +122,7 @@ func _fly(delta: float) -> void:
 				# two-handed blade does.
 				if gore_mult >= 1.5 and collider.has_method("note_cleave"):
 					collider.note_cleave(velocity, "horizontal")
-				collider.take_damage(damage, source_id, headshot)
+				collider.take_damage(_filtered(hit.position), source_id, headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, headshot)
 				if on_hit.is_valid():
 					on_hit.call(collider, hit.position, damage, crit, proc_coeff)
@@ -135,6 +138,13 @@ func _fly(delta: float) -> void:
 	look_at(global_position + velocity, Vector3.UP)
 	if age > 8.0 or global_position.y < -30.0:
 		queue_free()
+
+
+## The wound's own price, asked at the point the blade is about to land in.
+func _filtered(at: Vector3) -> float:
+	if not damage_filter.is_valid():
+		return damage
+	return maxf(0.0, damage * maxf(0.0, float(damage_filter.call(at))))
 
 
 ## A body the thrower's frame put under this swept blade, resolved now.
@@ -160,7 +170,7 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 				candidate.note_attacker(shooter)
 			if candidate.has_method("note_impact"):
 				candidate.note_impact(ImpactRules.projectile_force(velocity))
-			candidate.take_damage(damage, source_id, headshot)
+			candidate.take_damage(_filtered(point), source_id, headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
 			if on_hit.is_valid():
 				on_hit.call(candidate, point, damage, crit, proc_coeff)

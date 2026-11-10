@@ -264,5 +264,13 @@ static func alert_packmates(struck: Node3D, attacker: Node3D, at: Vector3,
 
 ## True for a ranger the mob is allowed to hunt: alive and outside the town's
 ## safe ring. Both mob families use this for sight, alerts and responses.
+##
+## The ring is the town's, so it belongs to the town's ground: a body that stands
+## somewhere with no settlement behind it (a run's island) names no centre at all
+## and nothing is ever inside it. Without that, an island the size of one town
+## ring made its own centre a sanctuary and every wave stood about watching a
+## ranger fight from ten metres away.
 static func in_safe_ring(safe_center: Vector3, point: Vector3) -> bool:
+	if not safe_center.is_finite():
+		return false
 	return Vector2(point.x - safe_center.x, point.z - safe_center.z).length() < SAFE_RING

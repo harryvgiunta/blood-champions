@@ -2,24 +2,22 @@ extends RefCounted
 ## The altar's die. Pure rules, no state, no world: hand it a pool and the ids a
 ## piece already carries and it answers what the ichor did.
 ##
-## Four outcomes, equal weight, and nothing is ever destroyed:
+## Three outcomes, and nothing is ever destroyed. Skills are the player's
+## unlocks now, not welds, so the die works in stats and procs:
 ##
-##   01-25  add an ability      (falls back to a passive, then to replace)
-##   26-50  add a passive       (falls back to an ability, then to replace)
+##   01-50  add a passive
 ##   51-75  remove one, at random
 ##   76-00  replace one at random with one at random
 ##
-## At the piece's cap the two add outcomes become a replace, so a full piece
-## still spends every vial on something that happened.
+## At the piece's cap the add becomes a replace, so a full piece still spends
+## every vial on something that happened.
 
 const Catalog = preload("res://scripts/warband/annoint_catalog.gd")
 
-enum Outcome { ADD_ABILITY, ADD_PASSIVE, REMOVE, REPLACE, NOTHING }
+enum Outcome { ADD_PASSIVE, REMOVE, REPLACE, NOTHING }
 
-const BAND := 25
 const CHANCES := {
-	"add_ability": 0.25,
-	"add_passive": 0.25,
+	"add_passive": 0.50,
 	"remove": 0.25,
 	"replace": 0.25,
 }
@@ -27,21 +25,16 @@ const CHANCES := {
 ## The outcome a `d100` of `value` lands on. Separate from `roll` so the altar can
 ## advertise the bands and the test can walk them without a pool.
 static func outcome_of(value: int) -> int:
-	var band := clampi(value, 0, 99) / BAND
-	match band:
-		0:
-			return Outcome.ADD_ABILITY
-		1:
-			return Outcome.ADD_PASSIVE
-		2:
-			return Outcome.REMOVE
+	var drawn := clampi(value, 0, 99)
+	if drawn < 50:
+		return Outcome.ADD_PASSIVE
+	if drawn < 75:
+		return Outcome.REMOVE
 	return Outcome.REPLACE
 
 
 static func label(outcome: int) -> String:
 	match outcome:
-		Outcome.ADD_ABILITY:
-			return "ADD AN ABILITY"
 		Outcome.ADD_PASSIVE:
 			return "ADD A PASSIVE"
 		Outcome.REMOVE:
@@ -105,12 +98,10 @@ static func roll(pool: Array, existing: Array[String], at_cap: bool,
 		return result
 	var drawn := rng.randi_range(0, 99)
 	var outcome := outcome_of(drawn)
-	if at_cap and (outcome == Outcome.ADD_ABILITY or outcome == Outcome.ADD_PASSIVE):
+	if at_cap and outcome == Outcome.ADD_PASSIVE:
 		outcome = Outcome.REPLACE
 		result["converted"] = true
 	match outcome:
-		Outcome.ADD_ABILITY:
-			return _add(pool, existing, true, result, rng, groups)
 		Outcome.ADD_PASSIVE:
 			return _add(pool, existing, false, result, rng, groups)
 		Outcome.REMOVE:
@@ -146,7 +137,7 @@ static func _add(pool: Array, existing: Array[String], want_ability: bool,
 	if open.is_empty():
 		return _replace(pool, existing, result, rng, -1, groups)
 	var picked = _rand_entry(open, rng, groups)
-	result["outcome"] = Outcome.ADD_ABILITY if want_ability else Outcome.ADD_PASSIVE
+	result["outcome"] = Outcome.ADD_PASSIVE
 	result["entry_id"] = str(picked.id)
 	result["message"] = "The ichor wakes %s." % str(picked.name)
 	return result

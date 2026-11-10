@@ -442,7 +442,6 @@ const JEWEL_FAMILIES := [
 ## the runtime already owns. `wired=false` rows are the pool's backlog - they are
 ## listed so the sheet and the code agree, and they never reach a player.
 const NAMES := [
-	# --- weapons: stat bundles --------------------------------------------
 	{"id": "w_quick_string", "name": "Quick String", "groups": ["bow"],
 		"stats": {"attack_speed": 0.25}, "drawback": {"ranged_damage": -0.15},
 		"line": "+25% draw speed, -15% damage", "tags": ["ranged", "tempo"], "power": 0.55},
@@ -470,9 +469,6 @@ const NAMES := [
 	{"id": "w_iron_constitution", "name": "Iron Constitution", "groups": ["weapon"],
 		"stats": {"health": 8.0, "stamina": 40.0},
 		"line": "+8 health, +40 stamina", "tags": ["defence"], "power": 0.35},
-	# The class bundles. A blade's flat cut, an arrow's heavy head, and the
-	# dagger's own quiet trade - each names its own group, so a class that does
-	# not want it never sees it in its pool.
 	{"id": "w_honed_edge", "name": "Honed Edge", "groups": ["sword"],
 		"stats": {"flat_melee": 4.0, "melee_damage": 0.05},
 		"line": "+4 blade damage, +5% melee damage", "tags": ["melee", "offence"], "power": 0.55},
@@ -486,8 +482,6 @@ const NAMES := [
 		"stats": {"melee_damage": 0.10}, "drawback": {"stamina_regen": -0.06},
 		"line": "+10% dagger damage, -6% stamina regen",
 		"tags": ["melee", "offence"], "power": 0.5},
-
-	# --- weapons: procs ----------------------------------------------------
 	{"id": "w_thirst_hit", "name": "Leech", "groups": ["weapon"], "kind": "proc",
 		"trigger": "damage_taken", "proc": "heal", "chance": 0.12, "magnitude": 4.0,
 		"line": "12% on being hit: heal 4", "tags": ["sustain"], "power": 0.4,
@@ -501,11 +495,6 @@ const NAMES := [
 	{"id": "w_bleed_edge", "name": "Whetstone Edge", "groups": ["melee"], "kind": "proc",
 		"trigger": "damage_taken", "proc": "bleed", "chance": 0.15, "magnitude": 2.0, "duration": 3.0,
 		"line": "15% on being hit: the attacker bleeds 2/s for 3 s", "tags": ["control"], "power": 0.45},
-
-	# --- jewellery: the necklace's own three words --------------------------
-	# Neck only, and each one is a different shape of the same idea: the cord
-	# changes what a blow does. Quick Hit and Poison Hit are attack-side procs
-	# (`Trigger.HIT`), Three Strike is a welded skill.
 	{"id": "j_quick_hit", "name": "Quick Hit", "groups": ["jewelry"],
 		"slots": ["neck"], "kind": "proc", "trigger": "hit", "proc": "quick_strike",
 		"chance": 0.20, "scale": 5.0,
@@ -517,17 +506,6 @@ const NAMES := [
 		"chance": 0.20, "magnitude": 5.0, "duration": 5.0,
 		"line": "20% on hit: 5 damage a second poison for 5 s",
 		"tags": ["offence", "control"], "power": 0.72},
-	{"id": "k_three_strike", "name": "Dual Wield Three Strike", "groups": ["jewelry"],
-		"slots": ["neck"], "kind": "ability", "ability": "three_strike",
-		"line": "three waves of steel, up to three bodies each",
-		"tags": ["melee", "offence"], "power": 0.8},
-	{"id": "k_stone_skin", "name": "Stone Skin", "groups": ["jewelry"],
-		"slots": ["neck"], "kind": "ability", "ability": "stone_skin",
-		"line": "a short ward that pays a third of each blow in stamina",
-		"tags": ["defence"], "power": 0.72,
-		"note": "Any hand can perform it: the cord, not the steel, is the ward."},
-	# The amulet's bundles. A cord buys a number and pays for it somewhere a
-	# player can see on the card.
 	{"id": "j_greedy_cord", "name": "Miser's Locket", "groups": ["jewelry"],
 		"slots": ["neck"], "stats": {"gold_find": 0.30}, "drawback": {"ranged_damage": -0.08},
 		"line": "+30% gold from kills, -8% ranged damage",
@@ -540,9 +518,6 @@ const NAMES := [
 		"slots": ["neck"], "stats": {"stamina_regen": 0.20}, "drawback": {"health": -6.0},
 		"line": "+20% stamina regen, -6 health",
 		"tags": ["sustain"], "power": 0.45},
-	# --- the amulet's procs -------------------------------------------------
-	# `LIFESTEAL` is the one verb here that reads the blow rather than the body:
-	# a share of the damage the bearer deals comes back as health.
 	{"id": "j_blood_thirst", "name": "Bloodthirst", "groups": ["jewelry"],
 		"slots": ["neck"], "kind": "proc", "trigger": "hit", "proc": "lifesteal",
 		"chance": 0.25, "scale": 0.15,
@@ -558,8 +533,6 @@ const NAMES := [
 		"proc": "reflect", "chance": 0.12, "scale": 0.22,
 		"line": "12% on being hit: return 22% of the blow",
 		"tags": ["defence", "offence"], "power": 0.55},
-
-	# --- armour: stat bundles ---------------------------------------------
 	{"id": "a_second_skin", "name": "Second Skin", "slots": ["chest", "legs"],
 		"stats": {"health": 10.0}, "drawback": {"move_speed": -0.05},
 		"line": "+10 health, -5% move", "tags": ["defence"], "power": 0.4},
@@ -600,8 +573,6 @@ const NAMES := [
 	{"id": "a_rag_wraps", "name": "Rag Wraps", "slots": ["feet"],
 		"stats": {"stamina_regen": 0.10}, "line": "+10% stamina regen",
 		"tags": ["sustain"], "power": 0.45},
-
-	# --- armour: procs ----------------------------------------------------
 	{"id": "a_bone_rivets", "name": "Bone Rivets", "kind": "proc",
 		"trigger": "damage_taken", "proc": "stamina", "chance": 0.08, "magnitude": 15.0,
 		"line": "8% on being hit: regain 15 stamina", "tags": ["sustain"], "power": 0.35},
@@ -629,11 +600,6 @@ const NAMES := [
 		"trigger": "damage_taken", "proc": "absorb", "scale": 0.25,
 		"line": "-25% damage from burns and bleeds", "tags": ["defence"], "power": 0.35,
 		"wired": false, "note": "DoT-typed incoming only; the source tag does not exist yet."},
-
-	# --- cloth: the robe's own words --------------------------------------
-	# A robe buys spells and the casting that pays for them, and nothing else.
-	# No movement, no attack speed, no damage reduction: the class table in
-	# `POLICY` enforces that even against the armour ladders above.
 	{"id": "c_ash_body", "name": "Ashen Body", "groups": ["cloth"],
 		"stats": {"spell_damage": 0.08}, "drawback": {"stamina_regen": -0.06},
 		"line": "+8% spell damage, -6% stamina regen", "tags": ["spell", "offence"], "power": 0.5},
@@ -653,8 +619,6 @@ const NAMES := [
 		"stats": {"spell_damage": 0.12}, "drawback": {"stamina_regen": -0.08},
 		"line": "+12% spell damage, -8% stamina regen",
 		"tags": ["spell", "offence"], "power": 0.65},
-
-	# --- shields and focuses: the off hand's own words ---------------------
 	{"id": "o_banded", "name": "Banded", "groups": ["shield"],
 		"stats": {"guard": 0.04}, "line": "+4% guard", "tags": ["defence"], "power": 0.45},
 	{"id": "o_wide_boss", "name": "Wide Boss", "groups": ["shield"],
@@ -678,93 +642,11 @@ const NAMES := [
 	{"id": "o_copper_ward", "name": "Copper Ward", "groups": ["focus"], "kind": "proc",
 		"trigger": "damage_taken", "proc": "absorb", "scale": 0.10, "cooldown": 6.0,
 		"line": "First blow each 6 s is reduced 10%", "tags": ["defence"], "power": 0.4},
-
-	# --- abilities: the skills the altar can weld ---------------------------
-	# Every id here must exist in `AbilityRules`; the registry drops the entry
-	# otherwise, so a skill can be declared before it is written.
-	{"id": "k_barrage", "name": "Barrage", "kind": "ability", "groups": ["bow"],
-		"ability": "barrage", "line": "six half-damage arrows in a spread",
-		"tags": ["ranged", "offence"], "power": 0.7},
-	{"id": "k_triple_volley", "name": "Triple Fan Volley", "kind": "ability", "groups": ["bow"],
-		"ability": "triple_volley", "line": "three arrows fanned wide",
-		"tags": ["ranged", "offence"], "power": 0.6},
-	{"id": "k_piercing_shot", "name": "Piercing Shot", "kind": "ability", "groups": ["bow"],
-		"ability": "piercing_shot", "line": "double damage through three bodies",
-		"tags": ["ranged", "offence"], "power": 0.7},
-	{"id": "k_rain_of_ash", "name": "Rain of Ash", "kind": "ability", "groups": ["bow"],
-		"ability": "rain_of_ash", "line": "eight arrows into a patch of ground",
-		"tags": ["ranged", "offence"], "power": 0.8},
-	{"id": "k_skewer", "name": "Skewer", "kind": "ability", "groups": ["bow"],
-		"ability": "skewer", "line": "one shaft through three bodies",
-		"tags": ["ranged", "offence"], "power": 0.65},
-	{"id": "k_double_slash", "name": "Double Slash", "kind": "ability", "groups": ["sword"],
-		"ability": "double_slash", "line": "two fast cuts across the front arc",
-		"tags": ["melee", "offence"], "power": 0.6},
-	{"id": "k_lunge_thrust", "name": "Lunging Thrust", "kind": "ability", "groups": ["sword"],
-		"ability": "lunge_thrust", "line": "a committed step and a point",
-		"tags": ["melee", "offence", "mobility"], "power": 0.65},
-	{"id": "k_butchers_cut", "name": "Butcher's Cut", "kind": "ability", "groups": ["sword"],
-		"ability": "butchers_cut", "line": "a hooked cut through the front arc",
-		"tags": ["melee", "control"], "power": 0.6},
-	{"id": "k_gut_hook", "name": "Gut Hook", "kind": "ability", "groups": ["sword"],
-		"ability": "gut_hook", "line": "one narrow, heavy cut",
-		"tags": ["melee", "offence"], "power": 0.6},
-	# The heavy blow, and blunt steel's own weld: the makeshift club and the whole
-	# tree limb carry `blunt`, so no forged blade can take it. A club's overhand
-	# already runs at twice its profile's clip; this makes that blow three times
-	# the damage at half again the speed on top (`ItemPassives`), which is the club
-	# the campaign issues. The altar's worth floor is above a club's price, so the
-	# named weld is the only way onto one - the starter kit, or the paperdoll's bench.
 	{"id": "k_heavy_swing", "name": "Heavy Swing", "kind": "stat", "groups": ["blunt"],
 		"stats": {"overhead_damage": 2.0, "overhead_speed": 0.5},
 		"line": "3x damage on the overhand, swung 1.5x as fast",
 		"note": "The wheel-down blow only: a club's sweep keeps its own clock.",
-		"tags": ["melee", "offence"], "power": 0.85},
-	{"id": "k_backstab", "name": "Backstab", "kind": "ability", "groups": ["dagger"],
-		"ability": "backstab", "line": "blink behind the target and stab for double",
-		"tags": ["melee", "offence"], "power": 0.8},
-	{"id": "k_knife_work", "name": "Knife Work", "kind": "ability", "groups": ["dagger"],
-		"ability": "knife_work", "line": "three fast stabs",
-		"tags": ["melee", "offence"], "power": 0.55},
-	{"id": "k_spin_slash", "name": "Whirling Steel", "kind": "ability", "groups": ["two_hand"],
-		"ability": "spin_slash", "line": "a full ring around the body",
-		"tags": ["melee", "offence"], "power": 0.7},
-	{"id": "k_ground_breaker", "name": "Ground Breaker", "kind": "ability", "groups": ["two_hand"],
-		"ability": "ground_breaker", "line": "a 3 m slam that staggers everything",
-		"tags": ["melee", "control"], "power": 0.8},
-	{"id": "k_wide_sweep", "name": "Wide Sweep", "kind": "ability", "groups": ["two_hand"],
-		"ability": "wide_sweep", "line": "a 220 degree arc",
-		"tags": ["melee", "offence"], "power": 0.6},
-	{"id": "k_executioner", "name": "Executioner", "kind": "ability", "groups": ["two_hand"],
-		"ability": "executioner", "line": "a 2.2x overhead",
-		"tags": ["melee", "offence"], "power": 0.75},
-	{"id": "k_fireball", "name": "Fireball", "kind": "ability", "groups": ["staff"],
-		"ability": "fireball", "line": "a blast at the aim point",
-		"tags": ["ranged", "offence"], "power": 0.7},
-	{"id": "k_bone_spear", "name": "Bone Spear", "kind": "ability", "groups": ["staff"],
-		"ability": "bone_spear", "line": "a spear of bone through three bodies",
-		"tags": ["ranged", "offence"], "power": 0.7},
-	{"id": "k_cinder_lance", "name": "Cinder Lance", "kind": "ability", "groups": ["staff"],
-		"ability": "cinder_lance", "line": "a fast lance that pierces four",
-		"tags": ["ranged", "offence"], "power": 0.75},
-	{"id": "k_grave_bloom", "name": "Grave Bloom", "kind": "ability", "groups": ["staff"],
-		"ability": "grave_bloom", "line": "a 4 m bloom where it lands",
-		"tags": ["ranged", "offence"], "power": 0.7},
-	{"id": "k_ember_ward", "name": "Ember Ward", "kind": "ability", "groups": ["staff"],
-		"ability": "ember_ward", "line": "a 6 s ward paid in stamina",
-		"tags": ["defence"], "power": 0.6},
-	{"id": "k_shield_bash", "name": "Shield Bash", "kind": "ability", "groups": ["shield"],
-		"ability": "shield_bash", "line": "the boss into the front arc",
-		"tags": ["defence", "control"], "power": 0.6},
-	{"id": "k_shield_charge", "name": "Shield Charge", "kind": "ability", "groups": ["shield"],
-		"ability": "shield_charge", "line": "a running shoulder into a stagger",
-		"tags": ["defence", "control", "mobility"], "power": 0.65},
-	{"id": "k_shield_slam", "name": "Shield Slam", "kind": "ability", "groups": ["shield"],
-		"ability": "shield_slam", "line": "a ring of force off the board",
-		"tags": ["defence", "offence"], "power": 0.7},
-	{"id": "k_rebuke", "name": "Rebuke", "kind": "ability", "groups": ["shield"],
-		"ability": "rebuke", "line": "the rim comes round",
-		"tags": ["defence", "control"], "power": 0.55},
+		"tags": ["melee", "offence"], "power": 0.85}
 ]
 
 

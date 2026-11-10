@@ -275,17 +275,21 @@ var focus_active := false
 ## Presentation never reads these; the damage/timing getters below do.
 var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
 var trinket_stats := {}
-## The skills each held hand was anointed with, by ability id, in weld order
-## (`{main, off}`; an empty list for a plain piece). A stock weapon carries no
-## skill: `AbilityRules.granted` hands a held piece its skills only when this
-## names them for that hand, and `apply_loadout` rewrites it on every dressing,
-## so a hand that swaps pieces never keeps the last one's skills.
-var anointed := {"main": [], "off": []}
-## The player's own hotbar sequence, by ability id, set on every dressing by
-## `SeatLoadout` from the mercenary's roster record. `AbilityRules.granted` lays
-## the kit's grants into the slots this names first and appends the rest in kit
-## order; an id whose piece is stowed is skipped, so the layout survives a swap.
-var hotbar_order: Array[String] = []
+## The abilities the player has equipped on this body, by ability id, in key
+## order. `SeatLoadout` rewrites it on every dressing from the mercenary's own
+## list; `AbilityRules.granted` shows only the ones whose weapon family fits the
+## hands the body is holding, so a bow skill disappears when the sword comes out
+## and comes back with the bow. It is not a grant: the unlock is the player's.
+var ability_loadout: Array[String] = []
+
+## Set the equipped ability ids on this body, keeping only real catalog ids.
+func set_ability_loadout(ids: Variant) -> void:
+	ability_loadout = AbilityRules.equipped_ids(ids)
+## The one skill a body has whether or not the player equipped anything: the
+## family starters (`AbilityRules.STARTER_BY_FAMILY`) for a body dressed with one,
+## and empty for a mob, a clone or a caged soldier. `AbilityRules.granted` puts
+## it after the equipped list and before the consumables.
+var starter_ability := ""
 ## How many annointments the altar welded to the copy in each hand, 0..6. The rig
 ## hands these to the piece it is drawing, so a worked blade carries its marks in
 ## the hand, on the floor and in the paperdoll's mirror - never in a menu alone.
@@ -487,15 +491,17 @@ var _hit_react := 0.0
 var ability_id := ""
 var ability_clip := ""
 var ability_duration := 1.0
+## True for a bow skill. Its animation is the bow's own release-and-recover
+## (solved down the crosshair and played fast), not the authored skill clip, so
+## it can never point away from the aim.
+var ability_bow := false
 var ability_slot := -1
 var ability_index := -1
 var ability_lean := 0.0
 var ability_spin := 0.0
-var ability_draw_curve: Array = []
-## Move-enabled abilities keep their authored upper body while the legs layer
-## the normal locomotion cycle under them. `ability_travel` marks the committed
-## lunge/charge window whose authored full-body travel must survive unchanged.
-var ability_move := false
+## Every ability keeps its authored upper body while the legs layer the normal
+## locomotion cycle under it. `ability_travel` marks the committed lunge/charge
+## window whose authored full-body travel must survive unchanged.
 var ability_travel := 0.0
 ## The clip authored both wrists on purpose (the dual-wield three-strike): the
 ## rig keeps the off arm the clip posed instead of re-solving it to the neutral
@@ -1149,10 +1155,9 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	ability_id = str(definition.get("id", ""))
 	ability_clip = clip if _player.has_animation(clip) else "Sprint_Loop"
 	ability_duration = maxf(float(definition.get("duration", 1.0)),0.01)
+	ability_bow = AbilityRules.type_of(definition) == AbilityRules.TYPE_BOW
 	ability_lean = float(definition.get("lean",0.0))
 	ability_spin = float(definition.get("spin",0.0))
-	ability_draw_curve = definition.get("bow_draw", [])
-	ability_move = bool(definition.get("move",false))
 	ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 	ability_offhand_authored = bool(definition.get("offhand_authored", false))
 	phase = "ABILITY"
@@ -1161,6 +1166,11 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	charge_frozen = false
 	_blocking = false
 	_clear_melee()
+	# A bow skill never takes the string: any half draw and extra nocked shafts
+	# are dropped as the shot fires from the key, so no leftover draw rides the
+	# shot and no arrow is nocked for it.
+	if ability_bow:
+		_clear_nock_stack()
 	consumable_kind = ""
 	var planar := Vector3(direction.x,0.0,direction.z)
 	# A blade skill or dash is performed standing, and the controller has already
@@ -1170,26 +1180,70 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	if AbilityRules.needs_standing(definition):
 		_crouch_amount = 0.0
 		_slide_weight = 0.0
-	if not ability_draw_curve.is_empty() or AbilityRules.follows_aim(definition):
-		# Aim-directed skills are performed down the crosshair, not down the
-		# heading that was carried into the keypress: turn onto the aim before
-		# the first frame so the dash and its blade trail leave along it.
+	if AbilityRules.follows_aim(definition) or ability_bow:
+		# Aim-directed skills and every shot are performed down the crosshair,
+		# not down the heading carried into the keypress: turn onto the aim
+		# before the first frame so the arrow leaves along it.
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
 			planar = Vector3(offset.x,0.0,offset.z)
 	if planar.length_squared() > 0.000001:
 		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
+	# A bow skill's animation is the bow's own loose: solve the full-draw archery
+	# pose down the aim and remember where that loose leaves the bow and the
+	# drawing hand, so the fast shot plays the normal pose instead of an authored
+	# clip that may point somewhere else.
+	if ability_bow:
+		_capture_bow_release()
 	_update_pose(0.0)
 
 func is_ability() -> bool:
 	return phase == "ABILITY"
 
-## Move-enabled skills may keep walking under their authored upper body.
-func ability_allows_movement() -> bool:
-	return phase == "ABILITY" and ability_move
-
 func ability_progress() -> float:
 	return clampf(_phase_time/maxf(ability_duration,0.01),0.0,1.0)
+
+## The normal bow's release-and-recover timeline, mapped into the skill's short
+## window. The pose keeps the authored speeds and thresholds; only the wall clock
+## is compressed, which is what makes a bow skill a fast, normal bow shot.
+## x is 0 for the release and 1 for the recover; y is that phase's pose time.
+func _bow_shot_clock() -> Vector2:
+	var pose_time := ability_progress()*(RELEASE_SECONDS+RECOVER_SECONDS)
+	if pose_time < RELEASE_SECONDS:
+		return Vector2(0.0,pose_time)
+	return Vector2(1.0,pose_time-RELEASE_SECONDS)
+
+## Remember the full-draw loose the bow would make at this instant, without
+## loosing it. The shot then replays that captured bow position and hand follow
+## through, which is exactly the normal bow's release - aimed where the player
+## is looking.
+func _capture_bow_release() -> void:
+	var saved_phase := phase
+	var saved_time := _phase_time
+	phase = "HOLDING"
+	_phase_time = 0.0
+	draw_amount = 1.0
+	_update_pose(0.0)
+	_release_raise = _archery_weight()
+	_release_grip = to_local(active_bow.global_position)
+	_release_contact = to_local(string_hand.global_position)
+	_release_bow_rotation = (global_basis.inverse()*active_bow.global_basis).get_rotation_quaternion()
+	_release_draw = 1.0
+	_release_charge = 1.0
+	phase = saved_phase
+	_phase_time = saved_time
+	draw_amount = 0.0
+
+## Keep the captured loose pointing down the live crosshair. The grip and the
+## drawing hand were captured once at the press; the orientation is re-solved
+## against the aim on every pose step, so a mouse moved mid-skill turns the bow
+## with the shot instead of leaving it on an old line.
+func _retarget_bow_release() -> void:
+	var anchor := _jaw_anchor()
+	var offset := _aim_point-anchor
+	var elevation := clampf(atan2(offset.y,maxf(Vector2(offset.x,offset.z).length(),0.001)),-MAX_ELEVATION,MAX_ELEVATION)
+	var aim_basis := Basis(Vector3.UP,atan2(-offset.x,-offset.z))*Basis(Vector3.RIGHT,elevation)
+	_release_bow_rotation = (global_basis.inverse()*aim_basis).get_rotation_quaternion()
 
 ## A release cue fires from the owning scene before this rig's own pose step,
 ## so a shot would read the previous frame's hand origin. Solve the pose on
@@ -1211,12 +1265,11 @@ func _reset_ability_state() -> void:
 	ability_id = ""
 	ability_clip = ""
 	ability_duration = 1.0
+	ability_bow = false
 	ability_slot = -1
 	ability_index = -1
 	ability_lean = 0.0
 	ability_spin = 0.0
-	ability_draw_curve = []
-	ability_move = false
 	ability_travel = 0.0
 	ability_offhand_authored = false
 
@@ -1427,13 +1480,10 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
 	apply_trinkets(loadout.get("trinkets",{}))
-	# A hand carries a list of skills: the altar can weld several to one copy.
-	# Old dressings (and `PlayerState.build_loadout`) hand a bare id, so both
-	# shapes are accepted here and every consumer reads the list.
-	var hands: Variant = loadout.get("anointed",{})
-	var anointed_hands: Dictionary = hands if hands is Dictionary else {}
-	anointed = {"main": AbilityRules.skill_ids(anointed_hands.get("main","")),
-		"off": AbilityRules.skill_ids(anointed_hands.get("off",""))}
+	# The one skill a body has whether or not the player equipped anything. It is
+	# a field of its own so a loadout rewrite cannot drop it, and it stays empty
+	# for every body dressed without it (a mob, a clone).
+	starter_ability = str(loadout.get("starter", ""))
 	set_blade_skins("makeshift" if main_id == "sword_makeshift" or off_id == "sword_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))
@@ -1960,7 +2010,7 @@ func melee_half_angle(hand: String) -> float:
 	return deg_to_rad(75.0 if dagger else 80.0+5.0*size)
 
 func can_begin_melee(hand: String) -> bool:
-	if _roll_progress >= 0.0 or is_consuming():
+	if is_consuming():
 		return false
 	if hand == "left":
 		if weapon != "dual" or _left_melee_time >= 0.0:
@@ -2130,6 +2180,10 @@ func throw_scale() -> float:
 ## profile of the piece in the hand. Worn trinkets still compose beside it, so a
 ## ring of haste means in a run exactly what it means in the wood.
 var run_rate_scale := 1.0
+## The bow's own draw channel: Quick Draw and Magical Nock write these in a run.
+## A campaign body leaves them at the authored 1.0 / false.
+var bow_draw_scale := 1.0
+var bow_no_nock := false
 
 ## Rate multiplier: a 1.0 s draw becomes `1.0 / attack_rate()` seconds.
 func attack_rate() -> float:
@@ -2272,11 +2326,17 @@ func begin_throw() -> bool:
 
 func charge_seconds() -> float:
 	var base := float(SWORD_DATA[sword_index].seconds)
+	var rate := attack_rate()
 	if weapon == "bow":
+		# Magical Nock is the one row that removes the draw entirely; Quick
+		# Draw scales the same clock the trinkets and the run's rate already do.
+		if bow_no_nock:
+			return 0.001
 		base = float(BOW_DATA[bow_index].draw_seconds)
+		rate *= maxf(bow_draw_scale, 0.01)
 	elif weapon == "dagger":
 		base = float(profile_for_hand(_melee_hand).seconds)
-	return base/maxf(attack_rate(),0.01)
+	return base/maxf(rate,0.01)
 
 func throw_weapon_name() -> String:
 	return "dagger" if weapon == "dagger" else "sword"
@@ -2382,13 +2442,28 @@ func cancel_draw() -> void:
 	charge_frozen = false
 	cancel_consumable()
 	_clear_nock_stack()
-	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD"] and not phase.begins_with("MELEE"):
+	# A draw is a draw. A cut already swinging is not this function's to end:
+	# the feet take the string away on a leap or a roll, and they have no
+	# business taking the blade with it. The one caller that aborts everything
+	# ends the swing itself (`end_melee`).
+	if phase not in ["DRAWING", "HOLDING", "T_DRAW", "T_HOLD"]:
 		return
-	_clear_melee()
 	phase = "READY"
 	draw_amount = 0.0
 	_phase_time = 0.0
 	_update_pose(0.0)
+
+
+## End a swing outright, hands and phase together. This is the "stop everything"
+## half that `cancel_draw` used to do for melee: `Combat.abort_melee_to_neutral`
+## and a body being reset are its callers, never a jump, a roll or a hand swap.
+func end_melee() -> void:
+	_clear_melee()
+	if phase.begins_with("MELEE"):
+		phase = "READY"
+		_phase_time = 0.0
+		draw_amount = 0.0
+		_update_pose(0.0)
 
 
 ## How many shafts are on the string: the nocked one plus the pinched extras.
@@ -2706,10 +2781,9 @@ func apply_animation_state(state: Variant) -> void:
 		ability_id = str(definition.get("id",""))
 		ability_clip = str(definition.get("animation","Sprint_Loop"))
 		ability_duration = maxf(float(definition.get("duration",1.0)),0.01)
+		ability_bow = AbilityRules.type_of(definition) == AbilityRules.TYPE_BOW
 		ability_lean = float(definition.get("lean",0.0))
 		ability_spin = float(definition.get("spin",0.0))
-		ability_draw_curve = definition.get("bow_draw", [])
-		ability_move = bool(definition.get("move",false))
 		ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 		ability_offhand_authored = bool(definition.get("offhand_authored", false))
 		phase = "ABILITY"
@@ -2989,17 +3063,18 @@ func advance_animation(delta: float) -> void:
 			previous_right_base = get_blade_base("right")
 			previous_right_tip = get_blade_tip("right")
 		_advance_melee_step(step)
-		if _roll_progress < 0.0:
-			if previous_left >= 0.0 and _left_melee_time >= 0.0:
-				var window_left := _melee_window("left")
-				if _left_melee_time >= window_left.x and previous_left <= window_left.y:
-					melee_sweep.emit("left",previous_left_base,previous_left_tip,
-						get_blade_base("left"),get_blade_tip("left"),melee_radius("left"))
-			if previous_right >= 0.0 and _right_melee_time >= 0.0:
-				var window_right := _melee_window("right")
-				if _right_melee_time >= window_right.x and previous_right <= window_right.y:
-					melee_sweep.emit("right",previous_right_base,previous_right_tip,
-						get_blade_base("right"),get_blade_tip("right"),melee_radius("right"))
+		# The sweep lands whatever the feet are doing: a cut thrown mid-roll is
+		# still a cut, and a body in the air keeps the blade it swung.
+		if previous_left >= 0.0 and _left_melee_time >= 0.0:
+			var window_left := _melee_window("left")
+			if _left_melee_time >= window_left.x and previous_left <= window_left.y:
+				melee_sweep.emit("left",previous_left_base,previous_left_tip,
+					get_blade_base("left"),get_blade_tip("left"),melee_radius("left"))
+		if previous_right >= 0.0 and _right_melee_time >= 0.0:
+			var window_right := _melee_window("right")
+			if _right_melee_time >= window_right.x and previous_right <= window_right.y:
+				melee_sweep.emit("right",previous_right_base,previous_right_tip,
+					get_blade_base("right"),get_blade_tip("right"),melee_radius("right"))
 		if _left_melee_time >= _left_melee_duration-0.000001:
 			_left_melee_time = -1.0
 		if _right_melee_time >= _right_melee_duration-0.000001:
@@ -3141,11 +3216,13 @@ func _throw_clip_time() -> float:
 	return lerpf(strike_end,float(clip.duration),smoothstep(0.0,RECOVER_SECONDS,_phase_time))
 
 func _archery_weight() -> float:
-	if phase == "ABILITY":
-		if ability_draw_curve.is_empty():
-			return 0.0
-		var progress := ability_progress()
-		return smoothstep(0.0,0.10,progress)*(1.0-smoothstep(0.86,0.99,progress))
+	# A bow skill borrows the bow's own release-and-recover: the aim is the
+	# crosshair and the bow follows it, which an authored clip cannot promise.
+	if phase == "ABILITY" and ability_bow:
+		var clock := _bow_shot_clock()
+		if clock.x < 0.5:
+			return _release_raise
+		return _release_raise*(1.0-smoothstep(0.18,0.72,clock.y))
 	if phase == "DRAWING":
 		return smoothstep(0.0,RAISE_SECONDS,_phase_time)
 	if phase == "HOLDING":
@@ -3191,15 +3268,15 @@ func _solve_pose(delta: float) -> void:
 	# The quick step owns its own planted lunge; the forward locomotion cycle
 	# would read as a sprint in the step direction instead of a side step.
 	var ability := phase == "ABILITY"
-	# Bow skills decode their draw strength from data; both arms are then solved
-	# by the shared archery pose, so the bow aims and releases on cue.
-	var bow_ability := ability and weapon == "bow" and not ability_draw_curve.is_empty()
-	if bow_ability:
-		draw_amount = _sample_ability_draw()
-	# A move-enabled skill keeps playing its authored upper body while the legs
-	# layer the normal locomotion cycle. The committed travel window of a lunge
-	# or shield charge is exempt: its authored full-body clip owns the pose.
-	var moving_ability := ability and ability_move and (ability_travel <= 0.0 or _phase_time >= ability_travel)
+	# A bow skill is the bow's own loose played fast: the same archery overlay
+	# and aim-solved release a normal shot uses, so the bow points down the
+	# crosshair. The authored clip is not used for it.
+	var bow_ability := ability and ability_bow
+	# A skill keeps playing its authored upper body while the legs layer the
+	# normal locomotion cycle, at a run or in the air. The committed travel
+	# window of a lunge or shield charge is exempt: its authored full-body clip
+	# owns the pose.
+	var moving_ability := ability and (ability_travel <= 0.0 or _phase_time >= ability_travel)
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var consuming := is_consuming()
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
@@ -3224,13 +3301,17 @@ func _solve_pose(delta: float) -> void:
 				var tucked_yaw := atan2(-_cover_normal.x,-_cover_normal.z)
 				yaw = lerp_angle(tucked_yaw,yaw,smoothstep(0.0,1.0,_cover_lean.length()))
 			global_basis = Basis(Vector3.UP,yaw)
-	# Bow skills ride the crosshair: the body turns onto the aim on every pose
-	# solve, so each release cue leaves from the stance the player is looking
-	# through instead of the heading the skill began with.
-	if bow_ability and _roll_progress < 0.0:
+	# Every shot rides the crosshair: the body turns onto it on every pose solve,
+	# so each shaft leaves from the stance the player is looking through instead
+	# of the heading the skill began with.
+	if _ability_tracks_aim() and _roll_progress < 0.0:
 		var aim_offset := _aim_point-global_position
 		if Vector2(aim_offset.x,aim_offset.z).length_squared() > 0.0001:
 			global_basis = Basis(Vector3.UP,atan2(-aim_offset.x,-aim_offset.z))
+	# The body has just turned onto the crosshair; solve the captured loose
+	# against it so the bow's own direction is the line the arrow will take.
+	if bow_ability:
+		_retarget_bow_release()
 	# These nodes are rotation-only. Repeated Euler setters preserve extracted
 	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
 	_model.basis = _model_basis(PI+STANCE_YAW*archery+_ability_spin_yaw())
@@ -3251,7 +3332,7 @@ func _solve_pose(delta: float) -> void:
 	elif consuming:
 		clip = str(CONSUMABLE_DATA.get(consumable_kind, {}).get("clip","Idle_Loop"))
 		time = clampf(_phase_time,0.0,_clip_length(clip))
-	elif ability:
+	elif ability and not bow_ability:
 		clip = ability_clip if _clip_length(ability_clip) > 0.0 else "Sprint_Loop"
 		time = ability_progress()*_clip_length(clip)
 	elif drawing:
@@ -3371,7 +3452,7 @@ func _solve_pose(delta: float) -> void:
 		if aim_bow and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
-			_apply_slide_pose(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual" or consuming)
+			_apply_slide_pose(aim_bow or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual" or consuming)
 		if _step_progress >= 0.0 and not is_melee() and not throwing:
 			_apply_step_pose()
 		_place_feet()
@@ -3397,7 +3478,12 @@ func _solve_pose(delta: float) -> void:
 		_apply_downed_pose()
 	_update_shield_pose()
 	if weapon == "bow":
-		_update_bow_pose(aim_bow)
+		if bow_ability:
+			var shot := _bow_shot_clock()
+			var shot_draw := _release_draw*(1.0-smoothstep(0.0,0.075,shot.y)) if shot.x < 0.5 else 0.0
+			_update_bow_pose(true, "RELEASE" if shot.x < 0.5 else "RECOVER", shot.y, shot_draw)
+		else:
+			_update_bow_pose(drawing)
 	elif weapon != "none":
 		_update_hand_contacts()
 		var right_hand := _bone_world(_arms[1][2])
@@ -4042,29 +4128,15 @@ func _two_hand_wrist_target(target: Vector3, primary: Vector3, primary_radius: f
 	var radius := sqrt(maxf(0.0,primary_radius*primary_radius-along*along))
 	return centre+radial.normalized()*radius
 
-func _ability_bow() -> bool:
-	return phase == "ABILITY" and weapon == "bow" and not ability_draw_curve.is_empty()
+## A bow skill rides the live crosshair on every pose solve, so the release the
+## player sees is the line the arrow leaves on. A dash, lunge or shield charge
+## locks its line at the activation and must never re-solve, or its committed
+## travel would curve with the mouse.
+func _ability_tracks_aim() -> bool:
+	return phase == "ABILITY" and weapon == "bow" and ability_bow
 
 func _ability_needs_standing() -> bool:
 	return phase == "ABILITY" and AbilityRules.needs_standing(AbilityRules.by_id(ability_id))
-
-func _sample_ability_draw() -> float:
-	if ability_draw_curve.is_empty():
-		return 0.0
-	var progress := ability_progress()
-	var first: Array = ability_draw_curve[0]
-	if progress <= float(first[0]):
-		return clampf(float(first[1]),0.0,1.0)
-	for index in range(1,ability_draw_curve.size()):
-		var previous: Array = ability_draw_curve[index-1]
-		var current: Array = ability_draw_curve[index]
-		if progress <= float(current[0]):
-			var span := maxf(float(current[0])-float(previous[0]),0.000001)
-			# A release key is nearly instantaneous; a smoothstep here would
-			# smear the snap, so keep the interpolation linear.
-			return clampf(lerpf(float(previous[1]),float(current[1]),(progress-float(previous[0]))/span),0.0,1.0)
-	var last: Array = ability_draw_curve[ability_draw_curve.size()-1]
-	return clampf(float(last[1]),0.0,1.0)
 
 func _ability_spin_yaw() -> float:
 	# The spin is presentation-only and derived from the phase clock, so a
@@ -4315,7 +4387,15 @@ func _update_shield_pose() -> void:
 		var center := hand.origin+outward*carry+Vector3.UP*0.02
 		active_shield.global_transform = Transform3D(basis,center)
 
-func _update_bow_pose(drawing: bool) -> void:
+func _update_bow_pose(drawing: bool, shot_phase := "", shot_time := 0.0, shot_draw := -1.0) -> void:
+	# A bow skill passes its own release/recover phase and pose time: the normal
+	# shot's timeline is compressed into the skill's short window. A normal draw
+	# passes neither and uses the rig's own phase clock unchanged.
+	var pose_phase := shot_phase if not shot_phase.is_empty() else phase
+	var pose_time := shot_time if not shot_phase.is_empty() else _phase_time
+	# The string snaps from the captured full draw to brace on the same fast
+	# clock, exactly as the normal release does at its own speed.
+	var pose_draw := draw_amount if shot_draw < 0.0 else shot_draw
 	var left := _bone_world(_arms[0][2])
 	var right := _bone_world(_arms[1][2])
 	var carry_grip: Vector3 = left*_palm_left
@@ -4354,59 +4434,60 @@ func _update_bow_pose(drawing: bool) -> void:
 		var weight := _archery_weight()
 		# Push the bow out while pulling the string back; a fully extended bow
 		# at zero tension puts its brace point beyond the drawing arm's reach.
-		var grip_distance := lerpf(Bow.BRACE_DISTANCE+0.12,Bow.DRAW_DISTANCE,draw_amount)
+		var grip_distance := lerpf(Bow.BRACE_DISTANCE+0.12,Bow.DRAW_DISTANCE,pose_draw)
 		grip = carry_grip.lerp(anchor-aim_basis.z*grip_distance,weight)
 		bow_basis = bow_basis.slerp(aim_basis,weight)
-		if phase == "RELEASE":
+		if pose_phase == "RELEASE":
 			grip = to_global(_release_grip)
 			bow_basis = global_basis*Basis(_release_bow_rotation)
-		elif phase == "RECOVER":
+		elif pose_phase == "RECOVER":
 			# Load in front of the centreline, within both arms' reach. A far-left
 			# target straightens the right elbow and drives its forearm through the chest.
 			var nocking_grip := chest+body_right*0.04+body_forward*0.46-Vector3.UP*0.05
 			var nocking_basis := Basis.looking_at(body_forward,Vector3.UP)
-			var lower := smoothstep(0.18,0.40,_phase_time)
-			var relax := smoothstep(0.72,RECOVER_SECONDS,_phase_time)
+			var lower := smoothstep(0.18,0.40,pose_time)
+			var relax := smoothstep(0.72,RECOVER_SECONDS,pose_time)
 			grip = to_global(_release_grip).lerp(nocking_grip,lower).lerp(carry_grip,relax)
 			bow_basis = (global_basis*Basis(_release_bow_rotation)).slerp(nocking_basis,lower).slerp(bow_basis,relax)
 		var left_basis := bow_basis*_bow_grip_basis.inverse()
 		_solve_limb(_arms[0],grip-left_basis*_palm_left,left_basis,-body_right*0.60+body_forward*0.40-Vector3.UP*0.20)
 		left = _bone_world(_arms[0][2])
 		active_bow.global_transform = Transform3D(bow_basis.scaled_local(girth),left*_palm_left)
-		active_bow.set_draw(draw_amount)
+		active_bow.set_draw(pose_draw)
 		right_basis = (bow_basis*_string_grip_basis.inverse()).orthonormalized()
 		contact = active_bow.get_nock_position()
 		var draw_reach := 1.0
-		if phase == "DRAWING":
-			draw_reach = smoothstep(0.03,RAISE_SECONDS,_phase_time)
+		if pose_phase == "DRAWING":
+			draw_reach = smoothstep(0.03,RAISE_SECONDS,pose_time)
 			var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
 			contact = _hand_arc(carry_contact,hip_gate,front_gate,contact,draw_reach)
 			right_basis = right.basis.orthonormalized().slerp(right_basis,draw_reach)
-		elif phase in ["RELEASE","RECOVER"]:
-			var follow := smoothstep(0.0,RELEASE_SECONDS,_phase_time) if phase == "RELEASE" else 1.0
+		elif pose_phase in ["RELEASE","RECOVER"]:
+			var follow := smoothstep(0.0,RELEASE_SECONDS,pose_time) if pose_phase == "RELEASE" else 1.0
 			contact = to_global(_release_contact)+global_basis*Basis(_release_bow_rotation).z*(0.12*follow*_release_raise*_release_charge)
-			if phase == "RECOVER":
+			if pose_phase == "RECOVER":
 				var quiver_top := _quiver.to_global(Vector3(0,0.29,0))
-				if _phase_time < 0.40:
-					contact = _hand_arc(contact,shoulder_gate,shoulder_gate,quiver_top,smoothstep(0.03,0.40,_phase_time))
-				elif _phase_time < 0.68:
-					contact = _hand_arc(quiver_top,shoulder_gate,front_gate,active_bow.get_nock_position(),smoothstep(0.40,0.68,_phase_time))
+				if pose_time < 0.40:
+					contact = _hand_arc(contact,shoulder_gate,shoulder_gate,quiver_top,smoothstep(0.03,0.40,pose_time))
+				elif pose_time < 0.68:
+					contact = _hand_arc(quiver_top,shoulder_gate,front_gate,active_bow.get_nock_position(),smoothstep(0.40,0.68,pose_time))
 				else:
-					var relax := smoothstep(0.72,RECOVER_SECONDS,_phase_time)
+					var relax := smoothstep(0.72,RECOVER_SECONDS,pose_time)
 					var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
 					contact = _hand_arc(active_bow.get_nock_position(),hip_gate,hip_gate,carry_contact,relax)
 					right_basis = right_basis.slerp(right.basis.orthonormalized(),relax)
 		var elbow_pole := body_right*0.65+body_forward*0.40+Vector3.UP*0.12
-		if phase == "DRAWING":
+		if pose_phase == "DRAWING":
 			elbow_pole = (_bone_world(_arms[1][1]).origin-shoulder).lerp(elbow_pole,draw_reach)
 		var worn := right_basis.scaled_local(right_girth)
 		_solve_limb(_arms[1],contact-worn*_palm_right,worn,elbow_pole)
 	else:
 		active_bow.global_transform = Transform3D(bow_basis.scaled_local(girth),grip)
 		active_bow.set_draw(0.0)
+	# A bow skill never shows a nocked shaft: the key looses it, so the rig has
+	# nothing on the string to draw from.
 	active_bow.set_arrow_visible(_roll_progress < 0.0 and (phase in ["READY","DRAWING","HOLDING"] \
-		or (phase == "RECOVER" and _phase_time >= 0.68) \
-		or (phase == "ABILITY" and not ability_draw_curve.is_empty() and draw_amount > 0.03)))
+		or (phase == "RECOVER" and _phase_time >= 0.68)))
 	_update_hand_contacts()
 
 func _jaw_anchor() -> Vector3:

@@ -325,7 +325,10 @@ func _launch_line_clear(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vec
 	return space.intersect_ray(_sight_query).is_empty()
 
 func can_draw() -> bool:
-	return rig.weapon == "bow" and grounded and rig.phase == "READY" \
+	# A leap is not a reason to lower the bow: the string is drawn with the arms,
+	# so a body running or in the air keeps shooting. Only a roll, a stagger or a
+	# spent quiver keeps it down.
+	return rig.weapon == "bow" and rig.phase == "READY" \
 		and rig._roll_progress < 0.0 and stagger_time <= 0.0 and not quiver_empty()
 
 ## True when the gate itself is the reason the string will not come up, so a
@@ -342,9 +345,10 @@ func begin_draw() -> bool:
 	return true
 
 func can_throw() -> bool:
-	return rig.weapon in ["sword","dagger","dual"] and grounded and rig.phase == "READY" \
-		and rig._roll_progress < 0.0 and stagger_time <= 0.0 \
-		and melee_progress >= 1.0-0.000001
+	# Thrown steel answers the same rule as the bow: the hand is free in the air.
+	return rig.weapon in ["sword","dagger","dual"] \
+		and rig.phase == "READY" and rig._roll_progress < 0.0 \
+		and stagger_time <= 0.0 and melee_progress >= 1.0-0.000001
 
 func begin_throw() -> bool:
 	if not can_throw() or not _accept_cover_draw():
@@ -362,7 +366,7 @@ func release_throw() -> void:
 	if _cover_attack and not _cover_attached():
 		stop()
 		return
-	if _cover_attached():
+	if _cover_attack and _cover_attached():
 		if not grounded or rig._roll_progress >= 0.0 or not cover.can_peek(cover_side):
 			stop()
 			return
@@ -553,7 +557,7 @@ func stagger(seconds: float) -> void:
 	attack_progress = 1.0
 	melee_progress = 1.0
 	if is_instance_valid(rig) and rig.is_melee():
-		rig.cancel_draw()
+		rig.end_melee()
 	if is_instance_valid(rig) and rig.is_ability():
 		rig.cancel_ability()
 
@@ -563,7 +567,7 @@ func release_draw() -> void:
 	if _cover_attack and not _cover_attached():
 		stop()
 		return
-	if _cover_attached():
+	if _cover_attack and _cover_attached():
 		if not grounded or rig._roll_progress >= 0.0 or not cover.can_peek(cover_side):
 			stop()
 			return
@@ -589,24 +593,67 @@ func _on_loadout_changed() -> void:
 	if _cover_attack:
 		stop()
 
-func stop() -> void:
+func stop(keep_swings: bool = false) -> void:
 	clear_camera_ray()
 	_cover_attack = false
 	_auto_exposure = false
 	_release_pending = false
 	_shaft_grace = 0.0
 	_pending_throw = false
-	for hand in ["left","right"]:
-		var state := _swing_state(hand)
-		state.active = false
-		state.blocked = false
-		state.victims.clear()
-		state.exclude.clear()
+	# `keep_swings` is for the cancellations the feet cause: a jump that turns
+	# into a roll, or a roll committed mid-cut, takes the body's footing and
+	# nothing else. The blade already swinging keeps its clock and its contact.
+	if not keep_swings:
+		for hand in ["left","right"]:
+			var state := _swing_state(hand)
+			state.active = false
+			state.blocked = false
+			state.victims.clear()
+			state.exclude.clear()
 	stop_block()
 	rig.cancel_draw()
+	# A full stop ends the blade as well: a cancel is a cancel. The one caller
+	# that only means "the feet moved" passes `keep_swings` (`press_jump`'s roll).
+	if not keep_swings and rig.is_melee():
+		rig.end_melee()
 	if rig.is_ability():
 		rig.cancel_ability()
 	_sync_display_progress()
+
+## A leap takes the feet, not the hands. A body that jumps with a bow drawn, a
+## blade raised to throw, a cut already in the air or a skill under way keeps it:
+## the draw, its charge, the shafts it has pinched on the string, the swing's own
+## clock and the authored skill all survive the take-off. Only the guard and the
+## cover latch end with the leap, because neither can be held in the air. A
+## release that was waiting on a cover exposure is loosed on the plain line
+## instead of being swallowed by the jump, so jumping never costs a shot.
+func stop_for_airborne() -> void:
+	stop_block()
+	var held: bool = rig.phase in ["DRAWING","HOLDING","T_DRAW","T_HOLD"]
+	var pending_throw := _pending_throw
+	var pending := _release_pending
+	_cover_attack = false
+	_auto_exposure = false
+	_release_pending = false
+	_pending_throw = false
+	_shaft_grace = 0.0
+	# A skill rides the hands as well: a body that leaps mid-skill keeps
+	# performing it, exactly as a drawn bow keeps its string.
+	if rig.is_ability():
+		return
+	if not held:
+		rig.cancel_draw()
+		_sync_display_progress()
+		return
+	# The frozen charge belonged to the cover release that is no longer pending.
+	rig.charge_frozen = false
+	if not pending:
+		return
+	update_aim()
+	if pending_throw:
+		rig.release_throw()
+	else:
+		_release_archer()
 
 func wants_cover_exposure() -> bool:
 	return _auto_exposure and _cover_attached() \
@@ -687,7 +734,10 @@ func _cover_throw_clear() -> bool:
 
 func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	var key := "left" if hand == "left" else "right"
-	if not grounded or stagger_time > 0.0 or rig._roll_progress >= 0.0:
+	# A blade is swung with the hands, not the feet: a body at a run, in the air
+	# or in the middle of a roll keeps its cut. Only a stagger takes the swing
+	# away - and starting one never stops a run, a jump or a roll.
+	if stagger_time > 0.0:
 		return false
 	if key == "left":
 		if rig.weapon != "dual":
@@ -750,14 +800,18 @@ func _on_melee_started(hand: String) -> void:
 	# body answers the plain number and this block changes nothing.
 	state.crit = false
 	state.knockback = 1.0
+	var extra_reach := 0.0
 	if is_instance_valid(actor) and actor.has_method("roguelite_melee_swing"):
 		var swing: Dictionary = actor.roguelite_melee_swing(
 			float(state.damage), hand, rig.melee_variant(hand))
 		state.damage = float(swing.get("damage", state.damage))
 		state.crit = bool(swing.get("crit", false))
 		state.knockback = float(swing.get("knockback", 1.0))
+		# Big Claws buys reach, and it is bought for this hand alone: the cost of
+		# the row is paid on the cut it widens.
+		extra_reach = maxf(0.0, float(swing.get("reach", 0.0)))
 	state.diagonal = rig.is_diagonal_swing(hand)
-	state.reach = rig.melee_reach(hand)
+	state.reach = rig.melee_reach(hand) + extra_reach
 	state.half_angle = rig.melee_half_angle(hand)
 	state.variant = rig.melee_variant(hand)
 	# Whether the piece in the main hand is swung with both: a two-handed
@@ -789,10 +843,12 @@ func _swing_spent(state: Dictionary) -> bool:
 	return state.victims.size() >= int(state.get("max_victims", ONE_HAND_MAX_VICTIMS))
 
 func _can_damage_melee(hand: String, state: Dictionary) -> bool:
+	# No roll gate: a cut thrown mid-roll is still a cut, and the blade samples
+	# it emits are the ones the body's own sweep produced.
 	return damage_enabled and state.active and not state.blocked \
 		and is_instance_valid(actor) and actor.get("alive") != false \
 		and rig.weapon == state.weapon and rig.has_melee(hand) \
-		and rig._roll_progress < 0.0 and not _swing_spent(state)
+		and not _swing_spent(state)
 
 ## Resolves one blade sample against the present world, then against the world
 ## the client's owner was drawing: a body that stepped out of the cut since the
@@ -807,7 +863,11 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 
 func _sweep_blade(hand: String, state: Dictionary, previous_base: Vector3, previous_tip: Vector3,
 		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
-	if state.diagonal:
+	# A roll tucks the blade: the authored sample no longer passes anywhere near
+	# the body the cut was aimed at, so a cut thrown mid-roll resolves as the same
+	# front-arc cleave a diagonal cut uses. Without this the swing animates and
+	# touches nothing, which is worse than refusing the press.
+	if state.diagonal or (is_instance_valid(rig) and rig._roll_progress >= 0.0):
 		_sweep_cleave(hand,state)
 		return
 	# Precision attacks still follow the blade. Daggers retain their short
@@ -1071,6 +1131,10 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		return DEFENSE_NONE
 	state.victims[unit.get_instance_id()] = true
 	var damage: float = state.damage
+	# Danger Close and Eagle Eye: the two rows that read the range to the body a
+	# blow is landing on, asked here because this is where the range is known.
+	if is_instance_valid(actor) and actor.has_method("roguelite_proximity"):
+		damage *= maxf(0.0, float(actor.roguelite_proximity(at)))
 	var outcome := DEFENSE_NONE
 	# Name the striker before the blow lands so a mob can turn on the ranger
 	# that hit it, even a backstab it never saw coming.
@@ -1134,15 +1198,25 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 func ability_strike(radius: float, arc_degrees: float, damage: float,
 		stagger_seconds: float = 0.0, ring: bool = false,
 		require_sight: bool = true, victims: Dictionary = {},
-		max_victims: int = ABILITY_MAX_VICTIMS) -> int:
+		max_victims: int = ABILITY_MAX_VICTIMS, extra_victims: int = 0) -> int:
 	if not is_instance_valid(actor):
 		return 0
-	var cap := clampi(max_victims, 1, ABILITY_MAX_VICTIMS)
+	var cap := clampi(max_victims + maxi(0, extra_victims), 1,
+		ABILITY_MAX_VICTIMS + 6)
 	var struck := _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
 		stagger_seconds,arc_degrees,ring,require_sight,victims,cap)
 	struck += _lag_area_strike(actor.global_position+Vector3.UP*0.95,radius,damage,
 		stagger_seconds,arc_degrees,ring,require_sight,victims,cap)
 	return struck
+
+
+## The same strike with the run's cleave budget on top of the authored cap. The
+## row says "one more body", so the extra is added after the skill's own ceiling.
+func ability_strike_cleave(radius: float, arc_degrees: float, damage: float,
+		stagger_seconds: float, ring: bool, require_sight: bool,
+		victims: Dictionary, extra_victims: int) -> int:
+	return ability_strike(radius, arc_degrees, damage, stagger_seconds, ring,
+		require_sight, victims, ABILITY_MAX_VICTIMS, extra_victims)
 
 ## A blast centred away from the caster (a fireball burst). Sight is ignored:
 ## the explosion owns the space it fills. One blast is one attack: the present
@@ -1352,7 +1426,7 @@ func abort_melee_to_neutral() -> void:
 	attack_progress = 1.0
 	melee_progress = 1.0
 	if is_instance_valid(rig) and rig.is_melee():
-		rig.cancel_draw()
+		rig.end_melee()
 
 func abort_swing(hand: String) -> void:
 	var state := _swing_state(hand)

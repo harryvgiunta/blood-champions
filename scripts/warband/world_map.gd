@@ -34,6 +34,7 @@ extends CanvasLayer
 
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 const TravelScript = preload("res://scripts/warband/fast_travel.gd")
 
 const TITLE := "THE WOOD"
@@ -156,7 +157,10 @@ func open() -> void:
 func close() -> void:
 	_open = false
 	visible = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Closing hands the pointer back to the world's own policy; the gate refuses
+	# it in a window that is not in front or not engaged, so the cursor stays on
+	# the desktop instead of being warped into this page's window.
+	PointerGate.capture()
 	set_process(false)
 
 

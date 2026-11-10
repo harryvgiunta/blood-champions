@@ -9,9 +9,12 @@ extends SceneTree
 
 const TOWN_OUT := "res://.runtime/capture_rogue_town.png"
 const ISLAND_OUT := "res://.runtime/capture_rogue_island.png"
+const PointerGate = preload("res://scripts/pointer_gate.gd")
 
 
 func _initialize() -> void:
+	# The shots frame the aiming HUD; the tool takes no pointer to get it.
+	PointerGate.preview_aim = true
 	var flow = root.get_node_or_null("/root/GameFlow")
 	if flow != null:
 		flow.world_start = "town"
@@ -27,11 +30,14 @@ func _run(scene: Node) -> void:
 	_capture(TOWN_OUT)
 	var town = scene.get("town")
 	if town != null:
+		# A page owns the pointer for it, so the frame behind it is no aim frame.
+		PointerGate.preview_aim = false
 		town._open_forge("rack")
 		for _frame in 20:
 			await process_frame
 		_capture("res://.runtime/capture_rogue_rack.png")
 		town.forge_panel.close_panel()
+		PointerGate.preview_aim = true
 	var run = scene.get("roguelite")
 	if run != null:
 		run.start_run()
@@ -63,6 +69,22 @@ func _run(scene: Node) -> void:
 		for _frame in 60:
 			await process_frame
 		_capture("res://.runtime/capture_rogue_shop.png")
+		# The three gates a cleared level stands, framed from the party's side on
+		# the wood's neutral light: the grey ring, the black rock and bone, the red
+		# flesh and ribs.
+		run.stage_index = 0
+		run.biome_id = "wilderness"
+		run._build_stage()
+		run._clear_stage_props()
+		run.level_cleared = true
+		run._clear_level()
+		if scene.get("bodies").size() > 0:
+			var viewer = scene.get("bodies")[0]
+			viewer.global_position = run._gate_point(1) + Vector3(0.0, 0.0, 6.6)
+			viewer.rotation.y = 0.0
+		for _frame in 45:
+			await process_frame
+		_capture("res://.runtime/capture_rogue_gates.png")
 		# The island's furniture and the draft window: clear the last island,
 		# walk the body to the pedestal and open the board it offers.
 		run.level_cleared = true

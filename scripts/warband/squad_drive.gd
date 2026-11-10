@@ -857,11 +857,18 @@ static func retarget(watchers: Array, bodies: Array, radius: float = INF) -> voi
 			continue
 		if radius < INF and watcher.global_position.distance_to(nearest.global_position) > radius:
 			continue
-		watcher.player = nearest
+		# The quarry is handed over through `hunt`, which is the one verb every
+		# family owns and the one that writes each family's own target field (a
+		# watcher's `player`, a devil's `player`, a blood clone's roster). Writing
+		# `player` straight onto the body raised on every clone in the party's own
+		# guard list, and a family with no such property was skipped by `in`.
+		if not watcher.has_method("hunt"):
+			continue
+		if watcher.has_method("hunting") and bool(watcher.call("hunting")):
+			continue
 		# `hunt` only re-arms the senses when the pursuit lapsed, so calling it
 		# every frame never resets a watcher that is already running somebody down.
-		if not bool(watcher.hunting()):
-			watcher.hunt(nearest)
+		watcher.call("hunt", nearest)
 
 
 # --- answers ---------------------------------------------------------------
@@ -1372,6 +1379,10 @@ func _cast_step(actor, track: Dictionary, profile: Dictionary, watcher, directio
 	for slot in AbilityRules.SLOT_COUNT:
 		var definition: Dictionary = runner.definition(slot)
 		if definition.is_empty():
+			continue
+		# The starter spell is the player's key. A squad that casts it would spend
+		# every third swing on a blast, and cancelling its own cut to do it.
+		if not bool(definition.get("ai_cast", true)):
 			continue
 		var rank := Contracts.disposition_ability_rank(disposition,
 			str(definition.get("id", "")))

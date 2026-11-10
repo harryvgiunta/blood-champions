@@ -1096,7 +1096,6 @@ func _wakes_text(row: Dictionary, item_id: String) -> String:
 ## The four bands the altar's die is cut into, in the order they are cut.
 func _odds_text(odds: Dictionary) -> String:
 	var words := {
-		"add_ability": "add an ability",
 		"add_passive": "add a passive",
 		"remove": "strip one",
 		"replace": "swap one",

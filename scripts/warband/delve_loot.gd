@@ -15,23 +15,17 @@ extends RefCounted
 ##     themselves - so a rare corpse of either carries a piece of it
 ##     (`DEMON_ESSENCE_CHANCE`, `WATCHER_ESSENCE_CHANCE`). It is a carried piece in
 ##     the delve inventory until the climb out renders it into the wallet;
-##   * steel already anointed. A rare watcher's weapon comes out of its hand
-##     anointed (`ANOINTED_CHANCE`): its drop is marked, and the warband that takes
-##     it has the piece's skill awake on every copy it owns, no reagent spent
-##     (`Warband.grant_anointing`). Only a piece that has a skill can be.
+## Steel is plain now: the old chance of a watcher's weapon coming out already
+## anointed is gone, because a skill is the player's unlock and never a piece's.
 ##
-## The rare finds are their own rolls and are never thinned: an anointed weapon
-## always falls, and essence already on a body stays on it. These are rolls, not
-## properties of a post - every descent is a fresh instance, so the same body does
-## not carry the same prize twice - and only the host's world books a corpse.
-
-const Cruor = preload("res://scripts/warband/cruor_manager.gd")
+## The rare find is its own roll and is never thinned: essence already on a body
+## stays on it. It is a roll, not a property of a post - every descent is a fresh
+## instance - and only the host's world books a corpse.
 
 ## The essence a corpse carries: the catalog's Ritual Tallow, the wallet's tier 1.
 const ESSENCE := "cruor_t1"
 const WATCHER_ESSENCE_CHANCE := 0.04
 const DEMON_ESSENCE_CHANCE := 0.10
-const ANOINTED_CHANCE := 0.02
 ## Each ordinary piece on a watcher below survives its fall on this roll: the
 ## Hollow's loot is cut by 70%.
 const KEEP_SHARE := 0.3
@@ -48,12 +42,9 @@ static func settle(body, demon: bool, rng: RandomNumberGenerator) -> void:
 			body.spoils.append(ESSENCE)
 		return
 	var weapon := str(body.weapon_item)
-	if not weapon.is_empty() and not bool(body.weapon_anointed):
-		if rng.randf() < ANOINTED_CHANCE and not Cruor.anoint_skill(weapon).is_empty():
-			body.weapon_anointed = true
-		elif rng.randf() >= KEEP_SHARE:
-			# The steel does not survive the fall: the hand lets go of nothing.
-			body.take_weapon_item()
+	if not weapon.is_empty() and rng.randf() >= KEEP_SHARE:
+		# The steel does not survive the fall: the hand lets go of nothing.
+		body.take_weapon_item()
 	body.armor_items.assign(_thinned(body.armor_items, rng))
 	body.carried.assign(_thinned(body.carried, rng))
 	if rng.randf() < WATCHER_ESSENCE_CHANCE:

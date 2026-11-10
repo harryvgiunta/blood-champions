@@ -115,6 +115,7 @@ var _step_to := Vector3.ZERO
 func _ready() -> void:
 	# Before the parent's `_ready` reads them: the road's archers carry the
 	# hardened pool, like every other road watcher, and the bow in their hand.
+	# The scene's `pool_scale` is the parent's dial and lands there, once.
 	health_pool = HARDENED_HEALTH
 	weapon_item = BOW_ITEM
 	super()
@@ -138,6 +139,12 @@ func _ready() -> void:
 ## they stand their watch and fight whoever comes instead of sleeping in a crouch.
 func stand_watch() -> void:
 	ambush_awake = true
+
+
+## An archer's charge ends at its own holding ring. It runs in to bow range and
+## looses there, rather than closing to a blade's reach it never uses.
+func _charge_reach() -> float:
+	return ELITE_HOLD_NEAR if elite else HOLD_NEAR
 
 
 ## The group's post. Held as both the roam home and the leash centre.

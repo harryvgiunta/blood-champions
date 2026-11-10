@@ -17,6 +17,7 @@ Warband="*res://scripts/warband/warband_state.gd"
 Roguelite="*res://scripts/roguelite/roguelite_meta.gd"
 GameFlow="*res://scripts/warband/game_flow.gd"
 PerfOverlay="*res://scripts/perf_overlay.gd"
+PointerWatch="*res://scripts/pointer_gate.gd"
 
 [display]
 window/size/viewport_width=1440

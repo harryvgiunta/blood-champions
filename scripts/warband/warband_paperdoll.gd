@@ -97,6 +97,9 @@ const BENCH_OK := Color("7fd7c4")
 const BENCH_NO := Color("d9836e")
 ## The hands the bench can work, in the order its tabs stand.
 const BENCH_HANDS := ["main", "off"]
+## What the page says when the rack, not the wardrobe, owns the hand: the pair
+## the portal carries is the rack's, and TAB brings the other one up in a run.
+const RACK_HANDS_MESSAGE := "The rack binds the pair: bind another weapon there. TAB swaps the hands in a run."
 
 ## The header line: the screen's name, or the body it is stripping in corpse mode.
 var title_label: Label
@@ -120,6 +123,21 @@ var selected_merc := -1
 ## page opens on it, and the hotbar row names it: a row of keys the player did
 ## not arrange for the body under their hands must never read as their own.
 var controlled_merc := -1
+## The active run's own armour, as `(merc_id) -> {slot: piece}`. A run dresses
+## its bodies from the chest's pieces, not from the roster, so the page reads
+## this over the wardrobe for the body inside the run. Unset in the town's own
+## page (and on a guest with no runtime for the body): the wardrobe is then the
+## whole truth.
+var run_armour: Callable = Callable()
+## The pair a body's hands are holding, as `(merc_id) -> {main, off, source}`:
+## the run's own pair while a run owns the body (`source` "run") and the rack's
+## piece while it stands inside the square ("rack"). Unset, or `{}`, outside
+## both: the wardrobe's kit is then what the body holds. `off` is the piece the
+## other hand reaches, not a second piece of the wardrobe's.
+var hands_for: Callable = Callable()
+## The page's own TAB while a run owns the hands, as `(merc_id) -> {ok, message}`:
+## the world swaps the run's pair. Unset outside a run.
+var swap_hands: Callable = Callable()
 ## The slot the next stash click lands in (`WarbandContracts.SlotType`).
 var selected_slot := Contracts.SlotType.MAIN_HAND
 ## Slot rows keyed by slot id (`head`..`off`): `{slot, id, button, item_id}`.
@@ -388,7 +406,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. What you wear by hand stays yours: RE-EQUIP hands this body's kit back, forgets those pins and picks again by priority; RE-EQUIP THE BAND does the same for everyone but leaves your own slots alone. TAB swaps the weapon set. On the hotbar, click a skill then the key it should fire from."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. What you wear by hand stays yours: RE-EQUIP hands this body's kit back, forgets those pins and picks again by priority; RE-EQUIP THE BAND does the same for everyone but leaves your own slots alone. TAB swaps the weapon set. On the hotbar, click a skill then the key it should fire from; equip new skills at the Weapon Rack's ABILITY BOOK."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _can_dress(merc_id) else -1
@@ -429,6 +447,69 @@ func _pool() -> WarbandStash:
 
 func _pool_label() -> String:
 	return str(_warband.field_label()) if _warband != null else "the shared stash"
+
+
+## The pieces the live run has put on a body, one per armour slot. Read over the
+## roster's own kit so a piece a chest handed out is on the page from the moment
+## it lands, not only on the rig. Empty when no run owns the body.
+func _run_pieces(merc_id: int = -1) -> Dictionary:
+	if _corpse_active or not run_armour.is_valid():
+		return {}
+	var id := selected_merc if merc_id < 0 else merc_id
+	if id <= 0:
+		return {}
+	var raw: Variant = run_armour.call(id)
+	if not (raw is Dictionary):
+		return {}
+	return raw
+
+
+## The pair the body's hands are holding, `{main, off, source}`, read over the
+## wardrobe's own two hands. The page is a picture of the body: a hand the player
+## fights with is the run's (or the square's rack) and never the wardrobe's, so a
+## row that named a roster piece would be naming a weapon the portal does not
+## carry. Empty when the roster's kit is what the body holds.
+func _owned_hands(merc_id: int = -1) -> Dictionary:
+	if _corpse_active or not hands_for.is_valid():
+		return {}
+	var id := selected_merc if merc_id < 0 else merc_id
+	if id <= 0:
+		return {}
+	var raw: Variant = hands_for.call(id)
+	if not (raw is Dictionary):
+		return {}
+	var hands: Dictionary = raw
+	if not hands.has("main") and not hands.has("off"):
+		return {}
+	return hands
+
+
+## The kit's worth as the page displays it: a run piece replaces the wardrobe
+## piece in that slot, so its price replaces that piece's price on the header -
+## and a hand the rack or the run owns replaces the wardrobe's hand the same way.
+func _kit_value(gear: Dictionary, run_pieces: Dictionary,
+		hands: Dictionary = {}) -> int:
+	var total := int(_warband.gear_value(selected_merc))
+	for slot in ArmorData.SLOTS:
+		var won: Dictionary = run_pieces.get(slot, {})
+		if won.is_empty():
+			continue
+		var roster_id := str(gear.get(slot, ""))
+		if not roster_id.is_empty():
+			total -= StashScript.value_of(roster_id,
+				_warband.cruor.brand_of(roster_id))
+		total += StashScript.value_of(str(won.get("item_id", "")))
+	for slot_id in ["main", "off"]:
+		if not hands.has(slot_id):
+			continue
+		var roster_hand := str(gear.get(slot_id, ""))
+		if not roster_hand.is_empty():
+			total -= StashScript.value_of(roster_hand,
+				_warband.cruor.brand_of(roster_hand))
+		var held := str(hands.get(slot_id, ""))
+		if not held.is_empty():
+			total += StashScript.value_of(held, _warband.cruor.brand_of(held))
+	return maxi(total, 0)
 
 func _below() -> bool:
 	return _warband != null and bool(_warband.delve.active)
@@ -631,10 +712,10 @@ func _ensure_built() -> void:
 	hotbar_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hotbar_head.add_child(hotbar_spacer)
 	_reset_hotbar_button = Button.new()
-	_reset_hotbar_button.text = "KIT ORDER"
+	_reset_hotbar_button.text = "UNEQUIP ALL"
 	_reset_hotbar_button.focus_mode = Control.FOCUS_NONE
 	_reset_hotbar_button.custom_minimum_size = Vector2(0, 26)
-	_reset_hotbar_button.tooltip_text = "Drop the arrangement and let the kit order the keys again: main hand, off hand, then the worn trinkets."
+	_reset_hotbar_button.tooltip_text = "Take every equipped skill off the bar. The starter spell (when the hands fit it) and the two consumables stay; equip new skills at the Weapon Rack's ABILITY BOOK."
 	_reset_hotbar_button.pressed.connect(_reset_hotbar)
 	hotbar_head.add_child(_reset_hotbar_button)
 	var hotbar_row := HBoxContainer.new()
@@ -798,37 +879,78 @@ func _refresh_slots() -> void:
 		for slot in Contracts.SLOT_ORDER:
 			var bare: Dictionary = slot_rows[Contracts.slot_id(slot)]
 			bare["item_id"] = ""
+			bare["run_piece"] = {}
+			bare["hand"] = false
 			_apply_slot_row(bare, slot, "")
 		return
 	var body_name := str(_warband.roster.name_of(selected_merc))
 	var mine := selected_merc == controlled_merc
+	var gear: Dictionary = _warband.roster.equipped_of(selected_merc)
+	var run_pieces := _run_pieces()
+	var hands := _owned_hands()
 	_merc_label.text = "%s  /  %s  /  %d G WORN%s" % [
 		body_name.to_upper(),
 		Contracts.state_name(int(_warband.roster.state_of(selected_merc))).to_upper(),
-		int(_warband.gear_value(selected_merc)),
+		_kit_value(gear, run_pieces, hands),
 		"   \u00b7   YOU" if mine else ""]
 	_merc_label.add_theme_color_override("font_color", TEAL if mine else BONE)
 	# The column says whose rows these are, so the left half of the page can be
 	# read on its own - the body's name is not only in the header.
-	_worn_title.text = "WORN GEAR  \u00b7  %s" % body_name.to_upper()
-	var gear: Dictionary = _warband.roster.equipped_of(selected_merc)
+	_worn_title.text = "WORN GEAR  \u00b7  %s%s%s" % [body_name.to_upper(),
+		"  \u00b7  RUN HANDS" if str(hands.get("source", "")) == "run" else "",
+		"  \u00b7  RACK HANDS" if str(hands.get("source", "")) == "rack" else "",
+	]
+	if not run_pieces.is_empty():
+		_worn_title.text += "  \u00b7  RUN ARMOUR"
 	for slot in Contracts.SLOT_ORDER:
 		var row: Dictionary = slot_rows[Contracts.slot_id(slot)]
-		var worn := str(gear.get(str(row["id"]), ""))
+		var slot_id := str(row["id"])
+		var won: Dictionary = run_pieces.get(slot_id, {})
+		var worn := str(won.get("item_id", "")) if not won.is_empty() \
+			else str(gear.get(slot_id, ""))
+		var owned := hands.has(slot_id)
+		if owned:
+			# The hand the rack or the run owns: the roster's copy is still in the
+			# wardrobe, but it is not what the body is holding.
+			worn = str(hands.get(slot_id, ""))
 		row["item_id"] = worn
-		_apply_slot_row(row, slot, worn)
+		row["run_piece"] = won
+		row["hand"] = owned
+		_apply_slot_row(row, slot, worn, won, hands if owned else {})
 
-func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
+
+func _apply_slot_row(row: Dictionary, slot: int, worn: String,
+		run_piece: Dictionary = {}, hands: Dictionary = {}) -> void:
 	var button: Button = row["button"]
 	var marker := "> " if slot == selected_slot else "   "
 	var color := BONE if not worn.is_empty() else BONE_DIM
 	if slot == selected_slot:
 		color = BRASS_INK
 	var text := "%s%s  /  %s" % [marker, Contracts.slot_label(slot), _item_name(worn)]
+	if not hands.is_empty() and not worn.is_empty():
+		# The pair belongs to the run or to the rack: the row says whose hand this
+		# is and how the other one comes up, and skips the anointment prose that
+		# only a wardrobe copy can carry. An empty hand is the pair's own too, but
+		# it has no piece to name as carried.
+		var in_hand := slot == Contracts.SlotType.MAIN_HAND
+		if str(hands.get("source", "")) == "run":
+			text += "\n" + ("THE RUN'S HAND  \u00b7  TAB SWAPS" if in_hand \
+				else "THE RUN'S OTHER HAND  \u00b7  TAB")
+		else:
+			text += "\nBOUND ON THE RACK  \u00b7  THE PORTAL CARRIES IT"
+	elif not run_piece.is_empty():
+		# A chest's piece is the run's, not a copy in the wardrobe: the row says
+		# where it came from and what rides it, and skips the anointment prose
+		# that only a roster copy can carry.
+		var welded: Variant = run_piece.get("mods", [])
+		var mods: int = (welded as Array).size() if welded is Array else 0
+		text += "\nWON THIS RUN  \u00b7  LV %d%s" % [
+			maxi(1, int(run_piece.get("level", 1))),
+			"" if mods <= 0 else "  \u00b7  +%d" % mods]
 	# Anointings and brands are properties of the piece, so the lines under the
 	# item name are the only place the player learns what it looses before
 	# entering a body - and a plain weapon says what the altar would wake in it.
-	if not worn.is_empty() and _warband != null:
+	elif not worn.is_empty() and _warband != null:
 		var anointed: String = _warband.cruor.anoint_line(worn)
 		if not anointed.is_empty():
 			text += "\n" + anointed
@@ -856,6 +978,14 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 		button.show_item("")
 	elif _corpse_active:
 		button.show_item(worn, _warband, "Click to take it from the body.")
+	elif not hands.is_empty():
+		var hand_hint := "Not in the hand: TAB brings it up."
+		if slot == Contracts.SlotType.MAIN_HAND:
+			hand_hint = "The rack binds it: TAB on the island brings the other hand up."
+		button.show_item(worn, _warband, hand_hint)
+	elif not run_piece.is_empty():
+		button.show_item(worn, _warband,
+			"Won in this run: it leaves when the run ends.")
 	else:
 		var hint := "Click to take it off."
 		if _warband.roster.is_manual(selected_merc, str(row["id"])):
@@ -880,9 +1010,20 @@ func _worn_welds(item_id: String, slot_id: String) -> String:
 
 ## The panel's own QR: the same swap the world's `TAB` runs, on the body this
 ## screen is showing. The roster owns both pairs, so a piece put in a slot after
-## swapping belongs to the set that is now up.
+## swapping belongs to the set that is now up - and inside a run the pair is the
+## run's, so the same key brings the other hand up there.
 func _swap_set() -> void:
 	if _corpse_active or _warband == null or selected_merc <= 0:
+		return
+	var hands := _owned_hands()
+	if not hands.is_empty():
+		if str(hands.get("source", "")) != "run" or not swap_hands.is_valid():
+			set_status(RACK_HANDS_MESSAGE)
+			return
+		var answer: Variant = swap_hands.call(selected_merc)
+		if answer is Dictionary:
+			set_status(str((answer as Dictionary).get("message", "")))
+		refresh()
 		return
 	var result: Dictionary = _warband.swap_weapon_set(selected_merc)
 	set_status(str(result.get("message", "")))
@@ -926,9 +1067,22 @@ func _on_slot_pressed(slot: int) -> void:
 	if _warband == null or selected_merc <= 0:
 		set_status("Choose a mercenary first.")
 		return
+	var slot_id := Contracts.slot_id(slot)
+	var row: Dictionary = slot_rows.get(slot_id, {})
+	var won: Variant = row.get("run_piece", {})
+	if won is Dictionary and not (won as Dictionary).is_empty():
+		# The piece is not in the wardrobe: taking it off would strip the roster
+		# slot the page is not even showing. The run hands it back itself.
+		set_status("That piece is the run's own: it leaves when the run ends.")
+		return
+	if bool(row.get("hand", false)):
+		# The hand is the run's or the rack's. Taking it off here would strip the
+		# roster slot the page is not showing, and the portal would still carry
+		# the rack's piece.
+		set_status(RACK_HANDS_MESSAGE)
+		return
 	selected_slot = slot
 	_slot_chosen = true
-	var slot_id := Contracts.slot_id(slot)
 	var worn := str(_warband.roster.equipped_of(selected_merc).get(slot_id, ""))
 	if worn.is_empty():
 		set_status("Choose a free piece for the %s." % Contracts.slot_label(slot))
@@ -981,7 +1135,7 @@ func _sync_hotbar() -> void:
 		var button: Button = hotbar_buttons[index]
 		var definition := AbilityRules.by_id(id)
 		button.tooltip_text = "Key %d - no skill" % (index + 1) if definition.is_empty() \
-			else "Key %d - %s\nClick a skill, then the key it should fire from." % [
+			else "Key %d - %s\nClick a skill, then the key it should fire from. New skills are equipped at the Weapon Rack's ABILITY BOOK." % [
 				index + 1, str(definition.get("name", "")).capitalize()]
 		button.modulate = Color(1.6, 1.4, 1.0) if index == _hotbar_selected \
 			else Color.WHITE
@@ -998,6 +1152,9 @@ func _on_hotbar_pressed(slot: int) -> void:
 		set_status("Choose a mercenary first.")
 		return
 	if slot < 0 or slot >= hotbar_ids.size():
+		return
+	if AbilityRules.is_automatic(hotbar_ids[slot]):
+		set_status("The starter spell and the consumables keep their keys.")
 		return
 	if _hotbar_selected < 0:
 		if hotbar_ids[slot].is_empty():
@@ -1020,8 +1177,8 @@ func _on_hotbar_pressed(slot: int) -> void:
 	set_status(str(result.get("message", "")))
 	refresh()
 
-## Hand the keys back to the kit: main hand, off hand, necklace, ring 1, ring 2.
-## The numbers stay where they are; only the skills move.
+## Take the player's equipped skills off the bar. The starter spell and the two
+## consumables are automatic and keep their keys.
 func _reset_hotbar() -> void:
 	if _corpse_active or _warband == null or selected_merc <= 0:
 		set_status("Choose a mercenary first.")
@@ -1576,16 +1733,28 @@ func _refresh_preview() -> void:
 	# reads ints - so every slot packed as code 0 and the preview rendered the
 	# leather set whatever the body was actually wearing, including nothing at all.
 	var armor := {}
+	var run_pieces := _run_pieces()
 	for slot in ArmorData.SLOTS:
-		armor[slot] = ArmorData.set_of_item(str(gear.get(slot, "")))
+		var won: Dictionary = run_pieces.get(slot, {})
+		armor[slot] = int(won.get("set", ArmorData.NONE)) if not won.is_empty() \
+			else ArmorData.set_of_item(str(gear.get(slot, "")))
 	var worn := {
 		"neck": str(gear.get("neck", "")),
 		"ring1": str(gear.get("ring1", "")),
 		"ring2": str(gear.get("ring2", "")),
 		"off": str(gear.get("off", "")),
 	}
-	var loadout := State.build_loadout(str(gear.get("main", "")), str(gear.get("off", "")),
-		armor, worn)
+	# The hand the body actually holds comes off the run or the square's rack. The
+	# stage is one ranger with one weapon in the hand, so it wears the main piece
+	# alone: the other hand of the pair is reachable by TAB, not carried at once.
+	var hands := _owned_hands()
+	var main_id := str(gear.get("main", ""))
+	var off_id := str(gear.get("off", ""))
+	if not hands.is_empty():
+		main_id = str(hands.get("main", ""))
+		off_id = ""
+		worn["off"] = ""
+	var loadout := State.build_loadout(main_id, off_id, armor, worn)
 	# The stage shows the mercenary being dressed, not a generic ranger: his own
 	# height, face, hair and colours, then his kit on top of them.
 	preview.set_appearance(Looks.profile_for(selected_merc))
@@ -1593,6 +1762,23 @@ func _refresh_preview() -> void:
 	# Dressed on every repaint, open or shut (`Warband.changed` repaints a shut
 	# screen too), but only an open screen renders and poses its stage.
 	preview.set_active(_open)
+	if not hands.is_empty():
+		# The pair belongs to the run or the rack: the label names the hand in
+		# front of the player and the TAB that brings the other up, instead of the
+		# wardrobe's set the body is not carrying. Only the run's pair is the
+		# page's to swap - the rack's is bound at the rack.
+		var run_hands := str(hands.get("source", "")) == "run"
+		_set_label.text = "%s  \u00b7  MAIN: %s%s" % [
+			"THE RUN'S HANDS" if run_hands else "THE RACK'S HAND",
+			_item_name(main_id).to_upper(),
+			"" if str(hands.get("off", "")).is_empty() \
+				else "   \u00b7   TAB: %s" % _item_name(str(hands.get("off", ""))).to_upper()]
+		_set_button.text = "SWAP THE HANDS  \u00b7  TAB"
+		_set_button.disabled = not run_hands
+		_set_button.tooltip_text = "" if run_hands else RACK_HANDS_MESSAGE
+		return
+	_set_button.disabled = false
+	_set_button.tooltip_text = ""
 	# The line under the ranger names the set TAB brings up: which pair is in
 	# the hands is the one fact that decides what the next swap will take up.
 	var active_set: int = _warband.roster.active_weapon_set(selected_merc)
