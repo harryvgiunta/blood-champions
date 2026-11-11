@@ -196,6 +196,15 @@ var _parked := false
 static var _sources: Dictionary = {}
 ## One loaded copy of each tile the fitted bodies wear, per process.
 static var _tiles: Dictionary = {}
+## The creatures themselves, parsed once and kept: path -> `PackedScene`. A devil's
+## GLB is 87 to 327 ms of load on the owner's machine and 0.1 ms to instantiate, so
+## a scene that is allowed to fall out of the resource cache when its last body
+## dies is paid for again - in the middle of a wave, on every island - and that is
+## the hitch every spawn used to carry. Held here it is paid once, at the island's
+## stand (`warm`), and never again in a fight.
+static var _resident: Dictionary = {}
+## Paths a worker thread has been asked for and not yet handed over.
+static var _waiting: Dictionary = {}
 
 var _data: Dictionary
 var _instance: Node3D
@@ -304,7 +313,7 @@ func _build_sampler() -> void:
 	# The weapon models are authored for a ranger's palm; a body whose hand is
 	# bigger says so in its own entry rather than every call passing it in.
 	_grip_scale = maxf(0.1, float(_data.get("grip_scale", 1.0)))
-	var packed: PackedScene = load(str(scenes[mob_id]))
+	var packed: PackedScene = resident(str(scenes[mob_id]))
 	if packed == null:
 		push_error("Missing mob scene: " + str(scenes[mob_id]))
 		return
@@ -368,6 +377,59 @@ func _scenes() -> Dictionary:
 
 func _data_table() -> Dictionary:
 	return DATA
+
+
+## A creature's packed scene, loaded once and held for the session.
+static func resident(path: String) -> PackedScene:
+	if _resident.has(path):
+		return _resident[path]
+	var packed := load(path) as PackedScene
+	_resident[path] = packed
+	return packed
+
+
+## Parse every creature in `scenes` for the ids in `ids`, on a worker thread, and
+## keep them. `load()` is a 87-327 ms block on the main thread - a visible freeze
+## wherever it happens - so an island does not load its crowd, it *asks* for it
+## (`RunDirector.start_run`) and collects the answer a frame at a time (`poll`).
+## A species already held or already asked for is not asked again.
+static func warm(scenes: Dictionary, ids: Array) -> void:
+	for raw in ids:
+		var key := str(raw)
+		if not scenes.has(key):
+			continue
+		var path := str(scenes[key])
+		if _resident.has(path) or _waiting.has(path):
+			continue
+		var error := ResourceLoader.load_threaded_request(path, "PackedScene")
+		if error != OK:
+			_resident[path] = load(path)
+			continue
+		_waiting[path] = true
+
+
+## Collect whatever the worker has finished: one scene a call, because taking one
+## off the worker is where the main thread pays for it (its resources are built
+## here), and five scenes at once is one hitch worth five.
+static func poll() -> void:
+	if _waiting.is_empty():
+		return
+	for path in _waiting.keys():
+		var status := ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			continue
+		_waiting.erase(path)
+		if status != ResourceLoader.THREAD_LOAD_LOADED:
+			push_error("Mob scene would not load: " + str(path))
+			continue
+		_resident[path] = ResourceLoader.load_threaded_get(path)
+		return
+
+
+## How many creatures are still being parsed: the one figure that says whether the
+## warming is finished, for anything that wants to wait for it.
+static func waiting() -> int:
+	return _waiting.size()
 
 
 # --- the fitted body --------------------------------------------------------

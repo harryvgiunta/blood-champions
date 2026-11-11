@@ -394,6 +394,20 @@ func _visual_script():
 	return Visual
 
 
+## Parse the creatures a run can field, before the first of them walks on. The
+## director asks once, on the first tick the world stands - in the town, seconds
+## before any island - so the GLB each species carries is loaded there instead of
+## on the spawn that first needs it, which used to be a 200-330 ms frame.
+static func warm_creatures(ids: Array) -> void:
+	Visual.warm(Visual.SCENES, ids)
+
+
+## Collect the creatures the worker has finished parsing: one call a frame while
+## any are in flight, nothing at all after (`devil_mob_visual.gd`).
+static func poll_creatures() -> void:
+	Visual.poll()
+
+
 ## How long a body that has just been pointed at a party comes at it at a run.
 ## Long enough to cross an island, short enough that a body which has arrived
 ## drops the charge and fights on its own state machine.

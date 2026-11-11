@@ -263,6 +263,8 @@ var _trial_extra_elites := 0
 ## right now, between `BUDGET_FLOOR` and the depth cap (`_live_cap`). 0 until the
 ## island has measured a frame, which reads as the depth cap.
 var _earned_cap := 0
+## Whether this world has already asked for the run's crowds (`_warm_every_crowd`).
+var _crowd_asked := false
 ## The frame as the engine last drew it, milliseconds, smoothed.
 var _frame_ms := 0.0
 var _budget_clock := 0.0
@@ -524,6 +526,27 @@ func _begin_island(new_biome: String, field: Array = []) -> void:
 	_move_party_in(field if not field.is_empty() else _collect_party())
 	_spawn_runners()
 	state_changed.emit()
+
+
+## Ask for every creature this run's gates can field, on the first tick the world
+## stands.
+## A species' GLB is 87-327 ms to load on the owner's machine and 0.1 ms to
+## instantiate, so a wave that met them one at a time paid a hitch per species in
+## the middle of the fight - and paid it again on every island, because a scene
+## whose last body had died fell out of the cache. The ask is a worker thread's
+## (`devil_mob_visual.gd`), so the town opens on the frame it always did and
+## `tick` collects the scenes as they land, long before a body needs one.
+func _warm_every_crowd() -> void:
+	var ids: Array = []
+	for faction in FACTIONS:
+		for row in FACTIONS[faction]:
+			if str(row.get("kind", "")) == "devil":
+				ids.append(str(row.get("species", "")))
+		var boss: Dictionary = BOSSES.get(str(faction), {})
+		if str(boss.get("kind", "")) == "devil":
+			ids.append(str(boss.get("species", "")))
+	if not ids.is_empty():
+		DevilScript.warm_creatures(ids)
 
 
 ## Begin the level the run's counters currently name. A combat level queues its
@@ -965,6 +988,14 @@ func _wear_hand(run, slot: String, weapon_id: String) -> Dictionary:
 # --- the frame -------------------------------------------------------------
 
 func tick(delta: float) -> void:
+	# The crowds are asked for on the first tick the world stands - in the town,
+	# seconds before a run - and collected a scene a frame while this frame is
+	# being drawn (`devil_mob_visual.gd`). Both are a flag read once nothing is in
+	# flight, and neither ever blocks on a file.
+	if not _crowd_asked:
+		_crowd_asked = true
+		_warm_every_crowd()
+	DevilScript.poll_creatures()
 	if not run_active:
 		return
 	_tick_throw_regen(delta)
