@@ -1,0 +1,35 @@
+IRONWOOD REWARD CARD ART - LICENSE AND PROVENANCE
+
+Everything under this directory (assets/ui/cards/) is built by one command:
+
+    python tools/build_reward_cards.py
+
+which runs Blender 5.1 in background mode on tools/prepare_reward_cards.py.
+cards.json records the Blender version, the seed, the 9-slice margin and the
+digest of every render. Each file is a Cycles render of real geometry - a
+beveled metal ring with a cut stone in each corner, a solid family emblem, a
+world plaque - so the card's texture is the render and there is no bake step.
+No downloaded art is used; the geometry and the materials are authored by that
+script.
+
+WHAT IS HERE
+
+  frame_<rarity>.png         the card's plate, idle
+  frame_<rarity>_lit.png     the same plate under the pointer's own light
+  sigil_<family>.png         one emblem per upgrade family, on transparency
+  plaque_<rarity>.png        the plate a world prop hangs its name on
+  cards.json                 the build record and the manifest the HUD reads
+
+Rarities: common, epic, legendary, greed, neutral (the fallback a promise with
+no tier wears). Families: shot, hand, ability, perk, relic.
+
+The frames are 9-slice plates: the left and right strips are averaged down their
+length and the top and bottom across theirs, so a stretched edge never smears,
+while the four corner squares and the centre keep their detail. The patch margin
+in cards.json is the border in texture pixels and in drawn pixels at once -
+NinePatchRect does not scale its margins - so the plate is drawn at 1:1.
+
+LICENCE
+
+Original work made for this project: CC BY-NC-SA 4.0, section 3 of LICENSE.md.
+The upstream-generic CC0 dedication does not apply to these files.

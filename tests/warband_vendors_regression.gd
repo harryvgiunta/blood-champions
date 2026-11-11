@@ -66,8 +66,7 @@ func _dress_for_market() -> void:
 		"main": "sword_short", "off": "shield_tower",
 		"head": "armor_plate_head", "chest": "armor_plate_chest",
 		"hands": "armor_plate_hands", "legs": "armor_plate_legs",
-		"feet": "armor_plate_feet", "neck": "neck_ember",
-		"ring1": "ring_blood", "ring2": "ring_dash",
+		"feet": "armor_plate_feet",
 	}
 	for merc_id in warband.roster.ids():
 		for slot in kit:
@@ -146,67 +145,93 @@ func run() -> void:
 	check(game.quartermaster.is_open(), "the quartermaster menu still opens")
 	game.quartermaster.close()
 
-	# Orla's shelf: buy the shortbow into the shared stash at its keeper price.
-	var orla_point: Vector3 = game.service_point("vendor_orla")
-	check(game.interact_at(1, orla_point) == "vendor_orla", "Orla's stall opens again")
-	check(game.vendor_menu.stock_rows().size() == _expected_stock(0).size(),
-		"Orla's board is still whole")
-	var bow_row: Dictionary = _row_for(game.vendor_menu.stock_rows(), "bow_short")
-	check(not bow_row.is_empty(), "Orla stocks the shortbow")
-	var bow_price := int(State.ITEMS["bow_short"]["price"])
-	check(int(bow_row.get("price", 0)) == bow_price,
-		"the shelf charges the keeper price (%d)" % bow_price)
-	check(not bool(game.vendor_menu.buy("sword_short").get("ok", true)),
-		"a keeper cannot sell what another keeper stocks")
-
-	var credits_before := int(state.credits)
-	var bow_bought: Dictionary = game.vendor_menu.buy("bow_short")
-	check(bool(bow_bought.get("ok", false)), "Orla sells the shortbow")
-	check(int(state.credits) == credits_before - bow_price,
-		"exactly the price leaves the purse (%d)" % state.credits)
-	check(warband.stash.pooled_count("bow_short") == 1,
-		"the shortbow lands in the shared stash")
-	check(game.vendor_menu.status_text().contains("Shortbow"),
-		"the keeper says what was bought")
-
-	var pool_row: Dictionary = _row_for(game.vendor_menu.stash_rows(), "bow_short")
-	check(not pool_row.is_empty() and int(pool_row.get("count", 0)) == 1,
-		"the stash board shows the pooled copy with its count")
-
-	# Selling the same copy back returns the keeper's share and empties the pool.
-	var after_buy: int = int(state.credits)
-	var bow_sold: Dictionary = game.vendor_menu.sell("bow_short")
-	check(bool(bow_sold.get("ok", false)), "Orla buys the spare shortbow back")
-	var payout := int(bow_sold.get("price", 0))
-	check(payout == int(floor(float(bow_price) * 0.6)),
-		"the sale pays 60%% of the price (%d)" % payout)
-	check(absf(float(payout) / float(bow_price) - 0.6) < 0.02,
-		"the payout is about sixty percent")
-	check(int(state.credits) == after_buy + payout, "the purse is paid the sale price")
-	check(warband.stash.pooled_count("bow_short") == 0,
-		"the sold copy leaves the shared stash")
-	check(_row_for(game.vendor_menu.stash_rows(), "bow_short").is_empty(),
-		"the stash board drops the sold row")
-	check(game.vendor_menu.status_text().contains("Sold"),
-		"the keeper says what was sold")
-	check(not bool(game.vendor_menu.sell("bow_short").get("ok", true)),
-		"selling a copy the pool does not hold is refused")
-
-	# Arrows are unlimited, so no keeper sells shafts any more: there is no
-	# quiver to stock and no bunch to buy.
+	# No keeper sells steel: the three counters between them trade in bandages
+	# and draughts, and nothing on any board is a weapon or a piece of armour.
 	for seat in range(State.VENDORS.size()):
 		game.vendor_menu.configure(warband, seat)
+		for row in game.vendor_menu.stock_rows():
+			var stocked_category := str(State.ITEMS[str(row["item_id"])].get("category", ""))
+			check(stocked_category == "misc",
+				"keeper seat %d sells no gear: %s is '%s'" % [seat, str(row["item_id"]),
+				stocked_category])
+		check(_row_for(game.vendor_menu.stock_rows(), "bow_short").is_empty(),
+			"keeper seat %d does not stock a shortbow" % seat)
 		check(_row_for(game.vendor_menu.stock_rows(), "arrow").is_empty(),
 			"keeper seat %d stocks no arrows" % seat)
 	game.vendor_menu.configure(warband, 0)
 
-	# A short purse refuses before the stash is touched.
-	state.credits = 5
-	var refused_buy: Dictionary = game.vendor_menu.buy("bow_short")
+	# Orla's shelf: buy a bandage into the band's pack at its keeper price.
+	var orla_point: Vector3 = game.service_point("vendor_orla")
+	check(game.interact_at(1, orla_point) == "vendor_orla", "Orla's stall opens again")
+	check(game.vendor_menu.stock_rows().size() == _expected_stock(0).size(),
+		"Orla's board is still whole")
+	var bandage_row: Dictionary = _row_for(game.vendor_menu.stock_rows(), "bandage_linen")
+	check(not bandage_row.is_empty(), "Orla stocks a linen bandage")
+	var bandage_price := int(State.ITEMS["bandage_linen"]["price"])
+	check(int(bandage_row.get("price", 0)) == bandage_price,
+		"the shelf charges the keeper price (%d)" % bandage_price)
+	check(not bool(game.vendor_menu.buy("sword_short").get("ok", true)),
+		"a keeper cannot sell what no keeper stocks")
+
+	var credits_before := int(state.credits)
+	var bandages_before: int = warband.supply_count("bandage")
+	var bandages_bought: Dictionary = game.vendor_menu.buy("bandage_linen")
+	check(bool(bandages_bought.get("ok", false)), "Orla sells a bandage")
+	check(int(state.credits) == credits_before - bandage_price,
+		"exactly the price leaves the purse (%d)" % state.credits)
+	check(warband.supply_count("bandage") == bandages_before + 1,
+		"the dressing lands in the band's pack")
+	check(warband.stash.pooled_total() == 0,
+		"and the shared stash stays empty: medicine is a count, not a row")
+	check(game.vendor_menu.status_text().contains("Bandage"),
+		"the keeper says what was bought")
+	check(game.vendor_menu.pack_line().contains("BANDAGES %d" % (bandages_before + 1)),
+		"the board counts what the band carries, got %s" % game.vendor_menu.pack_line())
+
+	# The count is the band's to spend, and it is spent one dose at a time: the
+	# consumable keys go through exactly this verb, and an empty pack refuses.
+	var held_now: int = warband.supply_count("bandage")
+	check(warband.take_supply("bandage"), "a dressing can be spent")
+	check(warband.supply_count("bandage") == held_now - 1,
+		"spending one leaves one fewer, got %d" % warband.supply_count("bandage"))
+	warband.supplies["bandage"] = 0
+	check(not warband.take_supply("bandage"), "an empty pack spends nothing")
+	check(warband.supply_count("bandage") == 0, "and cannot go negative")
+
+	# A spare out of a run is the only thing a keeper buys back: seed one, sell
+	# it at the counter's share, and watch the pool empty.
+	warband.stash.add("sword_short", 1)
+	var short_price := int(State.ITEMS["sword_short"]["price"])
+	var pool_row: Dictionary = _row_for(game.vendor_menu.stash_rows(), "sword_short")
+	check(not pool_row.is_empty() and int(pool_row.get("count", 0)) == 1,
+		"the spare shelf shows the pooled copy with its count")
+
+	var after_buy: int = int(state.credits)
+	var sword_sold: Dictionary = game.vendor_menu.sell("sword_short")
+	check(bool(sword_sold.get("ok", false)), "Orla buys the spare shortsword back")
+	var payout := int(sword_sold.get("price", 0))
+	check(payout == int(floor(float(short_price) * 0.6)),
+		"the sale pays 60%% of the price (%d)" % payout)
+	check(absf(float(payout) / float(short_price) - 0.6) < 0.02,
+		"the payout is about sixty percent")
+	check(int(state.credits) == after_buy + payout, "the purse is paid the sale price")
+	check(warband.stash.pooled_count("sword_short") == 0,
+		"the sold copy leaves the shared stash")
+	check(_row_for(game.vendor_menu.stash_rows(), "sword_short").is_empty(),
+		"the spare shelf drops the sold row")
+	check(game.vendor_menu.status_text().contains("Sold"),
+		"the keeper says what was sold")
+	check(not bool(game.vendor_menu.sell("sword_short").get("ok", true)),
+		"selling a copy the pool does not hold is refused")
+
+	# A short purse refuses before the pack is touched.
+	state.credits = 1
+	var held: int = warband.supply_count("bandage")
+	var refused_buy: Dictionary = game.vendor_menu.buy("bandage_linen")
 	check(not bool(refused_buy.get("ok", true)), "a short purse buys nothing")
-	check(int(state.credits) == 5, "a refused purchase spends nothing")
-	check(warband.stash.pooled_count("bow_short") == 0,
-		"a refused purchase adds nothing")
+	check(int(state.credits) == 1, "a refused purchase spends nothing")
+	check(warband.supply_count("bandage") == held,
+		"a refused purchase adds nothing to the pack")
 	check(game.vendor_menu.status_text().contains("gold"),
 		"the refusal names the shortfall")
 

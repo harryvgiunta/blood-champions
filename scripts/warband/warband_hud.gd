@@ -77,15 +77,17 @@ const DISPOSITION_BADGE := {
 ## banner is only the moment.
 const AGGRO_BANNER_SECONDS := 3.5
 const AGGRO_REPEAT_SECONDS := 6.0
-## The hotbar: one compact tile per `AbilityRules.SLOT_COUNT`, half the measure
-## of the old skill card (40 px with a 26 px icon) so all ten fit under the soul's
-## plate. A tile advertises the plain number row: 1..9, then 10 on the 0 key.
+## The hotbar: one compact tile per key, half the measure of the old skill card
+## (40 px with a 26 px icon) so a bar bought up to ten keys still fits under the
+## soul's plate. A tile advertises the plain number row: 1..5, then 6..0 for the
+## keys a run's upgrade bought. The column is always the widest a bar can be, so
+## the soul's plate never shifts when a run upgrade lands mid-fight.
 const TILE_GAP := 3
 const TILE_SIZE := 40.0
 ## The column that holds the plate over the hotbar: the hotbar's own content
 ## measure plus the plate's padding, so the two left-align.
-const HOTBAR_WIDTH := TILE_SIZE * AbilityRules.SLOT_COUNT \
-	+ TILE_GAP * (AbilityRules.SLOT_COUNT - 1) + PANEL_PAD * 2
+const HOTBAR_WIDTH := TILE_SIZE * AbilityRules.MAX_SLOT_COUNT \
+	+ TILE_GAP * (AbilityRules.MAX_SLOT_COUNT - 1) + PANEL_PAD * 2
 ## Nothing in the warband is clicked while the pointer is captured, so the
 ## reticle is the only thing that says where the soul is aiming. It is drawn by
 ## `Reticle` below, which carries its own measurements.
@@ -357,11 +359,11 @@ func _build_soul_plate(parent: Control) -> void:
 	_build_hotbar(column)
 
 
-## The ten hotbar keys, under the soul's plate. One tile per
-## `AbilityRules.SLOT_COUNT`, in the order `granted` lays the worn kit out:
-## main hand, off hand, then the necklace, ring 1 and ring 2. A body with no
-## grant in a slot hides that tile instead of advertising a key that does
-## nothing, so a plain kit reads as empty space, not ten dead frames.
+## The hotbar keys, under the soul's plate. One tile per key the body's bar can
+## have - five, or more once a run's upgrade buys them - built up to
+## `AbilityRules.MAX_SLOT_COUNT` and hidden past the live row, so a key the run
+## bought mid-fight appears without rebuilding the plate and a five-key bar still
+## reads as five frames.
 func _build_hotbar(parent: Node) -> void:
 	var panel := PanelContainer.new()
 	panel.name = "Hotbar"
@@ -375,10 +377,11 @@ func _build_hotbar(parent: Node) -> void:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(row)
 	_ability_tiles.clear()
-	for index in AbilityRules.SLOT_COUNT:
+	for index in AbilityRules.MAX_SLOT_COUNT:
 		var tile = AbilitySlotScript.new()
 		tile.name = "Ability%d" % (index + 1)
 		tile.configure(index, TILE_SIZE)
+		tile.visible = index < AbilityRules.SLOT_COUNT
 		row.add_child(tile)
 		_ability_tiles.append(tile)
 
@@ -602,7 +605,8 @@ func _text(parent: Node, text: String, font_size: int, color: Color) -> Label:
 func stamina_bar() -> ProgressBar:
 	return _stamina_bar
 
-## One tile per `AbilityRules.SLOT_COUNT`, in key order (1..9, then 10).
+## One tile per key up to `AbilityRules.MAX_SLOT_COUNT`, in key order (1..5, then
+## 6..0 for the keys a run's upgrade buys). Tiles past the live row are hidden.
 func ability_tiles() -> Array:
 	return _ability_tiles.duplicate()
 
@@ -678,9 +682,10 @@ func _paint_state(state: int) -> void:
 	_state_label.add_theme_color_override("font_color", ink)
 	_state_label.add_theme_stylebox_override("normal", _chip_style(chip))
 
-## The hotbar tiles, read from the body's own runner every frame. A body with no
-## grant in a slot hides that tile instead of advertising a key that would do
-## nothing; a kit that grants several skills fills the slots in kit order.
+## The hotbar tiles, read from the body's own runner every frame. The row is as
+## long as the body's bar - five keys, or more while a run's upgrade holds them -
+## and a tile past it is hidden, so a bar that shrank hands its frames back
+## instead of advertising keys that fire nothing.
 func _refresh_skills() -> void:
 	if _ability_tiles.is_empty():
 		return
@@ -688,9 +693,14 @@ func _refresh_skills() -> void:
 	var states: Array = []
 	if runner != null and is_instance_valid(runner) and runner.has_method("hud_states"):
 		states = runner.hud_states()
+	var live := maxi(states.size(), AbilityRules.SLOT_COUNT)
 	for index in _ability_tiles.size():
 		var state: Dictionary = states[index] if index < states.size() else {}
 		_ability_tiles[index].update_state(state)
+		# After the paint, not before: an empty compact tile shows itself so a
+		# row of keys keeps its frames, and this is the one place that decides
+		# which frames the row has.
+		_ability_tiles[index].visible = index < live
 
 func _refresh_squad() -> void:
 	if _squad_box == null or _warband == null:
@@ -853,17 +863,12 @@ func _refresh_portrait() -> void:
 		armor[slot] = ArmorData.set_of_item(str(gear.get(slot, "")))
 	# The trinkets ride the same three ids the gear page hands the live stage, so
 	# the man in the HUD wears what the man on the page wears.
-	var worn := {
-		"neck": str(gear.get("neck", "")),
-		"ring1": str(gear.get("ring1", "")),
-		"ring2": str(gear.get("ring2", "")),
-		"off": str(gear.get("off", "")),
-	}
+	var worn := {"off": str(gear.get("off", ""))}
 	var loadout := State.build_loadout(str(gear.get("main", "")), str(gear.get("off", "")),
 		armor, worn)
 	_portrait.set_appearance(Looks.profile_for(_merc_id))
 	_portrait.set_bust(true)
-	_portrait.apply_kit(loadout, worn)
+	_portrait.apply_kit(loadout)
 	_portrait.flash()
 
 

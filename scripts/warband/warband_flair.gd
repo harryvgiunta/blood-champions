@@ -82,7 +82,6 @@ const HEAD_TROPHIES := ["feathers", "plume", "horns"]
 const HIP_TROPHIES := ["skull", "beast_skull", "jaw", "bones", "feathers", "bird_skull", "rag",
 	"teeth", "vertebrae"]
 const SHOULDER_TROPHIES := ["skull", "spikes", "ribs", "feathers"]
-const NECK_TROPHIES := ["teeth", "claws", "bones"]
 const WRIST_TROPHIES := ["beads", "teeth"]
 const THIGH_TROPHIES := ["long_bone", "rag", "jaw"]
 const ANKLE_TROPHIES := ["rattles", "beads"]
@@ -101,8 +100,6 @@ const STREAM_HIP_KIND := 33
 const STREAM_SHOULDER := 34
 const STREAM_SHOULDER_SIDE := 35
 const STREAM_SHOULDER_KIND := 36
-const STREAM_NECK := 37
-const STREAM_NECK_KIND := 38
 const STREAM_WRIST := 39
 const STREAM_WRIST_SIDE := 40
 const STREAM_WRIST_KIND := 41
@@ -194,9 +191,6 @@ static func _trophies_for(id: int) -> Array:
 		var side := "shoulder_l" if LookHash.fraction(id, STREAM_SHOULDER_SIDE) < 0.5 else "shoulder_r"
 		out.append({"anchor": side, "kind": str(SHOULDER_TROPHIES[
 			LookHash.pick(id, STREAM_SHOULDER_KIND, SHOULDER_TROPHIES.size())])})
-	if LookHash.fraction(id, STREAM_NECK) < 0.5:
-		out.append({"anchor": "neck", "kind": str(NECK_TROPHIES[
-			LookHash.pick(id, STREAM_NECK_KIND, NECK_TROPHIES.size())])})
 	var wrist_roll := LookHash.fraction(id, STREAM_WRIST)
 	if wrist_roll < 0.6:
 		var wrist_kind := str(WRIST_TROPHIES[LookHash.pick(id, STREAM_WRIST_KIND, WRIST_TROPHIES.size())])

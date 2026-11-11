@@ -769,8 +769,8 @@ def halo(center: tuple[float, float], radius: float, half_width: float,
 def plate(family_key: str) -> list[Layer]:
     """The disc every icon stands on: lacquer, a family-coloured rim, an inner glow.
 
-    One shared ground is what makes 37 icons read as one set instead of 37
-    drawings. It is dark and cool so the warm key light on the subject has
+    One shared ground is what makes every icon read as one set instead of a pile
+    of drawings. It is dark and cool so the warm key light on the subject has
     something to cut against, and it is inset far enough that the hotbar's own
     frame still shows around it.
     """
@@ -1316,6 +1316,33 @@ def cinder_lance():
     return layers
 
 
+@icon("fire_ray")
+def fire_ray():
+    layers = plate("ember")
+    layers += staff_kit((0.12, 0.88), (0.34, 0.60))
+    # A held ray, not a lance: three nested tapers leave the staff head and run
+    # to the far edge, so the icon reads as fire under pressure rather than a
+    # thrown shape. Cinder Lance's thin single shaft stays its own glyph.
+    layers.append(Layer(taper((0.34, 0.60), (0.97, 0.20), 0.125, 0.026),
+                        "cinder", bevel=30, alpha=0.9))
+    layers.append(Layer(taper((0.34, 0.60), (0.97, 0.20), 0.072, 0.014),
+                        "ember", bevel=24))
+    layers.append(Layer(taper((0.36, 0.58), (0.95, 0.22), 0.030, 0.006),
+                        "ember_hot", bevel=12))
+    # The mouth it leaves and the point it spends itself on.
+    layers.append(Layer(disc((0.34, 0.60), 0.105), "ember_hot", bevel=18))
+    layers.append(Layer(disc((0.34, 0.60), 0.058), "ember", bevel=8, alpha=0.8))
+    layers.append(Layer(disc((0.93, 0.24), 0.070), "ember_hot", bevel=14))
+    # Fire shed off the line, on both sides so the beam is not a straight tube.
+    for a, b, r in (((0.46, 0.44), (0.58, 0.34), 0.026),
+                    ((0.62, 0.38), (0.74, 0.24), 0.020),
+                    ((0.52, 0.66), (0.58, 0.78), 0.018),
+                    ((0.76, 0.44), (0.86, 0.34), 0.016)):
+        layers.append(Layer(taper(a, b, r, 0.004), "ember_hot", bevel=8,
+                            alpha=0.9))
+    return layers
+
+
 @icon("bone_spear")
 def bone_spear():
     layers = plate("bone")
@@ -1603,6 +1630,7 @@ ICON_AURA = {
     "ground_breaker": FAMILY_AURA["gold"], "executioner": FAMILY_AURA["steel"],
     "spin_slash": FAMILY_AURA["teal"], "backstab": FAMILY_AURA["blood"],
     "fireball": FAMILY_AURA["ember"], "cinder_lance": FAMILY_AURA["ember"],
+    "fire_ray": FAMILY_AURA["ember"],
     "bone_spear": FAMILY_AURA["bone"], "grave_bloom": FAMILY_AURA["bone"],
     "ember_ward": FAMILY_AURA["ember"], "energy_shield": FAMILY_AURA["gold"],
     "focus": FAMILY_AURA["teal"], "stone_skin": FAMILY_AURA["ash"],

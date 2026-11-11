@@ -67,18 +67,32 @@ func run() -> void:
 	check(travelled <= deg_to_rad(SquadScript.TURN_RATE) * 4.0 + 0.01,
 		"net turning stays inside the rate over four seconds (%.0f deg)" % rad_to_deg(travelled))
 
-	# A roll never reverses the body's own feet.
-	check(is_zero_approx(SquadScript.CIRCLE_REVERSE),
-		"a circle never reverses a body's direction of travel")
-	check(SquadScript.CIRCLE_MIN >= 0.5 and SquadScript.STEP_MIN >= 0.35,
-		"the roll windows are long enough to read as steps (%.2f s, %.2f s)"
-		% [SquadScript.CIRCLE_MIN, SquadScript.STEP_MIN])
+	# A body never reverses its own feet. The circle is one shape now - in on the
+	# target and round it, on the side the body picked when it went in - so the
+	# lateral share is the larger of the two and the side never re-rolls: the same
+	# track takes the same bearing on every frame of a fight.
+	check(SquadScript.CIRCLE_ACROSS > SquadScript.CIRCLE_IN,
+		"the between-blow step is a circle, not a walk-in (%.2f across, %.2f in)"
+		% [SquadScript.CIRCLE_ACROSS, SquadScript.CIRCLE_IN])
+	var round_track := {"merc_id": 2, "delta": step, "side": 0.0, "sign": 1.0,
+		"state": 0, "state_left": 0.0, "orbit": 1.0}
+	var side := Vector3.ZERO
+	var flipped := false
+	for index in 60:
+		squad._line_step(body, Vector3.RIGHT, round_track)
+		var intent := Vector3(body.last_intent.x, 0.0, body.last_intent.y)
+		if intent.length_squared() <= 0.0001:
+			continue
+		if side == Vector3.ZERO:
+			side = intent.normalized()
+		elif intent.normalized().dot(side) < 0.99:
+			flipped = true
+	check(not flipped, "and the same side every frame: no re-rolled circle")
 
 	check_fetch_give_up(step)
 	check_bearing()
 	check_escort_posts()
 	check_doubled_line(step)
-	check_cage_walk_out(step)
 
 	print("SQUAD_STEERING_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)

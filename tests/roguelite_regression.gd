@@ -1,13 +1,14 @@
 extends SceneTree
 ## Blood Champions end to end: the player ledger, the armory, the upgrade engine,
-## the town's two fixtures, and one endless run from level one through a shop, a
-## boss, and the island after it.
+## the town's two fixtures, and one endless run from level one through a market,
+## a shop, a boss, and the island after it.
 ##
 ## What this owns: that a new player has no keys and only the starters, that the
-## rack opens a named weapon for its price and binds it, that the stacking rules
+## rack opens a named weapon for its price and wears it out of the inventory, that
+## the run carries the kit the town shows, that the stacking rules
 ## still answer, that a run writes its level and island, that a boss is the only
-## key drop, that the level before a boss is a shop, that the portal carries the
-## party on, and that closing back onto the square restores the body.
+## key drop, that level 6 is the market and level 9 the shop, that the portal
+## carries the party on, and that closing back onto the square restores the body.
 
 const WORLD = "res://scenes/warband_world.tscn"
 const TEST_STATE := "user://roguelite_regression_state.json"
@@ -19,8 +20,10 @@ const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
 const ProcEngineScript = preload("res://scripts/roguelite/proc_engine.gd")
 const StageScript = preload("res://scripts/roguelite/roguelite_stage.gd")
 const DirectorScript = preload("res://scripts/roguelite/run_director.gd")
+const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const Props = preload("res://scripts/roguelite/roguelite_props.gd")
-const MetaScript = preload("res://scripts/roguelite/roguelite_meta.gd")
+const ChestVisual = preload("res://scripts/roguelite/chest_visual.gd")
+const GateVisual = preload("res://scripts/roguelite/gate_visual.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
@@ -28,6 +31,12 @@ const ArmorLoot = preload("res://scripts/roguelite/armor_loot.gd")
 const RunPlayerScript = preload("res://scripts/roguelite/run_player.gd")
 const AbilityIndex = preload("res://scripts/roguelite/ability_index.gd")
 const CloneScript = preload("res://scripts/ranger_clone.gd")
+const CloneAi = preload("res://scripts/clone_ai.gd")
+const CaveRoomScript = preload("res://scripts/roguelite/cave_room.gd")
+const CaveLayout = preload("res://scripts/world/cave_plan.gd")
+const DodgeStep = preload("res://scripts/dodge_step.gd")
+const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const RunningSlide = preload("res://scripts/running_slide.gd")
 
 ## The one field `AbilityRules.damage_for` reads off a rig for the spell channel.
 class SpellRig extends RefCounted:
@@ -35,13 +44,40 @@ class SpellRig extends RefCounted:
 	func spell_scale() -> float:
 		return scale
 
+## The six hands a body can hold, as `carrier_tags()` names them: the weapon
+## family, the group it belongs to, and the wildcard. A chest deals every body
+## its own hand from the surface its gate promised, out of the rows it has left.
+const BODY_HANDS := [
+	{"tags": ["bow", "ranged", "any"], "taken": []},
+	{"tags": ["staff", "ranged", "any"], "taken": []},
+	{"tags": ["sword", "melee", "any"], "taken": []},
+	{"tags": ["dagger", "melee", "any"], "taken": []},
+	{"tags": ["shield", "melee", "any"], "taken": []},
+	{"tags": ["unarmed", "melee", "any"], "taken": []},
+]
+
 ## A ranger rig that only records what it was handed, for the pit's loadout roll:
 ## the clone's own `_roll_loadout` needs a `rig` and nothing else of it.
 class KitRig extends Node:
 	var loadout: Dictionary = {}
+	## The item skill the clone rolled for itself, as it handed it to the rig. A
+	## real `Archer` keeps it on its own bench; the stub only has to accept it.
+	var ability_loadout: Variant = null
 
 	func apply_loadout(rolled: Dictionary) -> void:
 		loadout = rolled
+
+	func set_ability_loadout(ids: Variant) -> void:
+		ability_loadout = ids
+
+	## The rig fields the clone's skill roll reads (`AbilityRules.fits_rig`). A
+	## bare Node answers null for them, which is not a shape the real rig has.
+	var weapon := "sword"
+	var staff_active := false
+	var shield_equipped := false
+
+	func swings_two_handed() -> bool:
+		return false
 
 var game
 var run
@@ -76,22 +112,29 @@ func execute() -> void:
 	_check_armory()
 	_check_engine()
 	_check_pool()
+	_check_cave_rooms()
 	_check_ability_index()
 	_check_ladder()
+	_check_speed_shelf()
 	_check_armor_loot()
 	_check_starter_ability()
 	_check_clone_armoury()
+	_check_clone_tiers()
 	await _open_world()
 	await _check_town()
 	await _check_run()
 	await _check_ability_in_hand()
 	await _check_waves()
 	_check_rewards()
+	_check_kept_offers()
+	_check_prop_models()
 	_check_run_kit()
-	_check_portal()
+	await _check_portal()
 	_check_shop_and_boss()
 	_check_arsenal_in_hand()
+	await _check_double_chest()
 	await _check_bounds()
+	_check_island_carry()
 	_check_close()
 	_finish()
 
@@ -105,13 +148,10 @@ func _check_ledger() -> void:
 	body = null
 	check(meta.keys == 0, "a new player carries no keys")
 	check(meta.unlocked_ids().size() == 2, "two starters and nothing else")
-	check(meta.is_unlocked("bow_twig"), "the twig bow is free")
+	check(meta.is_unlocked("bow_long"), "the war bow is free")
 	check(meta.is_unlocked("hatchet_makeshift"), "the hatchet is free")
+	check(not meta.is_unlocked("bow_twig"), "the twig bow is the rack's to sell")
 	check(not meta.is_unlocked("xbow_heavy"), "the heavy crossbow is locked")
-	check(meta.loadout_for("ranged") == MetaScript.DEFAULT_RANGED, "ranged slot starts the twig bow")
-	check(meta.loadout_for("melee") == MetaScript.DEFAULT_MELEE, "melee slot starts the hatchet")
-	check(not meta.set_loadout_slot("ranged", "javelin_iron").ok, "a locked piece cannot be bound")
-	check(not meta.set_loadout_slot("ranged", "hatchet_makeshift").ok, "a melee piece cannot take the ranged slot")
 	# The rack's own unlock: named, priced, no roll.
 	var price: int = meta.unlock_cost_of("xbow_heavy")
 	check(price == 4, "the heavy crossbow costs four keys")
@@ -123,6 +163,8 @@ func _check_ledger() -> void:
 	check(meta.keys == 10 - price, "and spends exactly its price")
 	check(meta.unlocked_ids().size() == 3, "the pool grows by one")
 	check(meta.is_unlocked("xbow_heavy"), "the opened weapon is in the pool")
+	check(meta.needs_forge("xbow_heavy"), "and it owes the stash its one copy")
+	check(not meta.needs_forge("bow_long"), "the starters owe no forge")
 	var repeat: Dictionary = meta.unlock_weapon("xbow_heavy")
 	check(not bool(repeat.get("ok", false)), "an open weapon cannot be bought twice")
 	meta.save_meta()
@@ -132,13 +174,11 @@ func _check_ledger() -> void:
 	check(meta.best_level == 0, "a fresh record is level zero")
 	meta.note_run(12, 4)
 	check(meta.best_level == 12 and meta.runs == 1, "a run books its deepest level")
-	check(meta.set_loadout_slot("ranged", "xbow_heavy").ok, "an opened piece takes its slot")
-	check(meta.loadout_for("ranged") == "xbow_heavy", "and the slot remembers it")
 
 
 func _check_armory() -> void:
-	check(Weapons.has("bow_twig") and Weapons.has("hatchet_makeshift"), "both starters are in the registry")
-	check(Weapons.slot_of("bow_twig") == "ranged", "the twig bow is ranged")
+	check(Weapons.has("bow_long") and Weapons.has("hatchet_makeshift"), "both starters are in the registry")
+	check(Weapons.slot_of("bow_long") == "ranged", "the starter bow is ranged")
 	check(Weapons.slot_of("hatchet_makeshift") == "melee", "the hatchet is melee")
 	var heavy: Dictionary = Weapons.get_weapon("xbow_heavy")
 	check(float(heavy.get("proc", 0.0)) == 1.5, "the heavy crossbow carries a 1.5 proc coefficient")
@@ -151,6 +191,8 @@ func _check_armory() -> void:
 		"the world's own weapons are in the pool")
 	for id in Weapons.unlock_pool():
 		check(not Weapons.is_default(id), "the unlock pool holds no starter (%s)" % id)
+	check(Weapons.unlock_pool().has("bow_twig"),
+		"the sapling the warband used to wake with is on the rack")
 	check(Mods.all().size() >= 20, "the upgrade pool is broad enough to draft from (%d)" % Mods.all().size())
 	for rarity in Mods.RARITIES:
 		var found := false
@@ -186,6 +228,16 @@ func _check_engine() -> void:
 	var plan: Dictionary = engine.on_weapon_fire(Weapons.get_weapon("bow_twig"),
 		Vector3.ZERO, Vector3.FORWARD)
 	check(int(plan.get("shots", 0)) >= 3, "a split shot fires the fan")
+	# Broadhead's point has to leave the pool, not just sit in it: a flat row is
+	# added to each shaft's number, and it is a point rather than a share.
+	var flat = ProcEngineScript.new(78, 1)
+	flat.add_mod("broadhead", 3)
+	var flat_plan: Dictionary = flat.on_weapon_fire(Weapons.get_weapon("bow_twig"),
+		Vector3.ZERO, Vector3.FORWARD)
+	check(is_equal_approx(float(flat_plan.get("damage_add", 0.0)), 3.0),
+		"three Broadhead stacks carry three points into the shot plan")
+	check(is_equal_approx(flat.damage_multiplier(), 1.0),
+		"and a flat point never turns into a share of the base")
 	# Ten copies of a 15% proc must not reach the cap, let alone certainty.
 	var chance = ProcEngineScript.new(11, 1)
 	chance.add_mod("chain_lightning", 6)
@@ -208,13 +260,13 @@ func _check_engine() -> void:
 	check(absf(crit.stat("crit_chance") - 0.72) < 0.0001, "crit chance stacks linearly to the cap")
 	var draft_rng := RandomNumberGenerator.new()
 	draft_rng.seed = 31
-	var offers: Array = Mods.draft(draft_rng, 3, false)
-	check(offers.size() == 3, "a draft offers three")
+	var offers: Array = Mods.roll_shelf(draft_rng, Mods.SOURCE_WELD, 1, 3)
+	check(offers.size() == 3, "a shelf rolls three")
 	var unique := {}
 	for id in offers:
 		unique[id] = true
-		check(Mods.rarity_of(str(id)) != Mods.RARITY_GREED, "a normal draft holds no greed")
-	check(unique.size() == 3, "a draft never repeats a row")
+		check(Mods.rarity_of(str(id)) != Mods.RARITY_GREED, "a weld shelf holds no greed")
+	check(unique.size() == 3, "a shelf never repeats a row")
 	# The keys phase 3 added, read back from the engine rather than from the data.
 	var hand = ProcEngineScript.new(21, 1)
 	hand.add_mod("ring_of_precision", 2)
@@ -258,20 +310,21 @@ func _check_pool() -> void:
 			ready += 1
 		check(not str(row.get("description", "")).is_empty(), "%s says what it does" % id)
 		check(int(row.get("max_stacks", 0)) >= 1, "%s has a ceiling" % id)
-	check(Mods.all().size() == 161, "the pool is 120 base + 41 ability rows (%d)" % Mods.all().size())
+	check(Mods.all().size() == 173,
+		"the pool is 120 base + 42 ability + 11 speed rows (%d)" % Mods.all().size())
 	check(ids.size() == Mods.all().size(), "every row has its own id")
-	check(int(tiers.get(Mods.RARITY_COMMON, 0)) == 63,
-		"63 commons (%d)" % int(tiers.get(Mods.RARITY_COMMON, 0)))
-	check(int(tiers.get(Mods.RARITY_EPIC, 0)) == 51,
-		"51 epics (%d)" % int(tiers.get(Mods.RARITY_EPIC, 0)))
-	check(int(tiers.get(Mods.RARITY_LEGENDARY, 0)) == 33,
-		"33 legendaries (%d)" % int(tiers.get(Mods.RARITY_LEGENDARY, 0)))
+	check(int(tiers.get(Mods.RARITY_COMMON, 0)) == 67,
+		"67 commons (%d)" % int(tiers.get(Mods.RARITY_COMMON, 0)))
+	check(int(tiers.get(Mods.RARITY_EPIC, 0)) == 55,
+		"55 epics (%d)" % int(tiers.get(Mods.RARITY_EPIC, 0)))
+	check(int(tiers.get(Mods.RARITY_LEGENDARY, 0)) == 37,
+		"37 legendaries (%d)" % int(tiers.get(Mods.RARITY_LEGENDARY, 0)))
 	check(int(tiers.get(Mods.RARITY_GREED, 0)) == 14,
 		"14 greed rows (%d)" % int(tiers.get(Mods.RARITY_GREED, 0)))
 	check(int(families.get("shot", 0)) == 30 and int(families.get("hand", 0)) == 11
-		and int(families.get("ability", 0)) == 60 and int(families.get("perk", 0)) == 48
+		and int(families.get("ability", 0)) == 61 and int(families.get("perk", 0)) == 59
 		and int(families.get("relic", 0)) == 12, "the five families keep their share")
-	check(ready == 130, "130 live rows are the pool the surfaces offer (%d)" % ready)
+	check(ready == 142, "142 live rows are the pool the surfaces offer (%d)" % ready)
 	# Every row at its ceiling, read back as the design's own table.
 	var ceiling = ProcEngineScript.new(4242, 1)
 	for row in Mods.all():
@@ -289,17 +342,46 @@ func _check_pool() -> void:
 	check(absf(ceiling.stat("enemy_count_mult") - 2.25) < 0.001, "the wave ceiling is +2.25")
 	check(absf(ceiling.stat("currency_mult") - 7.25) < 0.001, "the gold ceiling is +7.25")
 	check(int(round(ceiling.stat("luck"))) == 6, "the luck ceiling is +6")
+	check(absf(ceiling.stat("move_mult") - 1.41) < 0.001, "the speed ceiling is +1.41")
+
+
+## The chambers the demons' island may be cut from: every one of them is a hall
+## the party's own line fits in with its wall margin, and every area of the
+## Hollow keeps at least one, so no part of the plan can stop being drawn.
+func _check_cave_rooms() -> void:
+	var rooms := CaveRoomScript.room_ids()
+	check(rooms.size() >= CaveLayout.AREAS.size(),
+		"the Hollow offers a chamber for every area (%d rooms)" % rooms.size())
+	var line := CaveRoomScript.SPREAD * 2.0 + CaveRoomScript.WALL_MARGIN * 2.0
+	for id in rooms:
+		var index: int = CaveLayout.room_index(id)
+		check(index >= 0, "the chamber %s is a room of the plan" % id)
+		if index < 0:
+			continue
+		var room: Dictionary = CaveLayout.ROOMS[index]
+		var rect: Rect2 = room["rect"]
+		check(not bool(room.get("tunnel", false)), "no passage is offered as a chamber (%s)" % id)
+		check(minf(rect.size.x, rect.size.y) >= line,
+			"the chamber %s holds the party's line with its wall margin (%s)" % [id, rect.size])
+	for area in CaveLayout.AREAS:
+		var halls := 0
+		for room in CaveLayout.ROOMS:
+			if str(room["area"]) != str(area) or bool(room.get("tunnel", false)):
+				continue
+			if rooms.has(str(room["id"])):
+				halls += 1
+		check(halls > 0, "the Hollow keeps a fight chamber in %s" % str(area))
 
 
 ## The two catalogs that use the word "ability" are joined by one index, not
-## confused: 35 active skills, 60 ability upgrades, 95 rows, unique ids.
+## confused: 36 active skills, 60 ability upgrades, 96 rows, unique ids.
 func _check_ability_index() -> void:
 	var active := AbilityIndex.active_entries()
 	var upgrades := AbilityIndex.upgrade_entries()
 	var all_entries := AbilityIndex.entries()
-	check(active.size() == 35, "the active ability catalog holds 35 (%d)" % active.size())
+	check(active.size() == 36, "the active ability catalog holds 36 (%d)" % active.size())
 	check(upgrades.size() == 60, "the ability upgrade set holds 60 (%d)" % upgrades.size())
-	check(all_entries.size() == 95, "the merged index holds 95 (%d)" % all_entries.size())
+	check(all_entries.size() == 96, "the merged index holds 96 (%d)" % all_entries.size())
 	var ids := {}
 	var dupes: Array[String] = []
 	for entry in all_entries:
@@ -347,22 +429,35 @@ func _check_ability_index() -> void:
 func _check_ladder() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
-	# An island-one pedestal is commons, and a luck-stacked one on island nine is
+	# A weld on island one is commons, and a luck-stacked one on island nine is
 	# still commons and epics: luck moves weight, never the shelf.
 	var off_shelf := 0
 	for _round in 120:
-		for id in Mods.draft(rng, 3, Mods.surface_tiers(Mods.SURFACE_PEDESTAL, 1),
-				0, 1, []):
+		for id in Mods.roll_shelf(rng, Mods.SOURCE_WELD, 1, 3, 0):
 			if Mods.rarity_of(str(id)) != Mods.RARITY_COMMON:
 				off_shelf += 1
-		for id in Mods.draft(rng, 3, Mods.surface_tiers(Mods.SURFACE_PEDESTAL, 9),
-				6, 9, []):
+		for id in Mods.roll_shelf(rng, Mods.SOURCE_WELD, 9, 3, 6):
 			var tier := Mods.rarity_of(str(id))
 			if tier == Mods.RARITY_LEGENDARY or tier == Mods.RARITY_GREED:
 				off_shelf += 1
 			if not Mods.ready_of(str(id)):
 				off_shelf += 1
-	check(off_shelf == 0, "a pedestal never carries a legendary, a greed row or a pending row")
+	check(off_shelf == 0, "a weld never carries a legendary, a greed row or a pending row")
+	# The rule luck cannot bend, stated once for every unpromised source: the rows
+	# it deals are always inside the tiers it lists for that island.
+	var off_source := 0
+	var drawn := 0
+	for source in [Mods.SOURCE_WELD, Mods.SOURCE_STALL, Mods.SOURCE_HOARD,
+			Mods.SOURCE_CACHE]:
+		for island in [1, 3, 6]:
+			var sells := Mods.source_tiers(source, island)
+			for luck in [0, 8]:
+				for id in Mods.roll_shelf(rng, source, island, 4, luck):
+					drawn += 1
+					if not sells.has(Mods.rarity_of(str(id))):
+						off_source += 1
+	check(off_source == 0,
+		"a source never sells a tier it does not list (%d of %d)" % [off_source, drawn])
 	# A boss's hoard pays the ceiling: one legendary, every time.
 	var missing := 0
 	for _round in 80:
@@ -386,18 +481,177 @@ func _check_ladder() -> void:
 		"six luck leans the roll away from common")
 	check(float(bent.get(Mods.RARITY_LEGENDARY, 0.0)) <= Mods.LUCK_LEGENDARY_CAP + 0.001,
 		"the legendary share has a ceiling")
-	var chest := Mods.tier_weights(Mods.surface_tiers(Mods.SURFACE_CHEST, 4), 0, 4,
-		Mods.CHEST_LEGENDARY_SCALE, true)
-	check(absf(float(chest.get(Mods.RARITY_LEGENDARY, 0.0)) - 4.0) < 0.01,
-		"a reward chest's legendary is 4%% on island 4 (%.2f)" % float(
-			chest.get(Mods.RARITY_LEGENDARY, 0.0)))
-	var chest_late := Mods.tier_weights(Mods.surface_tiers(Mods.SURFACE_CHEST, 5), 0, 5,
-		Mods.CHEST_LEGENDARY_SCALE, true)
-	check(absf(float(chest_late.get(Mods.RARITY_LEGENDARY, 0.0)) - 5.5) < 0.01,
-		"and 5.5%% on island 5+ (%.2f)" % float(chest_late.get(Mods.RARITY_LEGENDARY, 0.0)))
+	# A promise is a surface and a tier, and the chest lays out exactly that pair:
+	# a band is one rarity, and every row on a surface's shelf is on it.
+	check(Mods.promise(Mods.CHEST_ATTACK, Mods.RARITY_EPIC).tier == Mods.RARITY_EPIC,
+		"a promise names the one tier it lays out")
+	var off_surface := 0
+	var short_shelves := 0
+	var promises := 0
+	for surface in Mods.CHEST_SURFACES:
+		if Mods.surface_payout(surface) != Mods.PAYOUT_CARDS:
+			continue
+		for tier in [Mods.RARITY_COMMON, Mods.RARITY_EPIC, Mods.RARITY_LEGENDARY]:
+			var rows := Mods.shelf(surface, tier)
+			var offered := Mods.keeps_promise(Mods.promise(surface, tier))
+			if offered:
+				promises += 1
+			if offered != (rows.size() >= Mods.SURFACE_MIN_ROWS):
+				short_shelves += 1
+			if rows.is_empty():
+				continue
+			for id in rows:
+				if not Mods.in_chest_surface(str(id), surface):
+					off_surface += 1
+				if Mods.rarity_of(str(id)) != tier:
+					off_surface += 1
+				if not Mods.ready_of(str(id)):
+					off_surface += 1
+	check(off_surface == 0,
+		"a surface's shelf only holds ready rows of its own surface and tier")
+	check(short_shelves == 0,
+		"and a promise is only offered where a whole hand fits (%d short)" % short_shelves)
+	check(promises >= 20, "the surfaces lay out a shelf at most tiers (%d promises)" % promises)
+	# A promise is absolute, not a roll. Island one's ladder row carries no
+	# legendary at all, and a legendary chest promised there - an elite gate, a
+	# lucky roll - once laid out nothing, because the tier the chest allowed was
+	# re-weighted by the ladder; the luck ceiling then spent the promise's whole
+	# mass on epics the promise never sold.
+	var promise_rng := RandomNumberGenerator.new()
+	promise_rng.seed = 2027
+	var empty_promise := 0
+	var off_promise := 0
+	for _round in 120:
+		var cards := Mods.deal(promise_rng,
+			Mods.promise(Mods.CHEST_STAMINA, Mods.RARITY_LEGENDARY), 3)
+		if cards.is_empty():
+			empty_promise += 1
+		for id in cards:
+			if Mods.rarity_of(str(id)) != Mods.RARITY_LEGENDARY:
+				off_promise += 1
+	check(empty_promise == 0,
+		"a legendary promise lays out cards where the ladder has no legendary (%d empty)"
+			% empty_promise)
+	check(off_promise == 0,
+		"and every card it lays out is a legendary (%d off)" % off_promise)
+	# A chest deals each body its own hand, so a promise is only made where every
+	# body in the party can lay out a whole one: a party-wide row count is what
+	# promised an Ability epic chest to a dagger body whose own epic shelf is bare.
+	var short_hands := 0
+	var hand_promises := 0
+	for surface in Mods.CHEST_SURFACES:
+		if Mods.surface_payout(surface) != Mods.PAYOUT_CARDS:
+			continue
+		for tier in [Mods.RARITY_COMMON, Mods.RARITY_EPIC, Mods.RARITY_LEGENDARY]:
+			if not Mods.keeps_promise(Mods.promise(surface, tier), BODY_HANDS):
+				continue
+			hand_promises += 1
+			for hand in BODY_HANDS:
+				if Mods.deal(promise_rng, Mods.promise(surface, tier), 3,
+						hand["taken"], hand["tags"]).size() < 3:
+					short_hands += 1
+	check(hand_promises >= 12,
+		"a promise is still made at most tiers for a whole party (%d promises)" % hand_promises)
+	check(short_hands == 0,
+		"and every body a promise is dealt to can lay out a whole hand (%d short)"
+			% short_hands)
+	# A body spends a shelf as it takes the rows, so the promise is asked with the
+	# rows it has left: a shelf it has taken to its ceiling is not promised again.
+	var bow_tags := ["bow", "ranged", "any"]
+	var kept_hand := {"tags": bow_tags, "taken": []}
+	var stamina_legendary := Mods.promise(Mods.CHEST_STAMINA, Mods.RARITY_LEGENDARY)
+	var spent_shelf := Mods.shelf(Mods.CHEST_STAMINA, Mods.RARITY_LEGENDARY, bow_tags)
+	var spent_hand := {"tags": bow_tags, "taken": spent_shelf}
+	check(spent_shelf.size() >= Mods.SURFACE_MIN_ROWS
+		and Mods.keeps_promise(stamina_legendary, [kept_hand]),
+		"a legendary stamina shelf a body can still fill is promised (%d rows)" % spent_shelf.size())
+	check(not Mods.keeps_promise(stamina_legendary, [spent_hand]),
+		"and the same shelf spent to its ceiling is not")
+	# The tier a gate rolls is the ladder's, and luck leans it: the same six points
+	# of Streamer Loot that bend a roll bend a promise.
+	var luck_rng := RandomNumberGenerator.new()
+	luck_rng.seed = 1234
+	var plain_epic := 0
+	var lucky_legendary := 0
+	for _round in 400:
+		var rolled := str(Mods.roll_promise(luck_rng, 5, 0).get("tier", ""))
+		if rolled == Mods.RARITY_EPIC:
+			plain_epic += 1
+		if str(Mods.roll_promise(luck_rng, 5, 6).get("tier", "")) == Mods.RARITY_LEGENDARY:
+			lucky_legendary += 1
+	check(plain_epic > 0, "an unmodified island 5 gate still promises epics (%d)" % plain_epic)
+	check(lucky_legendary > 0,
+		"and six points of luck promise legendaries (%d)" % lucky_legendary)
+	check(Mods.raise_tier(Mods.RARITY_COMMON) == Mods.RARITY_EPIC
+		and Mods.raise_tier(Mods.RARITY_LEGENDARY) == Mods.RARITY_LEGENDARY,
+		"the elite trial raises a promise one rung and no further")
+	check(Mods.payout_count(Mods.RARITY_COMMON) == 1
+		and Mods.payout_count(Mods.RARITY_LEGENDARY) == 3,
+		"a key or gear chest pays one a tier, three on a legendary")
+	# The set floor a legendary Gear chest welds on is a set this island never
+	# rolls: floor_add is the whole of that promise.
+	var floor_rng := RandomNumberGenerator.new()
+	floor_rng.seed = 99
+	var early := ArmorLoot.roll_set(floor_rng, 1, ArmorData.NONE, 0)
+	var raised := ArmorLoot.roll_set(floor_rng, 1, ArmorData.NONE, 5)
+	check(ArmorLoot.quality_rank(early) <= ArmorLoot.quality_rank(raised),
+		"a Gear chest's floor raises the set (%d -> %d)" % [
+			ArmorLoot.quality_rank(early), ArmorLoot.quality_rank(raised)])
+	check(ArmorLoot.quality_rank(raised) >= 4,
+		"and an island-one row cannot answer it (%d)" % ArmorLoot.quality_rank(raised))
 	check(Mods.stall_price(Mods.RARITY_COMMON, 9) == 67
 		and Mods.stall_price(Mods.RARITY_LEGENDARY, 9) == 137,
 		"the stall prices a common at 67 and a legendary at 137 on level 9")
+
+
+## The Speed chest: the body's own travel. It reads the three movement state
+## machines' keys, so the shelf is checked against that list in both directions -
+## no card on it writes a key the roll, the step or the slide never ask for, and
+## every key they do ask for is answered by the engine the card is priced against.
+func _check_speed_shelf() -> void:
+	check(Mods.CARD_SURFACES.has(Mods.CHEST_SPEED),
+		"speed owns a shelf of cards")
+	check(Mods.surface_payout(Mods.CHEST_SPEED) == Mods.PAYOUT_CARDS,
+		"and a speed chest pays cards")
+	check(Mods.surface_label(Mods.CHEST_SPEED) == "SPEED",
+		"the gate's label names it (%s)" % Mods.surface_label(Mods.CHEST_SPEED))
+	var keys: Array = Mods.CHEST_KEYS.get(Mods.CHEST_SPEED, [])
+	check(keys.size() >= 4, "the surface reads the body's travel (%d keys)" % keys.size())
+	var engine = ProcEngineScript.new(4242, 1)
+	var answers := engine.stats()
+	var silent: Array[String] = []
+	for key in keys:
+		if not answers.has(str(key)):
+			silent.append(str(key))
+	check(silent.is_empty(), "the engine answers every movement key (%s)" % str(silent))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5150
+	for tier in [Mods.RARITY_COMMON, Mods.RARITY_EPIC, Mods.RARITY_LEGENDARY]:
+		var shelf: Array = Mods.shelf(Mods.CHEST_SPEED, tier)
+		check(shelf.size() >= Mods.SURFACE_MIN_ROWS,
+			"a speed chest lays out a whole hand at %s (%d)" % [tier, shelf.size()])
+		var off := 0
+		for id in shelf:
+			for key in (Mods.get_mod(str(id)).get("stats", {}) as Dictionary):
+				if not keys.has(str(key)):
+					off += 1
+		check(off == 0, "every %s speed row writes a movement key (%d off)" % [tier, off])
+		var dealt: Array = Mods.deal(rng, Mods.promise(Mods.CHEST_SPEED, tier), 3)
+		var wrong := 0
+		for id in dealt:
+			if Mods.rarity_of(str(id)) != tier:
+				wrong += 1
+		check(dealt.size() == 3 and wrong == 0,
+			"and its cards are the promised tier (%d cards, %d off)" % [dealt.size(), wrong])
+	# A movement row is a Speed card wherever its family sits: the two the pool
+	# already shipped are the ones a player sees first, so they are not left off.
+	check(Mods.in_chest_surface("speed_demon", Mods.CHEST_SPEED)
+		and Mods.in_chest_surface("ring_of_swiftness", Mods.CHEST_SPEED),
+		"Speed Demon and Ring Of Swiftness are speed cards too")
+	var kit = RunPlayerScript.new()
+	var plain := kit.movement()
+	check(plain.is_empty(), "a body with no run asks for no tuning (%s)" % str(plain.size()))
+	kit.free()
 
 
 ## The chest's armour: one piece at a random slot, a set the level's ladder can
@@ -592,6 +846,73 @@ func _check_clone_armoury() -> void:
 	check(saw_last, "and its own block's newest piece is in the mix")
 
 
+## The pit's brain is a ladder, and a ladder is only a ladder if every rung is
+## above the one under it: a typo in `CloneAi` would otherwise ship a "Very Easy"
+## body that swings faster than a "Fuck you" one, and nothing would say so.
+func _check_clone_tiers() -> void:
+	var tiers: Array = CloneAi.TIERS
+	check(tiers.size() == 6, "the pit's brain has six tiers (%d)" % tiers.size())
+	var names: Array[String] = CloneAi.labels()
+	check(names == ["Very Easy", "Easy", "Medium", "Hard", "Very Hard", "Fuck you"],
+		"named shallowest first (%s)" % str(names))
+	check(CloneAi.name_of(CloneAi.DEFAULT_TIER) == "Hard",
+		"the default is Hard, the body the pit shipped")
+	check(CloneAi.current_tier == CloneAi.DEFAULT_TIER,
+		"and a fresh session stands on it")
+	# Every tier carries the same knobs: the brain reads them unguarded, so a hole
+	# in the table is an error at the first swing rather than a slow clone.
+	var keys := ["name", "swing_gap", "blow", "guard_answer", "reaction",
+		"step_gap", "step_chance", "speed", "turn", "sight", "lead"]
+	for tier in tiers:
+		var missing: Array[String] = []
+		for key in keys:
+			if not (tier as Dictionary).has(key):
+				missing.append(str(key))
+		check(missing.is_empty(), "%s carries every knob (%s)" % [
+			str((tier as Dictionary).get("name", "?")), str(missing)])
+	# Which way each knob has to move as the ladder gets deeper.
+	var rising := ["blow", "guard_answer", "step_chance", "speed", "turn", "sight", "lead"]
+	var falling := ["swing_gap", "reaction", "step_gap"]
+	for index in range(1, tiers.size()):
+		var before: Dictionary = tiers[index - 1]
+		var after: Dictionary = tiers[index]
+		for key in rising:
+			check(float(after[key]) >= float(before[key]),
+				"%s never falls from %s to %s" % [key, str(before["name"]), str(after["name"])])
+		for key in falling:
+			check(float(after[key]) <= float(before[key]),
+				"%s never rises from %s to %s" % [key, str(before["name"]), str(after["name"])])
+	# Hard is the authored body: every multiplier is the one the brain was written
+	# with, and its swing is the pit's own - a fifth slower than the flat 0.85 s it
+	# shipped with, which is the owner's change and not a drift.
+	var hard: Dictionary = CloneAi.profile(CloneAi.DEFAULT_TIER)
+	for key in ["blow", "speed", "turn", "sight"]:
+		check(absf(float(hard[key]) - 1.0) < 0.0001, "Hard leaves %s at 1.0" % key)
+	check(float(hard["swing_gap"]) > 0.85, "Hard swings slower than the flat 0.85 s it shipped with")
+	check(absf(float(hard["swing_gap"]) - 1.05) < 0.0001, "at the tier table's 1.05 s")
+	# A skill is the tier's own: nothing below `Medium` performs one, and among the
+	# tiers that do, the deeper the body stands the more willing it is to spend the
+	# beat rather than the blade.
+	for index in tiers.size():
+		var row: Dictionary = tiers[index]
+		check(bool(row.get("casts", false)) == (index >= 2),
+			"%s casts: %s" % [str(row["name"]), str(bool(row.get("casts", false)))])
+	for index in range(3, tiers.size()):
+		check(float(tiers[index]["cast_gap"]) < float(tiers[index - 1]["cast_gap"]),
+			"%s performs a beat sooner than %s" % [
+				str((tiers[index] as Dictionary)["name"]),
+				str((tiers[index - 1] as Dictionary)["name"])])
+	check(float(tiers[1]["cast_gap"]) == 0.0 and float(tiers[2]["cast_gap"]) > 0.0,
+		"the first casting tier names a wait and the shy tiers name none")
+	# A tier asked for outside the ladder lands on the default rather than nowhere.
+	check(CloneAi.clamp_tier(-4) == CloneAi.DEFAULT_TIER, "a tier under the ladder is Hard")
+	check(CloneAi.clamp_tier(99) == CloneAi.DEFAULT_TIER, "so is one past it")
+	check(CloneAi.set_tier(7) == CloneAi.DEFAULT_TIER, "and set_tier refuses it the same way")
+	check(CloneAi.set_tier(5) == 5 and CloneAi.current_tier == 5, "a real tier takes")
+	check(CloneAi.cycle_tier() == 0, "and the ladder wraps from the deepest to the shallowest")
+	CloneAi.set_tier(CloneAi.DEFAULT_TIER)
+
+
 # --- the world and the square ----------------------------------------------
 
 func _open_world() -> void:
@@ -639,49 +960,86 @@ func _check_town() -> void:
 	check(game.town.service_at(game.town.global_position + Vector3(-5.5, 0.0, -1.5)) != "roguelite_totem",
 		"nothing answers where the totem stood")
 	check(game.town.service_point("altar") == Vector3.ZERO, "the square has no annoint altar")
-	# The square dresses a body in the rack's ranged piece, and puts the world's
-	# kit back when the body walks out of the walls.
-	check(str(body.rig.weapon) == "bow", "a body in the square holds the rack's bow")
-	check(int(body.rig.bow_index) == 4, "and it is the piece the rack bound")
-	body.global_position = game.town.global_position + Vector3(0.0, 0.0, -60.0)
-	game._sync_town_dress()
-	check(str(body.rig.weapon) == "bow" and int(body.rig.bow_index) == 3,
-		"walking out restores the body's own starter bow")
-	body.global_position = game.town.service_point("roguelite_rack")
-	game._sync_town_dress()
-	check(str(body.rig.weapon) == "bow", "walking back in dresses it again")
-	# The page is a picture of that body: while it holds the rack's piece the hand
-	# row names that piece, not the wardrobe's, so the piece the portal carries is
-	# the piece P shows - and a press on it cannot strip the roster slot it hides.
+	# The kit is the run's: the square holds the body's own hands, and the pair
+	# the portal will carry is read straight out of the inventory.
 	var merc_in_square := int(game.controller.merc_of(body))
-	var rack_piece := str(root.get_node("Roguelite").loadout_for("ranged"))
-	var roster_before := str(game.warband.roster.equipped_of(merc_in_square).get("main", ""))
-	game.paperdoll.open(merc_in_square)
-	check(str(game.paperdoll.slot_rows.get("main", {}).get("item_id", "")) == rack_piece,
-		"the character page shows the rack's hand in the square (%s)" % rack_piece)
-	check(str((game.paperdoll.slot_rows["main"]["button"] as Button).text).contains("RACK"),
-		"and names the hand as the rack's")
-	game.paperdoll._on_slot_pressed(WarbandContracts.slot_from_id("main"))
-	check(str(game.warband.roster.equipped_of(merc_in_square).get("main", "")) == roster_before,
-		"clicking the square's hand never strips the wardrobe")
-	# A wardrobe piece worn from the page is the body's again: the square dresses
-	# a body once, it does not lock the hand the page reports.
+	var pair: Dictionary = run.hand_pair_for(merc_in_square)
+	check(str(pair.get("ranged", "")) == "bow_long",
+		"the starter body carries its war bow (%s)" % str(pair.get("ranged", "")))
+	check(str(pair.get("melee", "")) == "hatchet_makeshift",
+		"and its makeshift hatchet (%s)" % str(pair.get("melee", "")))
+	check(str(body.rig.weapon) == "bow", "the square holds the kit's own bow")
+	check(int(body.rig.bow_index) == 2, "and it is the longbow's own piece")
+	# A piece in the inventory is the piece the run carries: wear the arming
+	# sword on the page and the portal's pair names it, with no starter behind it.
 	game.warband.stash.add("sword_arming", 1)
-	game.paperdoll._on_stash_pressed("sword_arming")
+	game.paperdoll.open(merc_in_square)
+	game.paperdoll.open_slot_menu("main")
+	var arming_row: Button = null
+	for child in game.paperdoll._menu_rows.get_children():
+		if str(child.get_meta("item_id", "")) == "sword_arming":
+			arming_row = child
+	check(arming_row != null, "the main hand offers the stashed arming sword")
+	if arming_row != null:
+		arming_row.pressed.emit()
 	check(str(game.warband.roster.equipped_of(merc_in_square).get("main", "")) == "sword_arming",
-		"a stash weapon is still worn in the square")
-	check(str(game.paperdoll.slot_rows.get("main", {}).get("item_id", "")) == "sword_arming",
-		"and the page names it once the body holds it")
-	# The body goes back to the kit it walked in with, so the run below starts
-	# from the square the rest of the suite expects.
-	game.warband.equip_merc(merc_in_square, "main", roster_before)
-	game.warband.stash.remove("sword_arming", 1)
+		"the page wears the stashed arming sword")
+	check(str(body.rig.weapon) == "sword", "and the body in the square holds it")
+	check(int(body.rig.sword_index) == 1, "as the arming sword's own piece")
+	var worn_pair: Dictionary = run.hand_pair_for(merc_in_square)
+	check(str(worn_pair.get("ranged", "")) == "sword_arming",
+		"the pair the portal carries is the inventory's sword (%s)" % str(worn_pair.get("ranged", "")))
+	check(str(worn_pair.get("melee", "")) == "hatchet_makeshift",
+		"beside the hatchet still in the other hand")
 	game.paperdoll.close()
-	# The press itself: the rack opens the board on the rack page.
+	# The starter bow goes back so the rack below binds into the kit the rest of
+	# the suite expects, and the test's sword leaves the pool.
+	game.warband.equip_hand(merc_in_square, "ranged", "bow_long")
+	game.warband.stash.remove("sword_arming", 1)
+	# The press itself: the rack opens the board on the rack page, and a row the
+	# ledger has opened wears the piece the stash holds.
+	body.global_position = game.town.service_point("roguelite_rack")
 	var service: String = game.town.interact_at(1, body.global_position)
 	check(service == "roguelite_rack", "the rack's press resolves to the rack")
 	check(game.town.forge_panel.is_open(), "and opens the run board")
 	check(game.town.forge_panel.mode == "rack", "on the weapon rack")
+	var heavy_name := Weapons.display_name("xbow_heavy")
+	var heavy_row = null
+	for child in game.town.forge_panel._body.get_children():
+		if child is Button and str((child as Button).text).contains(heavy_name):
+			heavy_row = child
+			break
+	check(heavy_row != null, "the rack lists the opened heavy crossbow")
+	if heavy_row != null:
+		(heavy_row as Button).pressed.emit()
+	check(game.warband.stash.owns("xbow_heavy", game.warband.roster),
+		"the opened piece is the warband's own")
+	check(meta.forged.has("xbow_heavy") and not meta.needs_forge("xbow_heavy"),
+		"and the forge is booked once")
+	check(str(game.warband.roster.weapon_set_pair(merc_in_square, 0).get("main", ""))
+		== "xbow_heavy", "and the rack put it in the body's ranged hand")
+	var bound_pair: Dictionary = run.hand_pair_for(merc_in_square)
+	check(str(bound_pair.get("ranged", "")) == "xbow_heavy",
+		"the portal's pair reads it out of the kit")
+
+	# The ledger is the ownership, not a spare on a shelf: a second body may carry
+	# the piece the keys opened, and nothing is left lying in the shared stash.
+	check(game.warband.stash.pooled_count("xbow_heavy") == 0,
+		"the opened piece left the pool as the body took it up")
+	for other_id in game.warband.roster.ids():
+		if int(other_id) == merc_in_square:
+			continue
+		var other: Dictionary = game.warband.equip_hand(int(other_id), "ranged", "xbow_heavy")
+		check(bool(other.get("ok", false)),
+			"a second body is armed with an opened piece (%s)"
+			% str(other.get("message", "")))
+		check(str(game.warband.roster.weapon_set_pair(int(other_id), 0).get("main", ""))
+			== "xbow_heavy", "and both bodies carry it at once")
+		check(str(game.warband.roster.weapon_set_pair(merc_in_square, 0).get("main", ""))
+			== "xbow_heavy", "the first body keeps the piece it was wearing")
+		check(game.warband.stash.pooled_count("xbow_heavy") == 0,
+			"and no spare is minted into the stash")
+		break
 	# The ability page is part of the same board: locked rows are the unlock and
 	# the body's hands decide which opened rows can be equipped.
 	game.town.forge_panel.open("abilities")
@@ -707,12 +1065,21 @@ func _check_run() -> void:
 	var start: Dictionary = run.start_run()
 	check(bool(start.get("ok", false)), "the portal opens the run: %s" % str(start.get("message", "")))
 	check(run.is_running(), "the director is live")
+	# A level opens quiet: the first body waits out the lead, and the island holds
+	# nothing until it lands.
+	check(absf(float(run._spawn_clock) - DirectorScript.SPAWN_LEAD) < 0.01,
+		"a level opens on its %.0f-second lead (%0.2f)" % [
+			DirectorScript.SPAWN_LEAD, float(run._spawn_clock)])
+	check(run.live_mobs().is_empty(), "with no body on the field yet")
+	check(run._live_cap() == 10,
+		"the opening block keeps ten bodies at once (%d)" % run._live_cap())
 	check(run.level == 1 and run.wave == 1 and run.stage_index == 0, "the run starts at level 1, island 1")
 	check(run.stage != null and is_instance_valid(run.stage), "an island was built")
 	check(run.players.size() >= 1, "the body has a run runtime")
 	var player = run.players.get(1)
 	check(player != null and is_instance_valid(player), "the runtime is bound to peer 1")
-	check(str(player.ranged_id) == "xbow_heavy", "the rack's choice rides into the run")
+	check(str(player.ranged_id) == "xbow_heavy", "the kit's ranged hand rides into the run")
+	check(str(player.melee_id) == "hatchet_makeshift", "and the melee hand beside it")
 	check(int(body.rig.bow_index) == 4, "the heavy crossbow is in the rig's hand")
 	# The page reads the hand the body is holding, not the wardrobe's: the run's
 	# pair is on it and the page's own TAB brings the other hand up with the rig.
@@ -722,11 +1089,26 @@ func _check_run() -> void:
 		"the character page shows the hand the run put up")
 	check(str(game.paperdoll.slot_rows.get("off", {}).get("item_id", "")) == str(player.melee_id),
 		"and the other one TAB reaches")
-	game.paperdoll._swap_set()
+	check(str(game.paperdoll.slot_rows.get("off", {}).get("item_id", ""))
+		== str(game.warband.roster.weapon_set_pair(page_merc, 1).get("main", "")),
+		"which is the piece the inventory holds for that hand")
+	# The pair belongs to the run: a slot press cannot change a hand out from
+	# under the island, and the page says so instead of offering the swap.
+	var run_main_before := str(game.warband.roster.equipped_of(page_merc).get("main", ""))
+	game.warband.stash.add("sword_short", 1)
+	game.paperdoll._on_slot_pressed("main")
+	check(str(game.warband.roster.equipped_of(page_merc).get("main", "")) == run_main_before,
+		"a slot press cannot change the hand a run is carrying")
+	check(not game.paperdoll._menu_box.visible,
+		"and the page offers no alternatives for a hand the run owns")
+	check(str(player.ranged_id) == "xbow_heavy", "and the run's pair is untouched")
+	game.warband.stash.remove("sword_short", 1)
+	# The island's own TAB is what brings the other hand up; the page reads it.
+	game._swap_weapon_set()
 	check(str(game.paperdoll.slot_rows.get("main", {}).get("item_id", "")) == str(player.melee_id),
-		"the page's swap brings the other hand up")
+		"the island's TAB brings the other hand up")
 	check(str(body.rig.weapon) != "bow", "and the rig is holding it")
-	game.paperdoll._swap_set()
+	game._swap_weapon_set()
 	check(str(game.paperdoll.slot_rows.get("main", {}).get("item_id", "")) == str(player.ranged_id),
 		"swapping back returns the ranged hand")
 	game.paperdoll.close()
@@ -735,14 +1117,16 @@ func _check_run() -> void:
 	check(absf(body.global_position.y - StageScript.LIFT) < 2.0, "the first island sits at the lift")
 
 
+
 ## A chest's armour is the run's, not the wardrobe's - but the character page is
 ## the screen a player checks after the pop. It must show the piece the chest
 ## actually handed out, the stage must wear it, and a click must never strip the
 ## roster slot it hides.
 func _check_run_kit() -> void:
 	var opener = run.players.get(1)
-	check(opener != null and opener.armor.size() == 1,
-		"the reward left one run piece to show on the page")
+	check(opener != null and not opener.armor.is_empty(),
+		"the Gear chest left the run pieces to show on the page (%d slots)" % (
+			opener.armor.size() if opener != null else -1))
 	if opener == null or opener.armor.is_empty():
 		return
 	var slot := str(opener.armor.keys()[0])
@@ -758,11 +1142,11 @@ func _check_run_kit() -> void:
 	check(str(row.get("item_id", "")) == item_id,
 		"the character page shows the piece the run won (%s, %s)"
 		% [str(row.get("item_id", "")), item_id])
-	check(str((row.get("button") as Button).text).contains("WON THIS RUN"),
+	check(str((row.get("button") as Button).text).contains("RUN"),
 		"and the row says it is the run's own")
 	check(int(game.paperdoll.preview.rig.armor_piece(slot)) == set_index,
 		"the stage ranger wears it too")
-	game.paperdoll._on_slot_pressed(WarbandContracts.slot_from_id(slot))
+	game.paperdoll._on_slot_pressed(slot)
 	check(str(game.warband.roster.equipped_of(merc).get(slot, "")) == roster_worn,
 		"clicking the run's piece never strips the wardrobe")
 	game.paperdoll.close()
@@ -822,6 +1206,15 @@ func _check_ability_in_hand() -> void:
 func _check_waves() -> void:
 	var gold_before: int = run.gold()
 	var guard_before: int = game.guards.size()
+	# The pacing rhythm: ten seconds before the opening body, nine before the next,
+	# down to one, with the tail quicker than a straight countdown. These are the
+	# waits the level is tuned to.
+	var rhythm: Array[float] = [10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.2, 2.2, 1.0]
+	for step in rhythm.size():
+		check(absf(run.spawn_interval(step) - rhythm[step]) < 0.001,
+			"wait %d is %.1f s (%0.2f)" % [step + 1, rhythm[step], run.spawn_interval(step)])
+	check(absf(run.spawn_interval(40) - DirectorScript.SPAWN_TAIL) < 0.001,
+		"every body past the tenth comes at the one-second tail")
 	var stormed := false
 	for _round in 14:
 		run.tick(2.5)
@@ -886,6 +1279,10 @@ func _check_waves() -> void:
 	player.take_mod("chain_lightning")
 	check(player.engine.stacks_of("chain_lightning") == 1, "the upgrade stack took")
 	check(player.engine.mod_list().size() == before + 1, "and is listed")
+	# The trickle may have fielded only one body: the chain needs a second to arc
+	# to, so the queue gives one up for the check.
+	if run.live_mobs().size() < 2 and not run._queue.is_empty():
+		run._spawn_next()
 	var second = first
 	for mob in run._mobs:
 		if is_instance_valid(mob) and mob != first:
@@ -927,8 +1324,19 @@ func _check_waves() -> void:
 	var swing: Dictionary = player.melee_swing(Vector3.FORWARD)
 	check(swing.has("crit"), "a swing answers its crit")
 	check(_count_procs("ProcWave") > waves_before, "a melee swing throws its crescent")
-	# Clear the level's wave. The director feeds it two bodies a tick, so the
-	# round cap has to cover the level's whole budget rather than a guess at it.
+	# A field with nothing on it never waits for the clock: the next body comes
+	# in at once. Kill what is standing and the queue gives up its next body on
+	# the same tick, so a clean fight sets its own pace.
+	var queued_before: int = run._queue.size()
+	for mob in run._mobs.duplicate():
+		if is_instance_valid(mob) and mob.get("alive") != false:
+			mob.take_damage(4096.0, 1)
+	run.tick(0.05)
+	check(run.live_mobs().size() == 1,
+		"an empty field pulls the next body in at once (%d)" % run.live_mobs().size())
+	check(run._queue.size() < queued_before, "and the queue gives it up")
+	# Clear the level's wave. The spawner feeds it one body a beat and an empty
+	# field pulls the next at once, so the round cap covers the whole budget.
 	for _round in 60:
 		run.tick(2.5)
 		for mob in run._mobs.duplicate():
@@ -943,6 +1351,23 @@ func _check_waves() -> void:
 	check(run.gold() == int(game.warband.gold()),
 		"and the run's purse is the one purse the town spends")
 	check(run.keys_earned == 0, "a non-boss level pays no unlock keys")
+	# An elite advertises its rank over its head while it fights. The corpse is
+	# not an elite, so the tag leaves on the frame the body dies instead of
+	# floating over the five-minute hold. The forced body is the test's, not the
+	# run's: the director's RNG is put back where it was so the rest of the walk
+	# is the same game it would have been.
+	var elite_rng: int = run._rng.state
+	var elite_spec: Dictionary = run._pick_spec(true)
+	run._spawn_spec(elite_spec, body.global_position + Vector3(0.0, 0.0, 4.0))
+	run._rng.state = elite_rng
+	var elite = run._mobs[run._mobs.size() - 1]
+	var rank_tag = elite.get_node_or_null(CorpseHold.RANK_TAG)
+	check(rank_tag is Label3D and str(rank_tag.text) == "ELITE",
+		"a forced elite wears its rank over the body")
+	elite.take_damage(1.0e7, 1)
+	await process_frame
+	check(not is_instance_valid(rank_tag), "and the corpse carries no ELITE tag")
+	check(is_instance_valid(elite), "while the body still lies where it fell")
 
 
 func _count_procs(name_prefix: String) -> int:
@@ -958,6 +1383,49 @@ func _prop_of(kind: String) -> Node3D:
 		if is_instance_valid(prop) and Props.prop_kind(prop) == kind:
 			return prop
 	return null
+
+
+## The recruiter's board on the island: three bodies for sale, one of each
+## archetype, sold for the party's gold, sworn into the warband as a body that
+## spends no deployment place and dies for good. Bought on the real world so the
+## spawn, the runtime and the reap are all the game's own.
+func _check_recruiter(actor) -> void:
+	var desk := _prop_of("recruiter")
+	if desk == null:
+		check(false, "the market stands a recruiter (no desk)")
+		return
+	var serial := int(desk.get_meta("serial"))
+	var board: Array = run.recruit_board.get(serial, [])
+	check(board.size() == DirectorScript.SHOP_HIRES,
+		"the recruiter sells three bodies (%d)" % board.size())
+	if board.size() < 3:
+		return
+	var archetypes: Dictionary = {}
+	for offer in board:
+		check(str(offer.get("kind", "")) == "hire", "a row is a body for sale")
+		check(int(offer.get("price", 0)) > 0,
+			"%s costs gold (%d)" % [str(offer.get("name", "?")),
+				int(offer.get("price", 0))])
+		archetypes[str(offer.get("archetype", ""))] = true
+	check(archetypes.size() == 3, "one of each archetype is on the board")
+	# The desk's own prompt and its panel. The body is stood at the desk first: the
+	# prompt is the prop inside reach, so a check that read it from wherever the
+	# last check left the body was a check that passed or failed on the seed's own
+	# island geometry rather than on the desk.
+	var was_at: Vector3 = (actor as Node3D).global_position
+	(actor as Node3D).global_position = desk.global_position + Vector3(0.0, 0.0, 1.6)
+	check(run.prompt_line(actor).contains("RECRUITER"),
+		"the desk names itself on the prompt (%s)" % run.prompt_line(actor))
+	(actor as Node3D).global_position = was_at
+	var hud = game.get("roguelite_hud")
+	run._open_recruiter(serial, actor)
+	if hud != null:
+		check(hud._overlay.visible, "a press opens the recruiter's board")
+		hud.close_all()
+	# Buying a body is the hire verb's own contract and it is measured where it
+	# lands (`tests/recruit_regression.gd`, on a market it opens itself): this test
+	# owns the stop - the desk, the board and the panel - and stays out of the
+	# party's composition, which the levels after it read.
 
 
 ## Every gate standing on the ground, in the order the director stood them.
@@ -980,10 +1448,10 @@ func _gate(biome: String) -> Node3D:
 func _check_rewards() -> void:
 	var chest := _prop_of("chest")
 	check(chest != null, "a reward chest stands on the level")
-	var pedestal := _prop_of("pedestal")
-	check(pedestal != null, "an upgrade pedestal stands on the level")
-	var greed := _prop_of("greed")
-	check(greed != null, "a Greed Totem stands on the level")
+	check(_prop_of("pedestal") == null,
+		"and it is the level's only growth surface: no second prop deals a draft")
+	check(_prop_of("greed") == null,
+		"no Greed Totem stands on the level: the bargain is the boss's hoard and the stall")
 	var gates := _gates()
 	check(gates.size() == 3, "three gates stand on the cleared level (%d)" % gates.size())
 	var biomes: Array[String] = []
@@ -996,12 +1464,73 @@ func _check_rewards() -> void:
 		"one gate per faction, in order (%s)" % str(biomes))
 	check(factions == ["watchers", "demons", "clones"],
 		"and each names the faction behind it (%s)" % str(factions))
+	var trials: Array[String] = []
+	var surfaces: Array[String] = []
+	var doubles := 0
+	var unpaid := 0
+	var wrongly_elite := 0
+	var broken_hands := 0
+	var off_contract := 0
+	var promise_rng := RandomNumberGenerator.new()
+	promise_rng.seed = 8181
+	for gate in gates:
+		var contract: Dictionary = Props.payload_of(gate).get("contract", {})
+		check(not contract.is_empty(), "the gate carries its contract")
+		trials.append(str(contract.get("trial", "")))
+		var contract_chest: Dictionary = contract.get("chest", {})
+		var surface := str(contract_chest.get("surface", ""))
+		var tier := str(contract_chest.get("tier", ""))
+		surfaces.append(surface)
+		if not Mods.CHEST_SURFACES.has(surface):
+			unpaid += 1
+		elif not Mods.keeps_promise(Mods.promise(surface, tier)):
+			unpaid += 1
+		if str(Mods.surface_payout(surface)) == Mods.PAYOUT_CARDS \
+				and not tier.is_empty():
+			# The promise is dealt body by body: each body in the run gets a whole
+			# hand of the promised surface and tier out of the rows it has left, so
+			# a gate can only price a shelf the whole party can still use.
+			for hand in run._party_hands():
+				var dealt := Mods.deal(promise_rng, Mods.promise(surface, tier), 3,
+					hand["taken"], hand["tags"])
+				if dealt.size() < 3:
+					broken_hands += 1
+				for id in dealt:
+					if Mods.rarity_of(str(id)) != tier:
+						off_contract += 1
+		if str(contract.get("trial", "")) == "elite" \
+				and Mods.tier_rank(tier) < 1:
+			wrongly_elite += 1
+		if int(contract_chest.get("mult", 1)) > 1:
+			doubles += 1
+	trials.sort()
+	check(trials == ["elite", "open", "swarm"],
+		"one gate each of open, elite and swarm (%s)" % str(trials))
+	check(unpaid == 0,
+		"every gate promises a real surface at a tier it can pay (%s)" % str(surfaces))
+	check(surfaces[0] != surfaces[1] and surfaces[1] != surfaces[2]
+		and surfaces[0] != surfaces[2],
+		"the three gates promise three different chests (%s)" % str(surfaces))
+	check(wrongly_elite == 0, "and an elite trial never promises a common chest")
+	check(broken_hands == 0,
+		"every body a gate's chest is dealt to draws a whole hand (%d short)"
+			% broken_hands)
+	check(off_contract == 0,
+		"and every card in it is the rarity the gate promised (%d off)" % off_contract)
+	check(doubles == 1, "the swarm gate promises a 2X chest (%d)" % doubles)
 	check(str(Props.payload_of(gates[0]).get("title", "")) == str(StageScript.biome("wilderness").name),
 		"a gate's lintel carries its own biome")
-	check(chest.global_position.distance_to(pedestal.global_position) < 7.0,
-		"the chest stands a few paces from the pedestal (%.1f m)" % chest.global_position.distance_to(pedestal.global_position))
-	check(pedestal.global_position.distance_to(gates[0].global_position) < 14.0,
-		"and the gates one walk from the pedestal (%.1f m)" % pedestal.global_position.distance_to(gates[0].global_position))
+	var first_label := str(Props.payload_of(gates[0]).get("label", ""))
+	check(not first_label.is_empty(), "and the contract line under it")
+	var first_surface := str((Props.payload_of(gates[0]).get("contract", {}) as Dictionary)
+		.get("chest", {}).get("surface", ""))
+	check(first_label.find(Mods.surface_label(first_surface)) >= 0,
+		"the lintel names the chest it promises (%s)" % first_label)
+	var first_trial := str(Props.payload_of(gates[0]).get("contract", {}).get("trial", ""))
+	check(first_label.find(str(first_trial).to_upper()) >= 0,
+		"and the trial that prices it (%s)" % first_label)
+	check(chest.global_position.distance_to(gates[0].global_position) < 14.0,
+		"the gates stand one walk from the chest (%.1f m)" % chest.global_position.distance_to(gates[0].global_position))
 	var closest := INF
 	for first in gates.size():
 		for second in range(first + 1, gates.size()):
@@ -1016,38 +1545,149 @@ func _check_rewards() -> void:
 	run.tick(0.2)
 	check(bool(body.alive), "and it does not bleed out while the run holds it")
 	var chest_serial := int(chest.get_meta("serial"))
+	var chest_owner := int(Props.payload_of(chest).get("owner", 0))
+	check(chest_owner == 1, "the box is stood for the soul that owns it (%d)" % chest_owner)
+	check(not str(Props.payload_of(chest).get("owner_name", "")).is_empty(),
+		"and it wears that soul's name on its own plate (%s)"
+			% str(Props.payload_of(chest).get("owner_name", "")))
+	var draft_table: Dictionary = run.draft_offers.get(chest_serial, {})
+	check(draft_table.size() == 1 and draft_table.has(1),
+		"the box carries one row, for its owner (%s)" % str(draft_table.keys()))
+	var short_rows := 0
+	for peer in draft_table:
+		if (draft_table[peer] as Array).size() != 3:
+			short_rows += 1
+	check(short_rows == 0, "and that row is three cards (%d short)" % short_rows)
+	# A chest never stands with nothing in it, or with one card and no choice. A
+	# promise the opener's own shelf cannot pay - a bare surface at that tier, a
+	# shelf spent to its ceiling - is topped up at the promised rarity instead.
+	var probe_body = run.players.get(1)
+	var bare: Array = []
+	if probe_body != null:
+		bare = probe_body.chest_draft(Mods.CHEST_CRITICAL, Mods.RARITY_LEGENDARY, 3)
+	check(not Mods.keeps_promise(Mods.promise(Mods.CHEST_CRITICAL,
+		Mods.RARITY_LEGENDARY)),
+		"a surface with no legendary row is never promised at legendary")
+	check(bare.size() == 3,
+		"yet a chest standing on it still deals three cards (%d)" % bare.size())
+	var rescued: Dictionary = run._chest_offers(Mods.CHEST_CRITICAL, Mods.RARITY_LEGENDARY)
+	var rescued_short := 0
+	var rescued_off := 0
+	for peer in rescued:
+		if (rescued[peer] as Array).size() != 3:
+			rescued_short += 1
+		for id in rescued[peer] as Array:
+			if Mods.rarity_of(str(id)) != Mods.RARITY_LEGENDARY:
+				rescued_off += 1
+	check(rescued.size() == run.players.size() and rescued_short == 0,
+		"the chest stands with a whole hand for every body (%d rows)" % rescued.size())
+	check(rescued_off == 0,
+		"at the rarity it promised (%d off)" % rescued_off)
+	# The chest is the level's one source: everything it takes is taken here.
+	var player = run.players.get(1)
 	run._open_chest(chest_serial, body)
-	check(run._opened.has(chest_serial), "the chest opens")
+	check(not run._opened.has(chest_serial), "the chest waits for its pick")
+	var chest_offers: Array = run._offers_for(chest_serial, 1)
+	check(chest_offers.size() == 3, "the chest offers three promised rows")
+	var chest_payload := Props.payload_of(chest)
+	var promised := str(chest_payload.get("surface", ""))
+	var promised_tier := str(chest_payload.get("tier", ""))
+	# The first chest on an island is an ABILITY chest: level one's promise is a
+	# skill, not the teaching card chest it used to be.
+	check(promised == Mods.CHEST_ABILITY and promised_tier == Mods.RARITY_COMMON,
+		"level one opens on the island's first ABILITY chest, commons (%s/%s)"
+			% [promised, promised_tier])
+	check(str(chest_payload.get("payout", "")) == Mods.PAYOUT_SKILLS,
+		"an ability surface pays a skill")
+	check(str(chest_payload.get("offer_kind", "")) == "skill",
+		"and its draft is drawn as a skill")
+	var worn_main: Dictionary = State.ITEMS.get(str(player.ranged_id), {})
+	var worn_off: Dictionary = State.ITEMS.get(str(player.melee_id), {})
+	var fitting := 0
+	for id in chest_offers:
+		var definition: Dictionary = AbilityRules.by_id(str(id))
+		check(not definition.is_empty(),
+			"an ability chest only offers skills (%s)" % str(id))
+		check(not meta.is_ability_unlocked(str(id)),
+			"and only skills this player has not opened (%s)" % str(id))
+		if AbilityRules.fits_gear(definition, worn_main, worn_off):
+			fitting += 1
+	check(fitting >= 1,
+		"at least one offer fits the pair the body is wearing (%d of %d)"
+			% [fitting, chest_offers.size()])
+	# A skill pick: the unlock is the player's, the bar is the body's.
+	var pick := str(chest_offers[0])
+	check(run.choose_draft(1, chest_serial, 0).get("ok", false),
+		"the chest's first skill is taken")
+	check(meta.is_ability_unlocked(pick),
+		"the skill is the player's from the pick onward (%s)" % pick)
+	var bar: Array = game.warband.roster.hotbar_order_of(int(player.merc_id))
+	var fits_pick: bool = AbilityRules.fits_gear(AbilityRules.by_id(pick),
+		worn_main, worn_off)
+	check(bar.has(pick) == fits_pick,
+		"and it rides the bar exactly when the hands fit it (%s, fits=%s)"
+			% [pick, str(fits_pick)])
+	check(run._opened.has(chest_serial), "the chest opens on its pick")
 	check(not bool(body.downed) and float(body.health) > 0.0,
 		"the chest wakes a downed body at half the pool")
 	check(run._opened.has("chest"), "the chest unseals the portal")
-	# The chest's other half: one piece of armour per body that opens it, worn on
-	# the rig, kept on the run's own table, and with its welded modifiers taken.
+	# An ability chest pays no armour: a piece is the Gear chest's surface, and
+	# its tier is the set floor. A Key chest pays keys and no card at all.
 	var opener = run.players.get(1)
-	check(opener != null and opener.armor.size() == 1,
-		"the chest hands its opener one piece of armour (%d)" % (
+	check(opener != null and opener.armor.is_empty(),
+		"an ability chest hands out no armour (%d slots)" % (
 			opener.armor.size() if opener != null else -1))
-	var chest_slot := ""
-	if opener != null and not opener.armor.is_empty():
-		chest_slot = str(opener.armor.keys()[0])
-	var piece: Dictionary = opener.armor_piece(chest_slot) if opener != null else {}
-	check(ArmorData.SLOTS.has(chest_slot), "the piece lands in a real slot (%s)" % chest_slot)
-	check(int(body.rig.armor_piece(chest_slot)) == int(piece.get("set", -1)),
-		"and the rig wears the set the chest rolled")
-	for id in _piece_mods(piece):
-		check(opener.engine.stacks_of(str(id)) >= 1,
-			"a welded modifier is on the body (%s)" % str(id))
-	print("ROGUELITE_ARMOUR %s" % ArmorLoot.status_line(piece))
-	check(game.hud.status_line().find(ArmorLoot.title_of(piece)) >= 0,
-		"the chest's line names the piece: %s" % game.hud.status_line())
-	# A second press cannot milk a second piece out of the same chest, and a hand
+	var gear_payload := {"surface": Mods.CHEST_GEAR, "tier": Mods.RARITY_LEGENDARY,
+		"payout": Mods.PAYOUT_GEAR, "style": "chest", "mult": 1}
+	var gear_chest = run._spawn_prop("chest", run.stage.rim_point(2, 6), gear_payload)
+	check(gear_chest != null, "a Gear chest stands where the director stands it")
+	var gear_serial := int(gear_chest.get_meta("serial"))
+	run._open_chest(gear_serial, body)
+	check(not opener.armor.is_empty(),
+		"the Gear chest hands its opener armour (%d slots)" % opener.armor.size())
+	var floor_rank := ArmorLoot.quality_rank(ArmorData.NONE) + Mods.tier_rank(
+		Mods.RARITY_LEGENDARY)
+	var low_pieces := 0
+	var off_rig := 0
+	for slot in opener.armor:
+		var won: Dictionary = opener.armor_piece(str(slot))
+		if ArmorLoot.quality_rank(int(won.get("set", ArmorData.NONE))) < floor_rank:
+			low_pieces += 1
+		if int(body.rig.armor_piece(str(slot))) != int(won.get("set", -1)):
+			off_rig += 1
+		for id in _piece_mods(won):
+			check(opener.engine.stacks_of(str(id)) >= 1,
+				"a welded modifier is on the body (%s)" % str(id))
+	check(low_pieces == 0, "every piece clears the set floor its tier welds on")
+	check(off_rig == 0, "and the rig wears what the run's own table won")
+	check(not run._props_by_serial.has(gear_serial),
+		"the Gear chest is spent on its open")
+	var gear_slot := str(opener.armor.keys()[0])
+	var gear_piece: Dictionary = opener.armor_piece(gear_slot)
+	print("ROGUELITE_ARMOUR %s" % ArmorLoot.status_line(gear_piece))
+	check(game.hud.status_line().find("GEAR CHEST") >= 0,
+		"the Gear chest's line names its own payout: %s" % game.hud.status_line())
+	# A second press cannot milk a second set out of the same chest, and a hand
 	# flip re-dresses from the roster without dropping what the run won.
-	run._open_chest(chest_serial, body)
-	check(opener.armor.size() == 1, "a body gets one piece per chest")
+	var slots_after: int = int(opener.armor.size())
+	run._open_chest(gear_serial, body)
+	check(opener.armor.size() == slots_after,
+		"a spent chest cannot be milked for a second set")
 	run._apply_hands(opener, "melee")
-	check(int(body.rig.armor_piece(chest_slot)) == int(piece.get("set", -1)),
-		"a hand swap keeps the chest's piece on the body")
+	check(int(body.rig.armor_piece(gear_slot)) == int(gear_piece.get("set", -1)),
+		"a hand swap keeps the Gear chest's piece on the body")
 	run._apply_hands(opener, "ranged")
+	# The Key chest: the one surface that pays the meta currency.
+	var keys_before: int = int(run.keys_earned)
+	var key_payload := {"surface": Mods.CHEST_KEY, "tier": Mods.RARITY_EPIC,
+		"payout": Mods.PAYOUT_KEYS, "style": "chest", "mult": 1}
+	var key_chest = run._spawn_prop("chest", run.stage.rim_point(3, 6), key_payload)
+	var key_serial := int(key_chest.get_meta("serial"))
+	run._open_chest(key_serial, body)
+	check(run.keys_earned == keys_before + Mods.payout_count(Mods.RARITY_EPIC),
+		"an epic Key chest banks its keys (%d -> %d)" % [keys_before, run.keys_earned])
+	check(not run.draft_offers.has(key_serial), "and lays out no card")
+	check(not run._props_by_serial.has(key_serial), "the Key chest is spent")
 	# The wear path itself, without a body behind it: a welded modifier lands on
 	# the engine, a row the engine refuses is dropped from the piece rather than
 	# left lying about what the piece carries, and a clean piece keeps its shape.
@@ -1064,31 +1704,6 @@ func _check_rewards() -> void:
 	check(str(kept.get("slot", "")) == "head" and int(kept.get("set", -1)) == 2,
 		"the clean piece keeps its slot and set")
 	probe.free()
-	# The draft: one row of three per body in the run, not one shared row.
-	var pedestal_serial := int(pedestal.get_meta("serial"))
-	var draft_table: Dictionary = run.draft_offers.get(pedestal_serial, {})
-	check(draft_table.size() == run.players.size(),
-		"every body in the run draws its own draft row (%d rows, %d bodies)" % [
-			draft_table.size(), run.players.size()])
-	check(draft_table.has(1), "the local body has a row")
-	var offers: Array = draft_table.get(1, [])
-	if offers.is_empty():
-		run._open_draft(pedestal_serial, body)
-		offers = (run.draft_offers.get(pedestal_serial, {}) as Dictionary).get(1, [])
-	check(offers.size() == 3, "the pedestal holds three upgrades for it")
-	var player = run.players.get(1)
-	var stacks_before: int = player.engine.total_stacks()
-	var chosen: Dictionary = run.choose_draft(1, pedestal_serial, 0)
-	check(bool(chosen.get("ok", false)), "the first upgrade is taken")
-	check(player.engine.total_stacks() == stacks_before + 1, "the upgrade lands on the body")
-	check(not run._props_by_serial.has(pedestal_serial), "the pedestal is spent")
-	# The Greed Totem.
-	var greed_serial := int(greed.get_meta("serial"))
-	var health_before: float = float(body.health)
-	var greed_stacks: int = player.engine.total_stacks()
-	run._open_greed(greed_serial, body)
-	check(player.engine.total_stacks() > greed_stacks, "the totem sells a greed upgrade")
-	check(float(body.health) < health_before, "and takes its price in blood")
 	# The shop's counter sells for the same gold the town spends.
 	var wares := [{"id": "rapid_fire", "name": "Berserk Rate", "price": 10,
 		"rarity": "common"}]
@@ -1101,7 +1716,61 @@ func _check_rewards() -> void:
 	check(int(game.warband.gold()) == run.gold(), "from the shared purse")
 
 
+## The authored model stands on the prop's own origin: every plaque, the chest's
+## lamp and the gate's promise sheet hang from that origin. The GLB lays its
+## variants out along +x for the bake sheet, so a variant left where the sheet
+## put it stands beside its own name.
+func _check_prop_models() -> void:
+	for style in ["chest", "mini", "elite"]:
+		var visual: Node3D = ChestVisual.new()
+		visual.setup(style, Color.WHITE)
+		var box := _model_bounds(visual)
+		check(box.size.x > 0.0 and absf(box.get_center().x) < 0.02,
+			"the %s chest is centred on the prop its plate hangs from (%.2f m off)"
+				% [style, box.get_center().x])
+		visual.free()
+	for biome in ["wilderness", "caves", "arena"]:
+		var visual: Node3D = GateVisual.new()
+		visual.setup(biome, Color.WHITE)
+		var box := _model_bounds(visual)
+		check(box.size.x > 0.0 and absf(box.get_center().x) < 0.02,
+			"the %s gate is centred on the prop its sheet and plates hang from (%.2f m off)"
+				% [biome, box.get_center().x])
+		visual.free()
+
+
+## The authored model's bounds in the prop's own space. The variant node is the
+## prop's first child; the plates, lamp and sheet that follow are the prop's own.
+func _model_bounds(prop: Node3D) -> AABB:
+	var model := prop.get_child(0) as Node3D
+	if model == null:
+		return AABB()
+	var meshes: Array = []
+	if model is MeshInstance3D:
+		meshes.append(model)
+	meshes.append_array(model.find_children("*", "MeshInstance3D", true, false))
+	var total := AABB()
+	var first := true
+	for mesh_node in meshes:
+		var placed: AABB = _relative(mesh_node, prop) * (mesh_node as MeshInstance3D).get_aabb()
+		total = placed if first else total.merge(placed)
+		first = false
+	return total
+
+
+func _relative(node: Node, ancestor: Node) -> Transform3D:
+	var out := Transform3D.IDENTITY
+	while node != null and node != ancestor:
+		out = (node as Node3D).transform * out
+		node = node.get_parent()
+	return out
+
+
 func _check_portal() -> void:
+	# The dead of level one lie on its ground until another level begins: a gate
+	# press is a new level's ground, and no corpse should walk through it.
+	var old_corpses: Array = run._corpses.duplicate()
+	check(not old_corpses.is_empty(), "the cleared level left its dead on the island")
 	# The gate taken is the biome fought: the party walks into the demons' gate
 	# and level two is the caves.
 	check(run.biome_id == "wilderness", "the run opened in the wood (%s)" % run.biome_id)
@@ -1125,19 +1794,147 @@ func _check_portal() -> void:
 		"the new biome stands on new ground")
 	check(run.level_cleared == false and run.wave_active, "the next level opens on its wave")
 	check(body.global_position.y > 600.0, "the party stands on the island")
+	# The Hollow Beneath is a chamber of the real cave, not the old turf ring:
+	# the stage names the room, the party lands inside its walls, and the only
+	# way on is the run's own gates.
+	check(run.stage.is_chamber(), "the demons' island is a Hollow chamber")
+	check(run.stage.room_label().begins_with("THE "),
+		"and it names the room it was cut from (%s)" % run.stage.room_label())
+	check(run.stage.contains(body.global_position), "the party lands inside its walls")
+	var chamber_middle: Vector3 = run.stage.middle()
+	check(run.stage.contains(chamber_middle), "the chamber's middle is inside the fight")
+	check(not run.stage.contains(chamber_middle + Vector3(200.0, 0.0, 0.0)),
+		"and the rock past its walls is not")
+	check(absf(run.stage.floor_point(Vector2.ZERO).y - chamber_middle.y) < 4.0,
+		"the middle stands on the room's own floor")
+	var chamber: Node = run.stage.get_node_or_null("Dressing/CaveChamber")
+	check(chamber != null, "the chamber is cut from the Hollow's plan")
+	var skin: MeshInstance3D = null
+	if chamber != null:
+		skin = chamber.get_node_or_null("Room/Skin") as MeshInstance3D
+	check(skin != null and skin.mesh != null and skin.mesh.get_surface_count() > 0,
+		"and walled in the Hollow's own rock")
+	check(chamber != null and chamber.get_node_or_null("Room/Formations") != null,
+		"with the dripstone the plan grows in it")
+	check(run.stage.get_node_or_null("ChamberWall") == null,
+		"there is no turf-ring shell under the chamber")
+	check(run.stage.get_node_or_null("IslandFloor") == null,
+		"and no flat island floor")
+	for slot in 3:
+		var gate_at: Vector3 = run.stage.gate_point(slot, 0.4189, 9.5)
+		check(run.stage.contains(gate_at),
+			"gate %d stands inside the chamber" % slot)
+	check(run.stage.air() != null, "the chamber carries its own air")
+	await process_frame
+	var lying := 0
+	for corpse in old_corpses:
+		if is_instance_valid(corpse):
+			lying += 1
+	check(lying == 0, "a new level clears the old corpses (%d still lying)" % lying)
+	check(run._corpses.is_empty(), "and the director forgets them")
 
 
 func _check_shop_and_boss() -> void:
-	# Level nine is the shop: no wave, a stall, the rack and the gates to the boss.
+	# Level six is the mid-block market: five combat levels first, then no wave,
+	# a stall and a reward chest, no rack, and gates back to combat rather than a boss.
+	# The market begins on the island the portal reached, with no ground rebuilt,
+	# so a body of the level before it is the same-island case: it still goes.
+	# The forced body is the test's, so the run's RNG is left where it was.
+	var market_rng: int = run._rng.state
+	run._spawn_spec(run._pick_spec(false), body.global_position + Vector3(0.0, 0.0, 4.0))
+	run._rng.state = market_rng
+	var market_corpse = run._mobs[run._mobs.size() - 1]
+	market_corpse.take_damage(1.0e7, 1)
+	run.wave = 6
+	run.level = 5
+	run.level_cleared = true
+	run._begin_level()
+	# The free is queued for the end of the frame, so the corpse's own flag is
+	# the evidence here: this function runs on the caller's frame.
+	check(not is_instance_valid(market_corpse)
+			or (market_corpse as Node).is_queued_for_deletion(),
+		"a level begun on the same island clears the old corpse")
+	check(run.market_level and run.shop_level and run.level == 6,
+		"level 6 is the market level")
+	check(not run.wave_active, "the market sends no wave")
+	check(_prop_of("shop") != null, "the market stall stands")
+	check(_prop_of("recruiter") != null, "and so does the recruiter's desk")
+	await _check_recruiter(body)
+	check(_prop_of("rack") == null, "the market has no weapon rack")
+	var market_chest := _prop_of("chest")
+	check(market_chest != null, "the market stands a reward chest")
+	var market_payload := Props.payload_of(market_chest)
+	var market_surface := str(market_payload.get("surface", ""))
+	check(Mods.CHEST_SURFACES.has(market_surface),
+		"and the stop rolls a real surface (%s)" % market_surface)
+	check([Mods.RARITY_COMMON, Mods.RARITY_EPIC, Mods.RARITY_LEGENDARY].has(
+		str(market_payload.get("tier", ""))),
+		"at one of the three ladder tiers (%s)" % str(market_payload.get("tier", "")))
+	check(not str(market_payload.get("label", "")).is_empty(),
+		"and says so on its lid (%s)" % str(market_payload.get("label", "")))
+	check(str(run.state().get("kind", "")) == "market"
+		and bool(run.state().get("market_level", false)),
+		"the state names the market")
+	var market_gates := _gates()
+	check(market_gates.size() == 3, "the market stands three gates (%d)" % market_gates.size())
+	var all_combat := true
+	for gate in market_gates:
+		if str(Props.payload_of(gate).get("kind", "")) != "combat":
+			all_combat = false
+	check(all_combat, "the market's gates lead back to combat")
+	# The stop's chest is a reward chest like any other: a card surface lays out a
+	# card a body and the allies have already taken theirs; a key or a gear chest
+	# pays on the open. Either way it seals no gate - a market's were never barred.
+	var market_serial := int(market_chest.get_meta("serial"))
+	var market_player = run.players.get(1)
+	var market_payout := str(market_payload.get("payout", ""))
+	if market_payout == Mods.PAYOUT_CARDS:
+		var market_table: Dictionary = run.draft_offers.get(market_serial, {})
+		check(market_table.size() == 1 and market_table.has(1),
+			"the market's box carries one row, for the soul it stands for (%s)" % str(
+				market_table.keys()))
+		var ally_rows := 0
+		for peer in run.ai_peers():
+			if market_table.has(int(peer)):
+				ally_rows += 1
+		check(ally_rows == 0,
+			"and no ally's row sits in a player's box (%d)" % ally_rows)
+		run._open_chest(market_serial, body)
+		var market_offers: Array = run._offers_for(market_serial, 1)
+		check(market_offers.size() == 3,
+			"the market's chest lays out three cards a body")
+		var market_stacks: int = market_player.engine.total_stacks()
+		check(run.choose_draft(1, market_serial, 0).get("ok", false),
+			"the market's first card is taken")
+		check(market_player.engine.total_stacks() == market_stacks + 1,
+			"and it lands on the body")
+	else:
+		var keys_before: int = int(run.keys_earned)
+		run._open_chest(market_serial, body)
+		check(run.keys_earned >= keys_before,
+			"a stop's key chest pays on the open")
+		check(not run.draft_offers.has(market_serial),
+			"and holds no card to choose")
+	check(not run._opened.has("chest"),
+		"a stop's chest seals no gate: the market's were never barred")
+	check(not run._props_by_serial.has(market_serial), "and the market's chest is spent")
+	run._take_portal(int(market_gates[0].get_meta("serial")), body)
+	check(run.level == 7 and run.wave_active and not run.shop_level
+		and not run.market_level,
+		"the market's gate opens level 7's wave")
+	# Level nine is the full shop: no wave, a stall, the rack and the gates to
+	# the boss.
 	run.wave = 9
 	run.level = 8
 	run.level_cleared = true
 	run._begin_level()
-	check(run.shop_level and run.level == 9, "level 9 is the shop level")
+	check(run.shop_level and not run.market_level and run.level == 9,
+		"level 9 is the full shop level")
 	check(not run.wave_active, "the shop level sends no wave")
 	check(_prop_of("shop") != null, "the shop stall stands")
 	check(_prop_of("rack") != null, "the weapon rack stands")
-	check(_prop_of("pedestal") != null, "an upgrade pedestal stands")
+	check(_prop_of("chest") != null,
+		"the shop level's own reward chest stands")
 	var gates := _gates()
 	check(gates.size() == 3, "the shop level stands all three gates (%d)" % gates.size())
 	var all_boss := true
@@ -1145,9 +1942,29 @@ func _check_shop_and_boss() -> void:
 		if str(Props.payload_of(gate).get("kind", "")) != "boss":
 			all_boss = false
 	check(all_boss, "and every one of them leads to the boss")
-	# The rack opens mid-run, and a bind reaches the body.
+	# The rack opens mid-run, and a press wears the piece the stash can hold: the
+	# run's hand is then the inventory's piece, not a ledger's id.
 	game.town.forge_panel.open("rack")
 	check(game.town.forge_panel.mode == "rack", "the shop rack opens the board")
+	var shop_player = run.players.get(1)
+	var axe_name := Weapons.display_name("axe_makeshift")
+	var axe_row = null
+	for child in game.town.forge_panel._body.get_children():
+		if child is Button and str((child as Button).text).contains(axe_name):
+			axe_row = child
+			break
+	check(axe_row != null, "the shop rack lists the locked axe")
+	var keys_before_axe := int(meta.keys)
+	if axe_row != null:
+		(axe_row as Button).pressed.emit()
+	check(int(meta.keys) == keys_before_axe - 2, "the press spends the axe's two keys")
+	check(game.warband.stash.owns("axe_makeshift", game.warband.roster),
+		"the opened axe is in the inventory")
+	check(not meta.needs_forge("axe_makeshift"), "and its forge is booked once")
+	check(shop_player != null and str(shop_player.melee_id) == "axe_makeshift",
+		"and the run's melee hand is the piece the inventory holds")
+	check(str(run.hands_for_merc(int(shop_player.merc_id)).get("main", "")) == "axe_makeshift",
+		"which is the hand the page is told the run is holding")
 	game.town.forge_panel.close_panel()
 	# Take the demons' gate: the boss level begins in the caves, and its queue
 	# carries that faction's boss.
@@ -1182,6 +1999,247 @@ func _check_shop_and_boss() -> void:
 	check(str(run.state().get("faction", "")) == "clones", "with the clones behind it")
 	check(run.stage != null and is_instance_valid(run.stage), "the new island is built")
 	check(body.global_position.y > 600.0, "the party stands on the new island")
+	# The pit's brain performs item skills from `Medium` up, and the session stands
+	# on `Hard`: every clone this island lands carries one skill of its own, fit to
+	# the hand that will fire it.
+	for _round in 14:
+		run.tick(2.5)
+		if not run._mobs.is_empty():
+			break
+	var pit: Array = []
+	for mob in run.live_mobs():
+		if mob.has_method("ai_tier_name"):
+			pit.append(mob)
+	check(not pit.is_empty(), "the clones' island lands clone bodies (%d)" % pit.size())
+	var armed := 0
+	var fit := 0
+	for mob in pit:
+		check(str(mob.ai_tier_name()) == CloneAi.name_of(CloneAi.current_tier),
+			"a pit body fights on the session's tier (%s)" % str(mob.ai_tier_name()))
+		var skill := str(mob.get("ability_id"))
+		if skill.is_empty():
+			continue
+		armed += 1
+		if AbilityRules.fits_rig(AbilityRules.by_id(skill), mob.rig):
+			fit += 1
+	check(armed == pit.size(), "every pit body carries a skill of its own (%d of %d)"
+		% [armed, pit.size()])
+	check(armed == fit, "and each is one their own hand can fire (%d of %d)" % [fit, armed])
+	run.queue_clear()
+	run._free_mobs()
+
+
+## A swarm contract promises a 2X chest, and a chest is stood one a soul: a 2X
+## promise under a party of two is four boxes, two for each player, each with its
+## own three offers and its owner's name on the plate.
+func _check_double_chest() -> void:
+	run.queue_clear()
+	run._free_mobs()
+	run.wave_active = false
+	run.level_cleared = false
+	run._clear_stage_props()
+	run.active_contract = {
+		"kind": "combat", "biome": run.biome_id, "faction": "clones",
+		"trial": "swarm",
+		"trial_params": {"budget_mult": 1.5, "live_cap_add": 6},
+		"chest": {"surface": Mods.CHEST_ATTACK, "tier": Mods.RARITY_COMMON,
+			"mult": 2},
+		"label": "ATTACK  ·  COMMON  ·  2X  ·  SWARM",
+	}
+	# One soul at the table first: the promise is two boxes for that soul.
+	run._clear_level()
+	var contracted := _contracted_chests()
+	check(contracted.size() == 2,
+		"a 2X contract stands two boxes for the one soul in the run (%d)"
+			% contracted.size())
+	check(_chest_owners(contracted) == [1, 1],
+		"both of them that soul's (%s)" % str(_chest_owners(contracted)))
+	check(_chest_drafts(contracted) == 2,
+		"each with its own three-card draft (%d)" % _chest_drafts(contracted))
+	# A second soul joins the run. The promise doubles again, and neither player
+	# can spend the other's box.
+	var second: int = game.warband.add_mercenary("Brine")
+	for _beat in 4:
+		await physics_frame
+	check(second > 0 and game.controller.body_of(second) != null,
+		"The second body stands on the run's field")
+	if second <= 0 or game.controller.body_of(second) == null:
+		return
+	game.controller.activate(2, second)
+	run._spawn_runners()
+	check(run.players.has(2), "The second soul is in the run (%s)" % str(run.players.keys()))
+	run._clear_stage_props()
+	run._clear_level()
+	contracted = _contracted_chests()
+	check(contracted.size() == 4,
+		"a 2X contract under two players stands four boxes (%d)" % contracted.size())
+	var owners := _chest_owners(contracted)
+	check(owners.count(1) == 2 and owners.count(2) == 2,
+		"two for each soul (%s)" % str(owners))
+	check(_chest_drafts(contracted) == 4,
+		"and every one of them carries a three-card draft of its own (%d)"
+			% _chest_drafts(contracted))
+	# A press on somebody else's box spends nothing at all.
+	var foreign = null
+	for chest in contracted:
+		if int(Props.payload_of(chest).get("owner", 0)) == 2:
+			foreign = chest
+			break
+	if foreign != null:
+		var stacks_before: int = run.players.get(1).engine.total_stacks()
+		run._open_chest(int(foreign.get_meta("serial")), body)
+		check(run.players.get(1).engine.total_stacks() == stacks_before,
+			"a player cannot open another player's chest")
+		check(run.draft_offers.has(int(foreign.get_meta("serial"))),
+			"and the box keeps its own owner's draft")
+
+
+## Every chest standing on the level that wears a contract: the level's main boxes.
+func _contracted_chests() -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	for prop in run._props:
+		if not is_instance_valid(prop) or Props.prop_kind(prop) != "chest":
+			continue
+		if not Props.payload_of(prop).get("contract", {}).is_empty():
+			out.append(prop)
+	return out
+
+
+## The owner each of those boxes was stood for, in the order they stand.
+func _chest_owners(chests: Array[Node3D]) -> Array:
+	var out: Array = []
+	for chest in chests:
+		out.append(int(Props.payload_of(chest).get("owner", 0)))
+	out.sort()
+	return out
+
+
+## How many of those boxes carry a whole three-card hand for their owner.
+func _chest_drafts(chests: Array[Node3D]) -> int:
+	var count := 0
+	for chest in chests:
+		var payload := Props.payload_of(chest)
+		var owner := int(payload.get("owner", 0))
+		var offers: Variant = run.draft_offers.get(int(chest.get_meta("serial")),
+			payload.get("offers", {}))
+		if not offers is Dictionary:
+			continue
+		var row: Variant = (offers as Dictionary).get(owner, [])
+		if row is Array and (row as Array).size() == 3:
+			count += 1
+	return count
+
+
+## Faulty Chests: the cards a body walks away from do not vanish. Each stack
+## keeps one, laid at the box's own feet as a one-card pickup with that soul's
+## name on it. A chest with no stack behind it still spends what it was not
+## asked for, so the two halves are checked against each other.
+func _check_kept_offers() -> void:
+	var hand = run.players.get(1)
+	check(hand != null and is_instance_valid(hand), "the soul has a runtime")
+	if hand == null or not is_instance_valid(hand) or run.stage == null:
+		return
+	var offered: Array[String] = ["steady_draw", "rapid_fire", "heavy_caliber"]
+	# Without the row, the two cards the body did not take are only spent.
+	var plain := _stand_test_chest(1, offered)
+	var props_before: int = run._props.size()
+	var answer: Dictionary = run.choose_draft(1, plain, 0)
+	check(bool(answer.get("ok", false)),
+		"a card chest takes the choice (%s)" % str(answer.get("message", "")))
+	check(_kept_cards() == 0 and run._props.size() == props_before - 1,
+		"and a chest with no Faulty Chests behind it leaves nothing (%d props)" % run._props.size())
+	# One stack, and the card walked past waits on the ground.
+	hand.engine.add_mod("faulty_chests", 1)
+	hand.apply_stats()
+	var kept := _stand_test_chest(1, offered)
+	var picked: Dictionary = run.choose_draft(1, kept, 0)
+	check(bool(picked.get("ok", false)),
+		"the chest takes the choice (%s)" % str(picked.get("message", "")))
+	var cards := _kept_cards()
+	check(cards == 1, "one Faulty Chests stack keeps one card (%d)" % cards)
+	var left := ""
+	for prop in run._props:
+		if not is_instance_valid(prop) or Props.prop_kind(prop) != "chest":
+			continue
+		var payload := Props.payload_of(prop)
+		if str(payload.get("label", "")) != "AN UNCHOSEN CARD":
+			continue
+		check(int(payload.get("owner", 0)) == 1, "the kept card is the chooser's own")
+		var row: Variant = (payload.get("offers", {}) as Dictionary).get(1, [])
+		check(row is Array and (row as Array).size() == 1,
+			"and it carries the one card it kept")
+		if row is Array and (row as Array).size() == 1:
+			left = str((row as Array)[0])
+	check(not left.is_empty() and left != str(offered[0]),
+		"the card kept is one the body did not take (%s)" % left)
+	# Clean up: the shelf's own numbers belong to other checks.
+	for id in offered + ["faulty_chests"]:
+		hand.engine.stacks.erase(id)
+	hand.engine._dirty = true
+	hand.apply_stats()
+	for prop in run._props.duplicate():
+		if not is_instance_valid(prop) or Props.prop_kind(prop) != "chest":
+			continue
+		if str(Props.payload_of(prop).get("label", "")) != "AN UNCHOSEN CARD":
+			continue
+		run._props.erase(prop)
+		run._props_by_serial.erase(int(prop.get_meta("serial")))
+		prop.queue_free()
+
+
+## A box standing on the level with a hand of cards for one soul.
+func _stand_test_chest(peer: int, offers: Array[String]) -> int:
+	var payload := {
+		"payout": Mods.PAYOUT_CARDS, "style": "mini", "level": run.level,
+		"owner": peer, "owner_name": run._peer_name(peer),
+		"owner_colour": run._peer_colour(peer), "label": "A TESTED CHEST",
+		"offers": {peer: offers},
+	}
+	var chest = run._spawn_prop("chest", run.stage.reward_point(0, 4, 3.2), payload)
+	if chest == null:
+		return 0
+	var serial := int(chest.get_meta("serial"))
+	run.draft_offers[serial] = payload["offers"]
+	return serial
+
+
+## How many cards are lying on the island because a chest was left half-taken.
+func _kept_cards() -> int:
+	var count := 0
+	for prop in run._props:
+		if not is_instance_valid(prop) or Props.prop_kind(prop) != "chest":
+			continue
+		if str(Props.payload_of(prop).get("label", "")) == "AN UNCHOSEN CARD":
+			count += 1
+	return count
+
+
+## The draft is the run's, not the island's. Level eleven is a new depth block -
+## new ground, new biome, new wave - and the body that walks onto it still holds
+## every stack it fought for, on the same runtime it took them on.
+func _check_island_carry() -> void:
+	var hand = run.players.get(1)
+	check(hand != null and is_instance_valid(hand), "the soul has a runtime")
+	if hand == null or not is_instance_valid(hand):
+		return
+	check(bool(hand.take_mod("steady_draw").get("ok", false)), "a card lands on the body")
+	var stacks := int(hand.engine.stacks_of("steady_draw"))
+	check(stacks >= 1, "and is booked in its engine (%d)" % stacks)
+	run.queue_clear()
+	run._free_mobs()
+	run.wave_active = false
+	run.level = 10
+	run.stage_index = 0
+	run.wave = 10
+	run.level_cleared = true
+	run.advance_level("wilderness")
+	check(run.stage_index == 1 and run.level == 11,
+		"level eleven is a new island (island %d, level %d)" % [run.stage_index, run.level])
+	var carried = run.players.get(1)
+	check(carried == hand, "the body keeps the runtime it took the card on")
+	check(carried != null and is_instance_valid(carried)
+		and int(carried.engine.stacks_of("steady_draw")) == stacks,
+		"and the stack crosses the gate with it (%s)" % str(carried.engine.stacks if carried != null else {}))
 
 
 ## The island's edge is a warning, not a wall. A body that stands out past the
@@ -1239,6 +2297,25 @@ func _check_bounds() -> void:
 		% [float(DirectorScript.BOUNDS_COST) * 100.0, health_outside - body.health, health_outside])
 	for frame in 10:
 		await physics_frame
+	# The Speed chest is the body's own feet: a card on the run has to reach the
+	# three movement state machines, or the shelf is a plate of numbers that do
+	# nothing. Each card here is one key, so one check a machine.
+	var speed_hand = run.players.get(1)
+	check(absf(float(body.dodge.travel) - DodgeStep.TRAVEL) < 0.001
+		and absf(float(body.roll.speed) - DodgeRoll.SPEED) < 0.001
+		and absf(float(body.slide.duration) - RunningSlide.DURATION) < 0.001,
+		"a run body walks, rolls and slides on its own constants before a card")
+	check(bool(speed_hand.take_mod("lightfoot").get("ok", false))
+		and bool(speed_hand.take_mod("long_roll").get("ok", false))
+		and bool(speed_hand.take_mod("low_slide").get("ok", false)),
+		"the Speed shelf deals a step, a roll and a slide card")
+	body._tune_movement()
+	check(absf(float(body.dodge.travel) - (DodgeStep.TRAVEL + 0.30)) < 0.001,
+		"Lightfoot carries the side step %.2f m" % float(body.dodge.travel))
+	check(absf(float(body.roll.speed) - (DodgeRoll.TRAVEL + 1.5) / DodgeRoll.DURATION) < 0.001,
+		"Long Roll pays its metre on the roll's own clock (%.2f m/s)" % float(body.roll.speed))
+	check(absf(float(body.slide.duration) - RunningSlide.DURATION * 1.18) < 0.001,
+		"Low Slide runs the slide 18%% longer (%.2f s)" % float(body.slide.duration))
 
 
 func _check_close() -> void:
@@ -1281,19 +2358,26 @@ func _check_close() -> void:
 	await _check_ability_book_actions()
 
 
-## The rack's ability page is the unlock and the equip: a locked row spends its
-## keys, the same row then equips on the body the soul is inside, and the bar
-## picks the skill up on the next dress.
+## The rack's ability page is the **equip** now, not the unlock: a skill is opened
+## by an ABILITY chest, so a row the player has not found carries no price and no
+## button, and an opened one equips on the body the soul is inside.
 func _check_ability_book_actions() -> void:
 	meta.award_keys(5)
+	var keys_before := int(meta.keys)
 	var merc := int(game.controller.merc_of(body))
 	game.town.forge_panel.open("abilities")
 	game.town.forge_panel._refresh()
 	var locked := _panel_button(game.town.forge_panel, "DASH", "LOCKED")
-	check(locked != null, "the book offers the locked Dash row")
-	if locked != null:
-		locked.pressed.emit()
-	check(meta.is_ability_unlocked("dash"), "the pressed row opens Dash for the player")
+	check(locked == null, "the book sells no locked Dash row")
+	var locked_row := _panel_label(game.town.forge_panel, "DASH", "ABILITY CHEST")
+	check(locked_row != null,
+		"the not-found row says where a skill comes from (%s)"
+			% (str(locked_row.text) if locked_row != null else "no row"))
+	check(int(meta.keys) == keys_before, "and the book spends no keys")
+	# The chest is what opens it; the book is what wears it.
+	check(bool(meta.grant_ability("dash").get("ok", true)),
+		"an ability chest's grant opens Dash for the player")
+	game.town.forge_panel._refresh()
 	var equip := _panel_button(game.town.forge_panel, "DASH", "EQUIP")
 	check(equip != null, "the opened Dash row becomes an equip")
 	if equip != null:
@@ -1314,6 +2398,17 @@ func _panel_button(panel, first: String, second: String) -> Button:
 		if not child is Button:
 			continue
 		var text := str((child as Button).text).to_upper()
+		if text.contains(first.to_upper()) and text.contains(second.to_upper()):
+			return child
+	return null
+
+
+## The same, for a row the page writes as a line of text rather than a button.
+func _panel_label(panel, first: String, second: String) -> Label:
+	for child in panel._body.get_children():
+		if not child is Label:
+			continue
+		var text := str((child as Label).text).to_upper()
 		if text.contains(first.to_upper()) and text.contains(second.to_upper()):
 			return child
 	return null

@@ -10,9 +10,9 @@ extends RefCounted
 ## (`ProcEngine.MAX_KEYS`); chance rows carry no number at all, only the key,
 ## because their curve is the engine's (`ProcEngine.HYPERBOLIC`).
 ##
-## The tier is not power. It is where the row arrives: a pedestal carries commons,
-## a boss's hoard and the stall carry legendaries, a totem carries greed. The
-## ladder is the part of a loot system a player learns by playing, so it lives
+## The tier is not power. It is where the row arrives: a reward chest carries
+## commons, a boss's hoard and the stall carry legendaries.
+## The ladder is the part of a loot system a player learns by playing, so it lives
 ## here, next to the rows it prices.
 ##
 ## The design this implements is `docs/upgrade-pool.md`. `ready: false` marks a row
@@ -46,6 +46,357 @@ const FAMILY_LABEL := {
 	FAMILY_SHOT: "SHOT", FAMILY_HAND: "HAND", FAMILY_ABILITY: "ABILITY",
 	FAMILY_PERK: "PERK", FAMILY_RELIC: "RELIC",
 }
+
+## What a gate promises: a **chest surface** — the category — and a tier. The
+## source system's surfaces table, re-cut to our keys. A surface is a tag set, not
+## a family: a row belongs to every surface it acts on, so Glass Cannon is a
+## Damage chest's and a Health chest's at once, and a weapon row is a Weapons
+## chest's wherever it sits in the pool.
+##
+## Eight surfaces hold a **shelf** of cards; `key` and `gear` are promises too,
+## but they pay on the open and lay out no card at all, so they are the payout
+## surfaces and never asked for a shelf. A gate promises one surface at one tier,
+## and that tier is absolute: the chest lays out the tier on the label, or the
+## gate does not make the promise.
+const CHEST_WEAPONS := "weapons"
+const CHEST_DAMAGE := "damage"
+const CHEST_HEALTH := "health"
+const CHEST_STAMINA := "stamina"
+const CHEST_SPEED := "speed"
+const CHEST_LUCK := "luck"
+const CHEST_CRITICAL := "critical"
+const CHEST_ABILITY := "ability"
+const CHEST_ATTACK := "attack"
+const CHEST_KEY := "key"
+const CHEST_GEAR := "gear"
+## The eight that own a shelf of **mod** cards: every row-bearing rule reads
+## these. `ability` is not one of them any more - an ABILITY chest pays skills
+## out of `ability_rules.gd`, not rows out of this pool.
+const CARD_SURFACES := [CHEST_WEAPONS, CHEST_DAMAGE, CHEST_HEALTH,
+	CHEST_STAMINA, CHEST_SPEED, CHEST_LUCK, CHEST_CRITICAL, CHEST_ATTACK]
+## The two that pay without a card.
+const PAYOUT_SURFACES := [CHEST_KEY, CHEST_GEAR]
+## The one that pays something other than this catalog's rows: a player's skill.
+const SKILL_SURFACES := [CHEST_ABILITY]
+const CHEST_SURFACES := [CHEST_WEAPONS, CHEST_DAMAGE, CHEST_HEALTH,
+	CHEST_STAMINA, CHEST_SPEED, CHEST_LUCK, CHEST_CRITICAL, CHEST_ABILITY,
+	CHEST_ATTACK, CHEST_KEY, CHEST_GEAR]
+const CHEST_SURFACE_LABEL := {
+	CHEST_WEAPONS: "WEAPONS", CHEST_DAMAGE: "DAMAGE", CHEST_HEALTH: "HEALTH",
+	CHEST_STAMINA: "STAMINA", CHEST_SPEED: "SPEED", CHEST_LUCK: "LUCK",
+	CHEST_CRITICAL: "CRITICAL", CHEST_ABILITY: "ABILITY", CHEST_ATTACK: "ATTACK",
+	CHEST_KEY: "KEY", CHEST_GEAR: "GEAR",
+}
+
+## A chest's payout: what a surface pays, and the two chests that carry no
+## surface at all - a cache that auto-rolls one row, and a boss's hoard.
+const PAYOUT_CARDS := "cards"
+const PAYOUT_KEYS := "keys"
+const PAYOUT_GEAR := "gear"
+const PAYOUT_ROLL := "roll"
+const PAYOUT_HOARD := "hoard"
+## A skill, permanently, for one player: the ABILITY chest's own payout. The
+## chest lays out three and the soul keeps one.
+const PAYOUT_SKILLS := "skills"
+const CHEST_SURFACE_PAYOUT := {
+	CHEST_WEAPONS: PAYOUT_CARDS, CHEST_DAMAGE: PAYOUT_CARDS,
+	CHEST_HEALTH: PAYOUT_CARDS, CHEST_STAMINA: PAYOUT_CARDS,
+	CHEST_SPEED: PAYOUT_CARDS, CHEST_LUCK: PAYOUT_CARDS,
+	CHEST_CRITICAL: PAYOUT_CARDS, CHEST_ABILITY: PAYOUT_SKILLS,
+	CHEST_ATTACK: PAYOUT_CARDS, CHEST_KEY: PAYOUT_KEYS, CHEST_GEAR: PAYOUT_GEAR,
+}
+## How often the route promises a surface. A key buys a weapon for the rest of
+## the player's life and a skill is that player's for as long as they play, so
+## the two unlock surfaces are the rarest promises on the board - and the first
+## chest of every island is an ability chest whatever the board rolled.
+const CHEST_SURFACE_WEIGHT := {CHEST_KEY: 0.5, CHEST_ABILITY: 0.5, CHEST_GEAR: 0.8}
+
+## What a key chest and a gear chest pay, by tier: the promise's own rank.
+const PAYOUT_BY_TIER := {
+	RARITY_COMMON: 1, RARITY_EPIC: 2, RARITY_LEGENDARY: 3,
+}
+
+## The weapon families a Weapons chest reads: the tags the ability kit rows carry.
+const WEAPON_TAGS := ["bow", "staff", "sword", "two_hand", "dagger", "shield",
+	"melee", "ranged"]
+
+## The keys each stat surface reads, exactly as `proc_engine.stats()` names them.
+## A row is on the surface when it writes one of these keys.
+const CHEST_KEYS := {
+	CHEST_DAMAGE: ["damage_mult", "melee_damage_mult", "flat_damage",
+		"wave_damage", "spell_damage_mult", "throw_damage_mult",
+		"ability_damage_mult", "damage_high_hp_mult", "damage_planted_mult",
+		"damage_close_mult", "damage_far_mult", "damage_per_hp",
+		"damage_per_gold", "damage_per_kill", "damage_per_island",
+		"damage_per_stack", "damage_per_mark", "damage_on_kill", "aura_damage",
+		"splash_frac", "explode_on_kill", "shock_on_hurt"],
+	CHEST_HEALTH: ["max_hp_mult", "max_hp_flat", "max_hp_flat_on_hit",
+		"heal_on_kill", "heal_on_clear", "heal_on_hit", "melee_lifesteal",
+		"regen_hp_per_s", "regen_window", "damage_taken_mult",
+		"mark_damage_taken_mult", "dodge_chance", "passive_block_chance",
+		"guard_cost_mult"],
+	# Stamina is the pool and what spends it: the ability buttons' cooldowns and
+	# recasts, the guard's price, the roll's charges and the throw's own kit. It
+	# is the widest shelf of the card surfaces because our run body spends stamina
+	# on every verb it has.
+	CHEST_STAMINA: ["ability_stamina_mult", "ability_cooldown_mult",
+		"ability_recast_chance", "guard_cost_mult", "roll_charges", "roll_regen",
+		"roll_refund_throw", "roll_repel", "roll_blades", "roll_blade_scale",
+		"roll_distance", "move_mult", "parry_refund", "parry_window_add",
+		"throw_charges_flat", "throw_regen_mult", "throw_delay",
+		"throw_damage_mult", "throw_speed_mult", "throw_fan", "throw_fan_scale",
+		"throw_burst_chance", "throw_stagger", "throw_spin", "throw_spin_radius",
+		"throw_homing", "throw_void", "throw_void_radius", "triple_throw_chance",
+		"double_burst_chance", "blast_radius"],
+	# Speed is the body's own travel: the walk it crosses the island at, the roll,
+	# the grounded side step and the sprint slide. It reads the three movement
+	# state machines' own keys, so a movement row is a Speed card wherever its
+	# family sits - `speed_demon` is a Perk and `ring_of_swiftness` a Relic, and
+	# both are on this shelf.
+	CHEST_SPEED: ["move_mult", "roll_distance", "roll_speed", "roll_charges",
+		"roll_regen", "step_distance", "step_speed", "step_recovery",
+		"slide_speed", "slide_duration"],
+	CHEST_LUCK: ["luck", "drop_chance", "drop_mult", "chest_chance",
+		"chest_offers", "chest_mods", "keep_offer", "extra_chest_kills",
+		"extra_chest_islands", "shop_offers", "shop_discount", "currency_mult",
+		"gold_on_hit", "gold_on_hit_taken", "levelup_per_island"],
+	CHEST_CRITICAL: ["crit_chance", "crit_mult_flat", "mega_crit_chance",
+		"mega_crit_mult", "crit_burst", "crit_burst_radius"],
+	CHEST_ATTACK: ["attack_mult", "melee_attack_mult", "attack_on_kill",
+		"attack_per_island", "proc_coeff_mult", "melee_reach", "melee_delay",
+		"knockback_mult", "shot_size", "spread_add", "projectile_speed_mult",
+		"projectile_bounce", "split_shots", "pierce", "pierce_growth",
+		"ricochet", "homing", "arrow_split", "arrow_homing",
+		"extra_arrow_chance", "bow_draw_mult", "bow_no_nock", "bow_spiral",
+		"windup_per_shot", "windup_cap", "streak_per_hit", "streak_cap",
+		"bleed_chance", "chain_chance", "arc_chance", "nova_chance",
+		"scatter_chance", "mace_chance", "spike_chance", "double_chance",
+		"bomb_chance", "whirlwind_chance"],
+}
+## Prefix rows: every mark a shaft or a claw applies is a basic attack's business.
+const CHEST_PREFIX_KEYS := {CHEST_ATTACK: ["mark_", "death_mark_"]}
+## Tag rows: a row carries the tag, the surface reads it.
+const CHEST_TAG_KEYS := {CHEST_WEAPONS: WEAPON_TAGS}
+## Family rows: basic attacks are the shot and hand families. The ability family
+## - the throw/roll/guard/parry kit and the weapon kit - is not a surface any
+## more: it arrives off a cache, the stall and the hoard, and the ABILITY chest
+## belongs to `AbilityRules`.
+const CHEST_FAMILY_KEYS := {
+	CHEST_ATTACK: [FAMILY_SHOT, FAMILY_HAND],
+}
+
+## The surfaces a row belongs to, most specific first. Computed once with the
+## catalog, so a chest never has to scan 161 rows to ask a question.
+static func chest_surfaces_of(mod_id: String) -> Array[String]:
+	_ensure()
+	var cached: Variant = _surfaces.get(mod_id)
+	if cached is Array:
+		return cached
+	return []
+
+
+## One row's surfaces, from the three rules that define them: a family, a tag,
+## or a key it writes. A row is on every surface it acts on.
+static func _surfaces_for(row: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	var family := str(row.get("family", ""))
+	var row_tags: Array = row.get("tags", [])
+	var stats: Dictionary = row.get("stats", {})
+	for surface in CARD_SURFACES:
+		if (CHEST_FAMILY_KEYS.get(surface, []) as Array).has(family):
+			out.append(surface)
+			continue
+		var matched := false
+		for tag in CHEST_TAG_KEYS.get(surface, []):
+			if row_tags.has(str(tag)):
+				matched = true
+				break
+		if not matched:
+			for key in stats:
+				var name := str(key)
+				if (CHEST_KEYS.get(surface, []) as Array).has(name):
+					matched = true
+					break
+				for prefix in CHEST_PREFIX_KEYS.get(surface, []):
+					if name.begins_with(str(prefix)):
+						matched = true
+						break
+				if matched:
+					break
+		if matched:
+			out.append(surface)
+	return out
+
+
+## Whether a row is one a surface may lay out. An empty surface is the
+## surfaceless cache, which takes whatever the ladder gives it.
+static func in_chest_surface(mod_id: String, surface: String) -> bool:
+	if surface.is_empty():
+		return true
+	return chest_surfaces_of(mod_id).has(surface)
+
+
+# --- the shelf --------------------------------------------------------------
+
+## The rows a surface holds at one tier that one hand can still take.
+## `carrier_tags` narrows the shelf to the rows the body's hands fit and `taken`
+## drops the rows it has already spent, because a chest deals its cards per body.
+## Empty arguments ask the catalog's own question: the whole surface.
+static func shelf(surface: String, tier: String,
+		carrier_tags: Array = [], taken: Array = []) -> Array[String]:
+	_ensure()
+	var out: Array[String] = []
+	for row in MODS:
+		var id := str(row.id)
+		if str(row.rarity) != tier or not ready_of(id):
+			continue
+		if taken.has(id):
+			continue
+		if not in_chest_surface(id, surface):
+			continue
+		if not row_fits_carrier(id, carrier_tags):
+			continue
+		out.append(id)
+	return out
+
+
+## A promise is a whole hand, not a card with a gate in front of it: a surface is
+## only promised at a tier where it can lay out this many cards.
+const SURFACE_MIN_ROWS := 3
+
+
+# --- promises ---------------------------------------------------------------
+
+## A gate's promise: a surface and the one tier the chest lays out. The pair is
+## absolute - nothing downstream rolls the tier again - and the label the player
+## reads is built from it.
+static func promise(surface: String, tier: String) -> Dictionary:
+	return {"surface": surface, "tier": tier}
+
+
+## Whether a promise can be kept: it names a surface that holds a shelf at all,
+## and every hand the chest is dealt to can still lay out a whole hand of it.
+## `hands` is one `{"tags": ..., "taken": ...}` per body; empty asks the
+## party-wide question. A party-wide row count once promised an Ability chest to a
+## dagger body whose own epic shelf was bare, and a shelf a body had spent to its
+## ceiling was promised just as blindly: both stood a chest with nothing in it.
+static func keeps_promise(pr: Dictionary, hands: Array = []) -> bool:
+	var surface := str(pr.get("surface", ""))
+	var tier := str(pr.get("tier", ""))
+	# A skill promise is kept by the catalog, not by this pool: the skills a body
+	# may still be offered are the ledger's fact, so the per-body check happens
+	# when the chest deals (the director's `_ability_offers`).
+	if surface_payout(surface) == PAYOUT_SKILLS:
+		return true
+	if not CARD_SURFACES.has(surface):
+		return not surface.is_empty() and surface_payout(surface) != ""
+	if tier.is_empty():
+		return false
+	if hands.is_empty():
+		return shelf(surface, tier).size() >= SURFACE_MIN_ROWS
+	for hand in hands:
+		var spec: Dictionary = hand
+		if shelf(surface, tier, spec.get("tags", []),
+				spec.get("taken", [])).size() < SURFACE_MIN_ROWS:
+			return false
+	return true
+
+
+## The promise a gate rolls: the island's own tier, the rung an elite trial buys,
+## and then the surface that can still keep it for every body in the party. The
+## raise happens here and nowhere else, so the shelf a surface is checked against
+## and the tier its chest lays out cannot drift apart.
+##
+## Greed is never a promise - it is the boss's hoard and the stall's bargain - and
+## `taken` surfaces are only repeated once the rest of the board is spent.
+static func roll_promise(rng: RandomNumberGenerator, island: int, luck: int,
+		hands: Array = [], elite: bool = false,
+		taken: Array = []) -> Dictionary:
+	var tier := _roll_tier(rng, tier_weights(
+		[RARITY_COMMON, RARITY_EPIC, RARITY_LEGENDARY], luck, island))
+	if tier.is_empty():
+		tier = RARITY_COMMON
+	if elite:
+		tier = raise_tier(tier)
+	return promise(_roll_surface(rng, tier, hands, taken), tier)
+
+
+## One step up the ladder: the elite trial's premium on a promise it priced.
+static func raise_tier(tier: String) -> String:
+	return RARITY_EPIC if tier == RARITY_COMMON else RARITY_LEGENDARY
+
+
+## Which surface a gate promises at a tier: every surface that can keep that
+## promise, weighted, and never one the board already carries while another is
+## left. A repeat beats a promise the chest cannot keep.
+static func _roll_surface(rng: RandomNumberGenerator, tier: String,
+		hands: Array, taken: Array) -> String:
+	var pool: Array[String] = []
+	var weights: Array[float] = []
+	for surface in CHEST_SURFACES:
+		if taken.has(surface) or not keeps_promise(promise(surface, tier), hands):
+			continue
+		pool.append(surface)
+		weights.append(float(CHEST_SURFACE_WEIGHT.get(surface, 1.0)))
+	if pool.is_empty():
+		for surface in CHEST_SURFACES:
+			if keeps_promise(promise(surface, tier), hands):
+				pool.append(surface)
+				weights.append(float(CHEST_SURFACE_WEIGHT.get(surface, 1.0)))
+	if pool.is_empty():
+		return CHEST_ATTACK
+	var total := 0.0
+	for weight in weights:
+		total += weight
+	var roll := rng.randf_range(0.0, total)
+	var walked := 0.0
+	for index in pool.size():
+		walked += weights[index]
+		if roll <= walked:
+			return str(pool[index])
+	return str(pool[pool.size() - 1])
+
+
+## The cards a promise stands in front of one body: the promised surface's own
+## shelf first, then the same tier across the pool until there are `count` of
+## them. A chest never stands with one card in it, or none. The top-up only
+## happens when the body's own shelf is short - rows it has spent to their
+## ceiling, or a hand it swapped into after the gate was priced - and it keeps the
+## part of the promise the player is owed: the tier on the label.
+static func deal(rng: RandomNumberGenerator, pr: Dictionary, count: int = 3,
+		exclude: Array = [], carrier_tags: Array = []) -> Array[String]:
+	var tier := str(pr.get("tier", ""))
+	var taken: Dictionary = {}
+	for id in exclude:
+		taken[str(id)] = true
+	var out := _take_rows(rng, str(pr.get("surface", "")), tier, count, taken,
+		carrier_tags)
+	if out.size() >= count:
+		return out
+	out.append_array(_take_rows(rng, "", tier, count - out.size(), taken,
+		carrier_tags))
+	return out
+
+
+## What a key chest or a gear chest pays on the open.
+static func payout_count(tier: String) -> int:
+	return maxi(1, int(PAYOUT_BY_TIER.get(tier, 1)))
+
+
+## The piece-count a lower tier pays, and the set floor a higher one welds on.
+static func tier_rank(tier: String) -> int:
+	var index := [RARITY_COMMON, RARITY_EPIC, RARITY_LEGENDARY].find(tier)
+	return maxi(0, index)
+
+
+static func surface_label(surface: String) -> String:
+	return str(CHEST_SURFACE_LABEL.get(surface, surface.to_upper()))
+
+
+static func surface_payout(surface: String) -> String:
+	return str(CHEST_SURFACE_PAYOUT.get(surface, ""))
+
+
 ## The ability family is not the active ability catalog: its rows are run upgrades
 ## to the throw, roll, guard and parry buttons, plus the weapon-family upgrades
 ## below. This is the verb each of the verb rows modifies, so an upgrade card, the
@@ -80,15 +431,14 @@ static func row_fits_carrier(mod_id: String, carrier_tags: Array) -> bool:
 	return false
 
 
-## The surfaces. A surface's ladder row is the only thing that decides whether a
-## tier can appear at all, which is what stops luck from opening a tier the
-## surface does not sell.
-const SURFACE_PEDESTAL := "pedestal"
-const SURFACE_SHOP_PEDESTAL := "shop_pedestal"
-const SURFACE_CHEST := "chest"
-const SURFACE_HOARD := "hoard"
-const SURFACE_STALL := "stall"
-const SURFACE_TOTEM := "totem"
+## The unpromised sources: where a row nobody promised comes from. Each one's
+## tier list is the only thing that decides whether a tier can appear at all,
+## which is what stops luck from opening a tier the source does not sell. A
+## source is not a surface - a surface is what a gate promises.
+const SOURCE_WELD := "weld"
+const SOURCE_CACHE := "cache"
+const SOURCE_HOARD := "hoard"
+const SOURCE_STALL := "stall"
 
 ## The tier roll by island: `common / epic / legendary` out of 100, before luck.
 ## Island 5 and beyond holds the fifth row, so a run that never leaves the first
@@ -106,12 +456,9 @@ const LADDER := [
 const LUCK_COMMON_TO_EPIC := 6.0
 const LUCK_EPIC_TO_LEGENDARY := 4.0
 const LUCK_LEGENDARY_CAP := 35.0
-## A reward chest is one mod with no choice, so its legendary weight is a quarter
-## of the ladder's: 4% on island 4, 5.5% on island 5+.
-const CHEST_LEGENDARY_SCALE := 0.25
 ## The greed share a surface that carries greed carves out of the roll, from
-## island 2 on. The source's greed is 6.1% of its pool; ours is the totem's six
-## levels in ten, so a chest is the only place greed arrives without a bargain.
+## island 2 on: the boss's hoard and the stall are the two surfaces that sell it,
+## so greed is a bargain the party buys and never a gate's promise.
 const GREED_SHARE := 6.0
 
 ## The stall's price: `22 + 5 x level` for a common, and a flat surcharge by tier.
@@ -779,7 +1126,8 @@ const MODS := [
 	{
 		"id": "magical_nock", "name": "Magical Nock", "family": FAMILY_ABILITY,
 		"tags": ["bow"], "rarity": RARITY_LEGENDARY, "max_stacks": 1,
-		"description": "The bow no longer has to be drawn: arrows leave at once.",
+		"description": "Arrows nock themselves: no reach for the quiver, no " +
+"re-nock. The string still has to be drawn.",
 		"stats": {"bow_no_nock": 1.0}, "flags": {},
 	},
 	{
@@ -800,6 +1148,17 @@ const MODS := [
 		"tags": ["bow"], "rarity": RARITY_LEGENDARY, "max_stacks": 2,
 		"description": "An extra arrow and a chance for one more.",
 		"stats": {"arrow_split": 1.0, "extra_arrow_chance": 0.1}, "flags": {},
+	},
+	# The bar's own upgrade: one more skill key for this run, held open as a
+	# placeholder until a skill is put on it. Five cards take the bar from its five
+	# keys to ten, and the ceiling is the run's, not the card's - `hotbar_slots` is
+	# clamped by `AbilityRules.MAX_SLOT_COUNT` on the rig that fires it.
+	{
+		"id": "widened_bar", "name": "Widened Bar", "family": FAMILY_ABILITY,
+		"tags": ["any"], "rarity": RARITY_LEGENDARY, "max_stacks": 5,
+		"description": "One more skill key for this run, up to ten. The key waits " +
+"empty until a skill is put on it.",
+		"stats": {"hotbar_slots": 1.0}, "flags": {},
 	},
 
 	# --- perk: the body ------------------------------------------------------
@@ -882,7 +1241,7 @@ const MODS := [
 	{
 		"id": "collectors_bounty", "name": "Collector's Bounty",
 		"family": FAMILY_PERK, "rarity": RARITY_COMMON, "max_stacks": 8,
-		"description": "+25% gold from every kill, chest and totem.",
+		"description": "+25% gold from every kill and chest.",
 		"stats": {"currency_mult": 0.25}, "flags": {},
 	},
 	{
@@ -923,6 +1282,34 @@ const MODS := [
 		"description": "A step that is never quite where the blow lands: +10% " +
 "dodge, hyperbolic toward 60%.",
 		"stats": {"dodge_chance": 1.0}, "flags": {},
+	},
+	{
+		"id": "lightfoot", "name": "Lightfoot", "family": FAMILY_PERK,
+		"rarity": RARITY_COMMON, "max_stacks": 4,
+		"description": "The side step carries a half pace further: +0.30 m of " +
+"travel on every step.",
+		"stats": {"step_distance": 0.30}, "flags": {},
+	},
+	{
+		"id": "spring_step", "name": "Spring Step", "family": FAMILY_PERK,
+		"rarity": RARITY_COMMON, "max_stacks": 3,
+		"description": "The step comes back sooner: 15% off its recovery, so it " +
+"chains a beat earlier.",
+		"stats": {"step_recovery": 0.15}, "flags": {},
+	},
+	{
+		"id": "quick_heel", "name": "Quick Heel", "family": FAMILY_PERK,
+		"rarity": RARITY_COMMON, "max_stacks": 3,
+		"description": "The same step, taken quicker: +15% side step speed, same " +
+"distance off the same floor.",
+		"stats": {"step_speed": 0.15}, "flags": {},
+	},
+	{
+		"id": "skirmish_legs", "name": "Skirmish Legs", "family": FAMILY_PERK,
+		"rarity": RARITY_COMMON, "max_stacks": 5,
+		"description": "The walk keeps up with the fight: +4% movement speed and " +
+"0.10 m more on every side step.",
+		"stats": {"move_mult": 0.04, "step_distance": 0.10}, "flags": {},
 	},
 	{
 		"id": "health_is_power", "name": "Health Is Power", "family": FAMILY_PERK,
@@ -980,8 +1367,8 @@ const MODS := [
 	{
 		"id": "big_chests", "name": "Big Chests", "family": FAMILY_PERK,
 		"rarity": RARITY_EPIC, "max_stacks": 2,
-		"description": "The pedestal lays out one more card.",
-		"stats": {"pedestal_offers": 1.0}, "flags": {},
+		"description": "The reward chest lays out one more card.",
+		"stats": {"chest_offers": 1.0}, "flags": {},
 	},
 	{
 		"id": "crit_blast", "name": "Critical Blast", "family": FAMILY_PERK,
@@ -1004,10 +1391,37 @@ const MODS := [
 		"stats": {"chest_chance": 1.0}, "flags": {},
 	},
 	{
+		"id": "rolling_start", "name": "Rolling Start", "family": FAMILY_PERK,
+		"rarity": RARITY_EPIC, "max_stacks": 4,
+		"description": "The roll leaves the ground faster: +12% roll speed, and " +
+"the same clock carries it further.",
+		"stats": {"roll_speed": 0.12}, "flags": {},
+	},
+	{
+		"id": "hunter_pace", "name": "Hunter's Pace", "family": FAMILY_PERK,
+		"rarity": RARITY_EPIC, "max_stacks": 3,
+		"description": "A long stride that keeps: +10% movement speed, walk and " +
+"sprint alike.",
+		"stats": {"move_mult": 0.10}, "flags": {},
+	},
+	{
+		"id": "low_slide", "name": "Low Slide", "family": FAMILY_PERK,
+		"rarity": RARITY_EPIC, "max_stacks": 3,
+		"description": "The sprint slide runs a fifth longer: +18% of its own " +
+"length, same low profile.",
+		"stats": {"slide_duration": 0.18}, "flags": {},
+	},
+	{
+		"id": "slipstream", "name": "Slipstream", "family": FAMILY_PERK,
+		"rarity": RARITY_EPIC, "max_stacks": 3,
+		"description": "The slide starts and ends quicker: +12% slide speed.",
+		"stats": {"slide_speed": 0.12}, "flags": {},
+	},
+	{
 		"id": "rare_treasure", "name": "Rare Treasure", "family": FAMILY_PERK,
 		"rarity": RARITY_LEGENDARY, "max_stacks": 3,
-		"description": "A body has a 3% chance a stack to leave an upgrade card on " +
-"the ground, for whoever reaches it.",
+		"description": "A body has a 3% chance a stack to leave a small cache " +
+"holding one upgrade card, for whoever reaches it.",
 		"stats": {"drop_chance": 1.0}, "flags": {},
 	},
 	{
@@ -1032,7 +1446,7 @@ const MODS := [
 	{
 		"id": "faulty_chests", "name": "Faulty Chests", "family": FAMILY_PERK,
 		"rarity": RARITY_LEGENDARY, "max_stacks": 2,
-		"description": "A pedestal card you did not take stays on the ground as a " +
+		"description": "A chest card you did not take stays on the ground as a " +
 "pickup, once a card a stack.",
 		"stats": {"keep_offer": 1.0}, "flags": {},
 	},
@@ -1044,6 +1458,26 @@ const MODS := [
 "5 m.",
 		"stats": {"death_marks.storm": 25.0, "death_mark_radius": 5.0},
 		"flags": {},
+	},
+	{
+		"id": "long_roll", "name": "Long Roll", "family": FAMILY_PERK,
+		"rarity": RARITY_LEGENDARY, "max_stacks": 2,
+		"description": "The roll becomes a dive: +1.5 m of travel on every one, " +
+"on the roll's own clock.",
+		"stats": {"roll_distance": 1.5}, "flags": {},
+	},
+	{
+		"id": "thoroughbred", "name": "Thoroughbred", "family": FAMILY_PERK,
+		"rarity": RARITY_LEGENDARY, "max_stacks": 3,
+		"description": "The island is crossed at a canter: +22% movement speed.",
+		"stats": {"move_mult": 0.22}, "flags": {},
+	},
+	{
+		"id": "ground_skimmer", "name": "Ground Skimmer", "family": FAMILY_PERK,
+		"rarity": RARITY_LEGENDARY, "max_stacks": 2,
+		"description": "The slide skims further and faster: +25% of its speed and " +
+"of its length together.",
+		"stats": {"slide_speed": 0.25, "slide_duration": 0.25}, "flags": {},
 	},
 	{
 		"id": "glass_cannon", "name": "Glass Cannon", "family": FAMILY_PERK,
@@ -1108,9 +1542,9 @@ const MODS := [
 	{
 		"id": "hoarder", "name": "Hoarder", "family": FAMILY_PERK,
 		"rarity": RARITY_GREED, "max_stacks": 2,
-		"description": "An extra chest every island, but the pedestal only lays " +
+		"description": "An extra chest every island, but the reward chest lays " +
 "out two cards from now on.",
-		"stats": {"extra_chest_islands": 1.0, "pedestal_offers": -1.0},
+		"stats": {"extra_chest_islands": 1.0, "chest_offers": -1.0},
 		"flags": {},
 	},
 	{
@@ -1211,6 +1645,7 @@ const MODS := [
 ]
 
 static var _by_id: Dictionary = {}
+static var _surfaces: Dictionary = {}   # mod id -> Array[String] of chest surfaces
 static var _built := false
 
 
@@ -1219,8 +1654,11 @@ static func _ensure() -> void:
 		return
 	_built = true
 	_by_id.clear()
+	_surfaces.clear()
 	for row in MODS:
-		_by_id[str(row.id)] = row
+		var id := str(row.id)
+		_by_id[id] = row
+		_surfaces[id] = _surfaces_for(row)
 
 
 static func all() -> Array:
@@ -1301,29 +1739,28 @@ static func max_stacks(mod_id: String) -> int:
 
 # --- the ladder -------------------------------------------------------------
 
-## The tier roll an island stands on, before luck or a surface's own gate.
+## The tier roll an island stands on, before luck or a source's own gate.
 static func ladder_for(island: int) -> Dictionary:
 	return LADDER[clampi(island, 1, LADDER.size()) - 1]
 
 
-## Which tiers a surface may sell at all. This is the one rule luck cannot bend:
-## a pedestal never carries a legendary, whatever the body's luck.
-static func surface_tiers(surface: String, island: int) -> Array[String]:
+## Which tiers a *source* may sell at all - the cache, the stall, the weld or the
+## hoard - whatever the luck. This is the one rule luck cannot bend:
+## a weld never carries a legendary, whatever the body's luck.
+##
+## A source is not a surface: a surface is what a gate promises, a source is where
+## an unpromised row comes from.
+static func source_tiers(source: String, island: int) -> Array[String]:
 	var out: Array[String] = []
-	match surface:
-		SURFACE_TOTEM:
-			out.append(RARITY_GREED)
-			return out
-		SURFACE_PEDESTAL:
+	match source:
+		SOURCE_WELD:
+			# The modifiers a chest's piece welds on: commons, epics from the
+			# second island, and never the ceiling.
 			out.append(RARITY_COMMON)
 			if island >= 2:
 				out.append(RARITY_EPIC)
 			return out
-		SURFACE_SHOP_PEDESTAL:
-			out.append(RARITY_COMMON)
-			out.append(RARITY_EPIC)
-			return out
-		SURFACE_STALL:
+		SOURCE_STALL:
 			out.append(RARITY_COMMON)
 			out.append(RARITY_EPIC)
 			if island >= 3:
@@ -1331,15 +1768,16 @@ static func surface_tiers(surface: String, island: int) -> Array[String]:
 			if island >= 2:
 				out.append(RARITY_GREED)
 			return out
-		SURFACE_HOARD:
+		SOURCE_HOARD:
 			out.append(RARITY_EPIC)
 			out.append(RARITY_LEGENDARY)
 			if island >= 2:
 				out.append(RARITY_GREED)
 			return out
 		_:
-			# The reward chest: commons and epics always, a legendary from island
-			# 4 at a quarter weight, greed from island 2.
+			# The cache: commons and epics always, a legendary from island 4, greed
+			# from island 2. A gate's chest never rolls this - it promises one
+			# surface at one tier and lays out exactly that.
 			out.append(RARITY_COMMON)
 			out.append(RARITY_EPIC)
 			if island >= 4:
@@ -1349,19 +1787,21 @@ static func surface_tiers(surface: String, island: int) -> Array[String]:
 			return out
 
 
-## The weights a surface's roll uses: the island's ladder row, luck's shift,
-## the chest's quarter legendary, the greed share, and then only the tiers the
-## surface sells. The result sums to 100 unless nothing is left.
+## The weights one source's roll uses inside the tiers it sells: the island's
+## ladder row, bent by luck. Mass the ladder puts outside the band is never
+## invented, and a band the ladder cannot price at all is priced evenly rather
+## than left empty - that empty band was what stood a legendary chest on island
+## one with nothing in it. The result sums to 100.
 static func tier_weights(tiers: Array, luck: int, island: int,
-		legendary_scale: float = 1.0, greedy: bool = false) -> Dictionary:
+		greedy: bool = false) -> Dictionary:
 	var row := ladder_for(island)
 	var shift := float(maxi(0, luck))
 	var common := maxf(0.0, float(row.common) - LUCK_COMMON_TO_EPIC * shift)
 	var epic := maxf(0.0, float(row.epic) + LUCK_COMMON_TO_EPIC * shift
 		- LUCK_EPIC_TO_LEGENDARY * shift)
 	var unluck := float(row.legendary) + LUCK_EPIC_TO_LEGENDARY * shift
-	var legendary := clampf(unluck * legendary_scale, 0.0, LUCK_LEGENDARY_CAP)
-	# A surface that quarters the legendary's weight gives the difference back to
+	var legendary := clampf(unluck, 0.0, LUCK_LEGENDARY_CAP)
+	# A source that quarters the legendary's weight gives the difference back to
 	# the epics: the design's 4% is a share of a hundred, not of eighty-eight.
 	epic += maxf(0.0, unluck - legendary)
 	# The greed share is carved out of the commons and epics, never out of the
@@ -1382,13 +1822,22 @@ static func tier_weights(tiers: Array, luck: int, island: int,
 		var weight := float(raw.get(str(tier), 0.0))
 		if weight > 0.0:
 			out[str(tier)] = weight
+	if out.is_empty():
+		for tier in tiers:
+			out[str(tier)] = 100.0 / float(maxi(1, tiers.size()))
+		return out
 	out = _normalise(out)
 	# The cap is a share of the finished roll, so it is applied after the roll is
-	# a hundred: four stacks of luck must still leave commons to find.
+	# a hundred: four stacks of luck must still leave commons to find. The mass it
+	# frees goes to another tier the band actually sells - a band of the ceiling
+	# alone has nowhere to put it, and the promise is the ceiling.
 	var held := float(out.get(RARITY_LEGENDARY, 0.0))
 	if held > LUCK_LEGENDARY_CAP:
-		out[RARITY_LEGENDARY] = LUCK_LEGENDARY_CAP
-		out[RARITY_EPIC] = float(out.get(RARITY_EPIC, 0.0)) + held - LUCK_LEGENDARY_CAP
+		for other in [RARITY_EPIC, RARITY_COMMON, RARITY_GREED]:
+			if out.has(other):
+				out[RARITY_LEGENDARY] = LUCK_LEGENDARY_CAP
+				out[other] = float(out[other]) + held - LUCK_LEGENDARY_CAP
+				break
 	return out
 
 
@@ -1410,59 +1859,53 @@ static func stall_price(tier: String, level: int) -> int:
 		+ float(TIER_SURCHARGE.get(tier, 0.0))))
 
 
-# --- drafting ---------------------------------------------------------------
+# --- one unpromised shelf ---------------------------------------------------
 
-## One draft of `count` distinct offers. `tiers` is the surface's own ladder row
-## (an Array of tier names) or, for the old call shape, a boolean gate: `false`
-## is the pedestal's ladder and `true` lets every tier in, greed included.
+## `count` distinct rows off a source nobody promised, for one body: the island's
+## ladder picks the tier among the ones the source sells, luck bends the weights,
+## and `exclude` drops the rows the body has spent. This is the cache, the stall,
+## the weld and the hoard - every roll that is *not* a promise.
 ##
-## `luck` only ever shifts weight between the tiers the surface already sells,
-## and `island` is 1-based. The roll happens here so every surface - pedestal,
-## chest, hoard and stall - answers the same rules.
-static func draft(rng: RandomNumberGenerator, count: int = 3, tiers: Variant = null,
-		luck: int = 0, island: int = 1, exclude: Array = [],
+## A gate's chest never comes through here: its tier is settled on the label.
+static func roll_shelf(rng: RandomNumberGenerator, source: String, island: int,
+		count: int = 3, luck: int = 0, exclude: Array = [],
 		carrier_tags: Array = []) -> Array[String]:
 	_ensure()
-	var allowed := _resolve_tiers(tiers, island)
+	var allowed := source_tiers(source, island)
 	var out: Array[String] = []
 	if allowed.is_empty() or count <= 0:
 		return out
+	var weights := tier_weights(allowed, luck, island, allowed.has(RARITY_GREED))
 	var taken: Dictionary = {}
 	for id in exclude:
 		taken[str(id)] = true
-	var weights := tier_weights(allowed,
-		luck, island, 1.0, allowed.has(RARITY_GREED))
-	# A surface whose roll is all greed (the totem's own row) needs the share,
-	# not the ladder: one tier means one tier.
-	if weights.size() == 1:
-		var only := str(weights.keys()[0])
-		weights = {only: 100.0}
-	var misses := 0
 	while out.size() < count and not weights.is_empty():
 		var tier := _roll_tier(rng, weights)
+		if tier.is_empty():
+			break
 		var id := _pick_in_tier(rng, tier, taken, carrier_tags)
 		if id.is_empty():
 			# That tier has nothing left to offer this body: drop it and roll the
-			# rest rather than spend the draft on a dead card.
-			misses += 1
+			# rest rather than spend the count on a dead card.
 			weights.erase(tier)
 			weights = _normalise(weights)
-			if misses > RARITIES.size() * 2:
-				break
 			continue
 		out.append(id)
 		taken[id] = true
 	return out
 
 
-static func _resolve_tiers(tiers: Variant, island: int) -> Array[String]:
-	if tiers is bool:
-		# The old call shape: `false` is the pedestal, `true` lets greed in.
-		return surface_tiers(SURFACE_STALL if tiers else SURFACE_PEDESTAL, island)
+## `count` distinct rows of one tier and one surface off a fixed `taken` set: the
+## only way a card chest deals. A fixed tier is a promise, so no ladder is read.
+static func _take_rows(rng: RandomNumberGenerator, surface: String, tier: String,
+		count: int, taken: Dictionary, carrier_tags: Array = []) -> Array[String]:
 	var out: Array[String] = []
-	if tiers is Array:
-		for tier in tiers:
-			out.append(str(tier))
+	while out.size() < count:
+		var id := _pick_in_tier(rng, tier, taken, carrier_tags, surface)
+		if id.is_empty():
+			break
+		out.append(id)
+		taken[id] = true
 	return out
 
 
@@ -1484,11 +1927,14 @@ static func _roll_tier(rng: RandomNumberGenerator, weights: Dictionary) -> Strin
 
 
 static func _pick_in_tier(rng: RandomNumberGenerator, tier: String,
-		taken: Dictionary, carrier_tags: Array = []) -> String:
+		taken: Dictionary, carrier_tags: Array = [],
+		chest_surface: String = "") -> String:
 	var pool: Array[String] = []
 	for row in MODS:
 		var id := str(row.id)
 		if str(row.rarity) != tier or taken.has(id) or not ready_of(id):
+			continue
+		if not in_chest_surface(id, chest_surface):
 			continue
 		if not row_fits_carrier(id, carrier_tags):
 			continue
@@ -1503,8 +1949,8 @@ static func _pick_in_tier(rng: RandomNumberGenerator, tier: String,
 ## ladder rolls `count - 1` and the legendary is the row that is written down.
 static func hoard(rng: RandomNumberGenerator, count: int, luck: int, island: int,
 		exclude: Array = [], carrier_tags: Array = []) -> Array[String]:
-	var out := draft(rng, maxi(0, count - 1),
-		surface_tiers(SURFACE_HOARD, island), luck, island, exclude, carrier_tags)
+	var out := roll_shelf(rng, SOURCE_HOARD, island, maxi(0, count - 1), luck,
+		exclude, carrier_tags)
 	var taken: Array = exclude.duplicate()
 	for id in out:
 		taken.append(id)
@@ -1523,19 +1969,3 @@ static func pick_of_tier(rng: RandomNumberGenerator, tier: String,
 	for id in taken:
 		exclude[str(id)] = true
 	return _pick_in_tier(rng, tier, exclude, carrier_tags)
-
-
-## A greed totem's own offer: always a greed mod, never one already maxed out.
-static func greed_offer(rng: RandomNumberGenerator, stacks: Dictionary) -> String:
-	_ensure()
-	var pool: Array[String] = []
-	for row in MODS:
-		if str(row.rarity) != RARITY_GREED:
-			continue
-		var id := str(row.id)
-		if not ready_of(id) or int(stacks.get(id, 0)) >= max_stacks(id):
-			continue
-		pool.append(id)
-	if pool.is_empty():
-		return ""
-	return pool[rng.randi_range(0, pool.size() - 1)]

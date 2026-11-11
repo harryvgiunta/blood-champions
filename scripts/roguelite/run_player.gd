@@ -99,12 +99,10 @@ func bind(owner_body, run_director, owner_peer: int, owner_merc: int,
 
 
 func _set_profiles() -> void:
+	# An empty hand has an empty profile: the run reads what the body's kit
+	# carries, and never invents a starter the inventory does not hold.
 	ranged_profile = Weapons.resolve(ranged_id)
 	melee_profile = Weapons.resolve(melee_id)
-	if ranged_profile.is_empty():
-		ranged_profile = Weapons.resolve(Weapons.STARTER_RANGED)
-	if melee_profile.is_empty():
-		melee_profile = Weapons.resolve(Weapons.STARTER_MELEE)
 
 
 func unbind() -> void:
@@ -113,6 +111,9 @@ func unbind() -> void:
 		body.roguelite_hold_downed = false
 		if is_instance_valid(body.rig):
 			body.rig.run_rate_scale = 1.0
+			# The extra keys were the run's: a body back in the square fires the
+			# five the game ships with again.
+			body.rig.ability_extra_slots = 0
 		body = null
 	director = null
 
@@ -272,6 +273,26 @@ func apply_stats() -> void:
 		body.max_health = pool
 		body.health = minf(float(body.health), pool)
 	_apply_rate()
+	_apply_bar_keys()
+
+
+## The keys a run's own upgrades bought this body. The bar is the rig's, so the
+## figure rides on the rig and `AbilityRules.granted` lays the row out to it: a
+## legendary slot upgrade is a key the fight can fire, not a promise on a screen.
+## The ceiling is `AbilityRules.MAX_SLOT_COUNT` minus the five the game ships with.
+func _apply_bar_keys() -> void:
+	if body == null or not is_instance_valid(body) or engine == null:
+		return
+	var rig = body.get("rig")
+	if rig == null or not is_instance_valid(rig):
+		return
+	var bonus := clampi(int(engine.stat("hotbar_slots")), 0,
+		AbilityRules.MAX_SLOT_COUNT - AbilityRules.SLOT_COUNT)
+	var raw: Variant = rig.get("ability_extra_slots")
+	var have := int(raw) if raw is int or raw is float else 0
+	if have == bonus:
+		return
+	rig.set("ability_extra_slots", bonus)
 
 
 ## Every multiplier that does not need to know what it is hitting: the rows with
@@ -344,6 +365,16 @@ func move_scale() -> float:
 	return 1.0 if engine == null else engine.move_scale()
 
 
+## The Speed chest's whole business: the walk's own scale and the tuning the
+## roll, the grounded side step and the sprint slide ask for. It hands back the
+## engine's own aggregate rather than a copy, so a body tuning itself every frame
+## allocates nothing; the keys are the surface's own list in `mod_catalog.gd`.
+func movement() -> Dictionary:
+	if engine == null:
+		return {}
+	return engine.stats()
+
+
 func melee_reach() -> float:
 	return 0.0 if engine == null else engine.stat("melee_reach")
 
@@ -408,14 +439,11 @@ func heal(amount: float) -> void:
 	body.health = minf(float(body.max_health), float(body.health) + amount)
 
 
-# --- the draft -------------------------------------------------------------
+# --- the chest's draft -----------------------------------------------------
 
-## The pedestal's own row: three cards, one per Big Chests, one per three points
-## of the party's best luck, and never a row already at its ceiling. The ladder is
-## the pedestal's, so no stack of Streamer Loot can make it carry a legendary.
 ## The ability-family tags this body can use right now: its held family, the
-## group that family belongs to, and the any-hand wildcard. A draft or a chest
-## asks for this so a bow is never handed a staff-only card.
+## group that family belongs to, and the any-hand wildcard. A chest asks for this
+## so a bow is never handed a staff-only card.
 func carrier_tags() -> Array[String]:
 	var out: Array[String] = []
 	var rig = body.get("rig") if body != null and is_instance_valid(body) else null
@@ -434,21 +462,28 @@ func carrier_tags() -> Array[String]:
 	return out
 
 
-func draft(party_luck: int = -1, surface: String = Mods.SURFACE_PEDESTAL) -> Array[String]:
-	var island := 1
-	if director != null:
-		island = int(director.get("stage_index")) + 1
-	var best: int = maxi(luck(), party_luck if party_luck >= 0 else 0)
-	var single := surface == Mods.SURFACE_SHOP_PEDESTAL
-	var count := 1 if single else 3 + int(best / 3) \
-		+ int(round(engine.stat("pedestal_offers")))
-	count = maxi(1, count)
-	var exclude: Array = []
+## Every row this body cannot take again: the ones already at their ceiling. A
+## promise asks for this before it is made, so the chest it stands can still fill
+## this body's hand.
+func maxed_mods() -> Array[String]:
+	var out: Array[String] = []
+	if engine == null:
+		return out
 	for id in engine.stacks:
 		if int(engine.stacks[id]) >= Mods.max_stacks(str(id)):
-			exclude.append(str(id))
-	return Mods.draft(engine.rng, count, Mods.surface_tiers(surface, island),
-		best, island, exclude, carrier_tags())
+			out.append(str(id))
+	return out
+
+
+## The chest's own row: `count` legal cards off the promise the gate named, never
+## a row already at its ceiling, and never fewer than a choice - a bare shelf is
+## topped up at the promised tier rather than left empty. Three cards, one more
+## per `Big Chests` stack and one fewer per `Hoarder`, and the body picks one: the
+## chest does not hand it a random row.
+func chest_draft(chest_surface: String, tier: String, count: int = 0) -> Array[String]:
+	var total := count if count > 0 else 3 + int(round(engine.stat("chest_offers")))
+	return Mods.deal(engine.rng, Mods.promise(chest_surface, tier),
+		maxi(1, total), maxed_mods(), carrier_tags())
 
 
 func take_mod(mod_id: String) -> Dictionary:
@@ -826,6 +861,10 @@ func stage_clear() -> void:
 
 func revive_for_clear() -> bool:
 	if body == null or not is_instance_valid(body):
+		return false
+	# The chest and the level's clear are the co-op contract for a soul: a
+	# hireling whose ten seconds ran out is gone, and a box does not hire him back.
+	if _flag(body, "expendable", false):
 		return false
 	if not _flag(body, "downed", false) or not _flag(body, "alive", true):
 		return false

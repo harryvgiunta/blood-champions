@@ -55,6 +55,10 @@ var damage_filter: Callable = Callable()
 ## on-hit chain. Never called on a replica: a guest draws the flight, the host
 ## rolls the consequence.
 var on_hit: Callable = Callable()
+## Health a landed shaft pays the body that loosed it back, bound at launch off
+## the bow's own row (`Archer.bow_heal_on_hit`). A wound for a wound: only the
+## authority pays it, and a shaft that meets nothing pays nothing.
+var heal_on_hit := 0.0
 var _bounced: Dictionary = {}
 ## Backward reconciliation for a shaft a client released: how far behind the
 ## host that peer was drawing, and the history to rewind targets to.
@@ -151,6 +155,7 @@ func _fly(delta: float) -> void:
 				collider.take_damage(_filtered(collider, hit.position), source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
 				_notify_hit(collider, hit.position)
+				_pay_shooter()
 			pierce -= 1
 			# Piercing Wave pays the next body for every body already opened.
 			damage *= 1.0 + maxf(pierce_growth, 0.0)
@@ -184,8 +189,11 @@ func _fly(delta: float) -> void:
 			# the next one instead of settling: it is one projectile with several
 			# victims, not several projectiles.
 			if hit_enemy and not hit_player and _try_bounce(collider, hit.position):
+				_pay_shooter()
 				return
 			_notify_hit(collider, hit.position)
+			if hit_enemy and not hit_player:
+				_pay_shooter()
 		# A shield intercepts the arrow without transferring damage to its
 		# owner. Players and shields keep the shaft so it visibly sticks where
 		# it landed; the arrow still times out with the existing age limit.
@@ -269,6 +277,18 @@ func _notify_hit(collider: Object, at: Vector3) -> void:
 	on_hit.call(collider, at, damage, crit, proc_coeff)
 
 
+## Health on hit: the bow that loosed this shaft pays its shooter back for the
+## body it just opened. Only the authority pays - a replica draws the flight and
+## none of its consequence - and a body that has no health of its own to mend
+## (a mob, a fixture) is left alone rather than guessed at.
+func _pay_shooter() -> void:
+	if heal_on_hit <= 0.0 or not authoritative_damage:
+		return
+	if not is_instance_valid(shooter) or not shooter.has_method("heal_from_hit"):
+		return
+	shooter.heal_from_hit(heal_on_hit)
+
+
 ## The wound's own price: the shooter's range rows are asked here, at the point
 ## the shaft is about to open, and nowhere else.
 func _filtered(_target, at: Vector3) -> float:
@@ -304,6 +324,7 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 			candidate.take_damage(_filtered(candidate, point),source_id,headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
 			_notify_hit(candidate, point)
+			_pay_shooter()
 		impacted.emit(true,point)
 		return true
 	return false

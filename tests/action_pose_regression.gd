@@ -427,6 +427,7 @@ func check_guard(rig: Node3D, size: int) -> void:
 	var closest_torso := INF
 	var flat_forward := INF
 	var palms_ahead := INF
+	var right := forward.cross(Vector3.UP)
 	for frame in 90:
 		rig.advance_animation(1.0/60.0)
 		check(rig.is_blocking(),"The guard stays raised for the whole loop")
@@ -435,8 +436,9 @@ func check_guard(rig: Node3D, size: int) -> void:
 		var base: Vector3 = rig.get_blade_base("right")
 		var tip: Vector3 = rig.get_blade_tip("right")
 		var blade: Vector3 = (tip-base).normalized()
-		check(blade.y > 0.85,
-			"The guard stands the blade up rather than laying it across the chest (%.2f)" % blade.y)
+		check(blade.y > 0.55 and absf(blade.dot(right)) > 0.35,
+			"The guard lays the blade on the diagonal across the front rather than standing it straight up or pointing it at the attacker (%.2f up, %.2f across)"
+				% [blade.y,absf(blade.dot(right))])
 		check((base-rig.global_position).dot(forward) > 0.22,
 			"The hilt is held out in front of the chest, not inside it (%.3f)" % (base-rig.global_position).dot(forward))
 		check(tip.y-rig.global_position.y > 1.9,"The held blade covers the head (tip %.2f)" % (tip.y-rig.global_position.y))

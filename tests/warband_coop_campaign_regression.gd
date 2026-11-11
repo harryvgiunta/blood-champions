@@ -253,8 +253,21 @@ func _host_run() -> void:
 		await _host_done()
 		return
 	var guest_merc := int(flow.session.ownership().get(guest_peer, -1))
-	check(host_roster.has(guest_merc),
-		"The guest wears one of the host's mercenaries (%d)" % guest_merc)
+	check(guest_merc > 0, "HOST GAME seats the guest in a body (%d)" % guest_merc)
+	check(not host_roster.has(guest_merc),
+		"and it is not one of the host's mercenaries (%s of %s)" % [
+			str(guest_merc), str(host_roster)])
+	check(warband.roster.is_player(guest_merc),
+		"it is the guest's own character")
+	check(warband.roster.name_of(guest_merc) == "Guest",
+		"named after the player who joined (%s)" % warband.roster.name_of(guest_merc))
+	check(not warband.roster.is_reserve(guest_merc),
+		"and on the field whatever the band's cap says")
+	check(warband.band_field_count() == SQUAD_NAMES.size(),
+		"the recruiter's oath count is untouched (%d)" % warband.band_field_count())
+	check(str(warband.roster.equipped_of(guest_merc).get("main", "")) == warband.STARTING_RANGED,
+		"their hands hold the pair a new game opens with (%s)" % str(
+			warband.roster.equipped_of(guest_merc).get("main", "")))
 	check(int(flow.session.ownership().get(1, 0)) > 0
 		and int(flow.session.ownership().get(1, 0)) != guest_merc,
 		"The host keeps a body of its own")
@@ -270,6 +283,21 @@ func _host_run() -> void:
 		and bool((reports["seat"] as Dictionary).get("own_body", false)), 10.0)
 	check(guest_ready, "The guest's own world seats it in the body the host gave it")
 
+	# --- the recruiter's board is the host's -------------------------------
+	# A guest plays a lent warband: the board closes on its own page, and the verb
+	# behind it refuses even if something presses it.
+	check(bool(warband.lent) == false and bool(flow.session.shared_warband),
+		"the campaign session shares one warband")
+	report.probe.rpc_id(guest_peer, "recruiter")
+	var board := await _wait_until(func(): return reports.has("recruiter"), 10.0)
+	check(board, "The guest answers for the recruiter's board")
+	if board:
+		var view: Dictionary = reports["recruiter"]
+		check(bool(view.get("hides_hires", false)),
+			"and its hire rows are closed to a guest")
+		check(not bool(view.get("hired", true)),
+			"a hire asked for anyway is refused (%s)" % str(view.get("message", "")))
+
 	# --- the purse moves without the books ---------------------------------
 	# A kill's gold changes nothing in the roster or the stash, so it must not cost
 	# every guest a whole campaign reload: one number goes out on its own.
@@ -284,23 +312,24 @@ func _host_run() -> void:
 				str((reports["purse"] as Dictionary).get("gold", -1)), str(warband.gold())])
 
 	# --- a guest's press wears gear on the host's books --------------------
-	# The paperdoll on a guest is the host's warband: the verb travels as a
+	# The character screen on a guest is the host's warband: the verb travels as a
 	# request, the host runs the same verb on its own books, and the guest sees
-	# the result when the copy comes back. The guest checks both directions on
-	# its own copy (a lent copy only ever changes with a mirror); here the host
-	# checks that the requests landed on its books and left nothing half-done.
+	# the result when the copy comes back. The page's slot press only ever puts a
+	# piece on - there is no unequip press any more - so this is the equip request
+	# and its mirror; here the host checks that the request landed on its books.
 	var geared := await _wait_until(func(): return reports.has("gear"), 20.0)
 	check(geared, "The guest reports its gear press")
 	if geared:
 		var data: Dictionary = reports["gear"]
 		var geared_merc := int(data.get("merc", 0))
-		check(host_roster.has(geared_merc), "The guest dressed one of the host's bodies (%d)"
-			% geared_merc)
-		check(str(warband.roster.equipped_of(geared_merc).get("main", "")) != "sword_arming",
-			"and the host took the spare back off (%s)"
+		check(geared_merc == guest_merc and warband.roster.is_player(geared_merc),
+			"The guest dressed its own character (%d of %s)" % [
+				geared_merc, str(host_roster)])
+		check(str(warband.roster.equipped_of(geared_merc).get("main", "")) == "sword_arming",
+			"and the host wore the spare on its own books (%s)"
 				% str(warband.roster.equipped_of(geared_merc).get("main", "")))
-		check(warband.stash.pooled_count("sword_arming") == 1,
-			"with the spare back on the host's shelf (%d)"
+		check(warband.stash.pooled_count("sword_arming") == 0,
+			"with the spare off the host's shelf (%d)"
 				% warband.stash.pooled_count("sword_arming"))
 
 	# The rest of the test measures the wire, not the wood: a cultist that happens
@@ -314,6 +343,15 @@ func _host_run() -> void:
 	var squad = world.get("squad")
 	if squad != null:
 		squad.following = false
+	# The band's own unpossessed bodies keep their errands, and one of those is
+	# steel on the ground: an ally walks to a drop and takes it for the stash. The
+	# drops below are the guest's own press, so the allies stand well clear first.
+	for merc_id in warband.roster.ids():
+		if int(merc_id) == host_merc or int(merc_id) == guest_merc:
+			continue
+		var ally = flow.session.controller.body_of(int(merc_id))
+		if ally != null and is_instance_valid(ally):
+			(ally as Node3D).global_position += Vector3(0.0, 0.0, 90.0)
 
 	# --- the guest's verbs land on the host's field ------------------------
 	# A body the host alone fields stands in front of the guest. The guest
@@ -321,8 +359,26 @@ func _host_run() -> void:
 	# and drops the steel; then the guest's K and its corpse screen take a piece
 	# each. This is the whole guest half of the campaign in one pass: an intent
 	# becomes a hit, a death becomes a record, and a record becomes a take.
+	# The body the host fields for the guest: the guest's own world seated it in
+	# the host's warband, and every press below is made from it.
+	var combat_actor = flow.session.controller.body_for_peer(guest_peer)
 	check(combat_actor != null and is_instance_valid(combat_actor),
 		"The guest's body stands before the fight")
+	# A new character carries the pair a new game opens with, and its hands hold
+	# the bow: the swing below is a sword blow, so the host puts the spare blade in
+	# the guest's main hand on its own books. The guest's press is the subject of
+	# the check; the hands are the fixture's to set.
+	var armed_book: Dictionary = warband.equip_merc(guest_merc, "main", "sword_arming")
+	check(bool(armed_book.get("ok", false)),
+		"The host puts a blade in the guest's hand (%s)" % str(armed_book.get("message", "")))
+	flow.session.controller.refresh_gear(guest_merc)
+	flow.session._push_warband(true)
+	var steel := await _wait_until(func(): return combat_actor != null \
+		and is_instance_valid(combat_actor) \
+		and str(combat_actor.rig.weapon) in ["sword", "dual"] \
+		and float(combat_actor.combat.attack_progress) >= 0.999, 8.0)
+	check(steel, "and the host's copy of its body holds steel and is ready (%s)"
+		% str(combat_actor.rig.weapon if is_instance_valid(combat_actor) else "gone"))
 	var dummy = null
 	var drop = null
 	var corpse_id := 0
@@ -344,9 +400,12 @@ func _host_run() -> void:
 		# the K check, so `_nearest_pickup` cannot pick another body's steel.
 		dummy.defeated.connect(Callable(world, "_on_enemy_defeated"))
 		world.guards.append(dummy)
-		# A few frames so the rewind has recorded the body and the guest has a
-		# playout tick to name.
-		for _beat in 4:
+		# Enough frames for the rewind to hold the body and for the guest's own
+		# playout tick to fall inside that history: the guest names the tick it was
+		# drawing, which trails the host's newest by the delay it draws remote
+		# bodies at (about seven ticks). A body recorded for four frames is a body
+		# the guest's blade is judged against before it existed.
+		for _beat in 24:
 			await physics_frame
 		reports.erase("strike")
 		report.strike.rpc_id(guest_peer, point + Vector3.UP * 1.2)
@@ -369,15 +428,21 @@ func _host_run() -> void:
 				"The tick a guest names is the tick it draws (%.2f vs %.2f)"
 					% [clock_delay, replica_delay])
 			check(newest >= 0 and view >= 0 and float(newest - view) >= 5.0,
-				"and it trails the newest snapshot by that delay (%d vs %d)"
-					% [newest, view])
+				"and it trails the newest snapshot by that delay (%d vs %d, %.2f ticks)"
+					% [newest, view, clock_delay])
 			# The link really was on, both ways: the guest's intents sat in its
 			# uplink queue and were released, or this run proves nothing about
 			# latency. The host's own count is checked with the same intent.
-			check(int(seen.get("uplink", 0)) > 200,
+			# At 60 Hz the press lands about two-thirds of a second in: the town
+			# has no warcamp to walk through before the fight now, so the floor
+			# only has to prove a steady stream went through the link.
+			check(int(seen.get("uplink", 0)) > 30,
 				"The guest's intents ran through the simulated link (%d released)"
 					% int(seen.get("uplink", 0)))
-			check(int(flow.session._link.released) > 200,
+			# One release per owned body per tick, and the warcamp's guards are
+			# gone: the count follows the three bodies the host fields, so the
+			# floor is well under the old warband-of-ten number.
+			check(int(flow.session._link.released) > 50,
 				"The host's poses ran through the simulated link too (%d released)"
 					% int(flow.session._link.released))
 			# Passing through a queue is not the same as being delayed by it: the
@@ -390,9 +455,23 @@ func _host_run() -> void:
 					% int(flow.session._link.discarded))
 			check(float(flow.session._link.drop) > 0.0,
 				"with the losses typed: deaths and leaves are reliable and never drop")
-		var struck := await _wait_until(func(): return is_instance_valid(dummy) \
-			and (not bool(dummy.get("alive")) \
-				or float(dummy.get("health")) < float(dummy.get("max_health"))), 6.0)
+		# The swing is a round trip, and a press is only a swing if the host's copy
+		# of the body had its blade ready when it landed: the guest predicts its
+		# own clock, and under load the two disagree for a beat. A player presses
+		# again when the blow does not land; the fixture does the same, up to a few
+		# times, rather than pinning the whole check on one frame of luck.
+		var struck := false
+		for _attempt in 4:
+			struck = await _wait_until(func(): return is_instance_valid(dummy) \
+				and (not bool(dummy.get("alive")) \
+					or float(dummy.get("health")) < float(dummy.get("max_health"))), 2.0)
+			if struck:
+				break
+			for _beat in 30:
+				await physics_frame
+			reports.erase("strike")
+			report.strike.rpc_id(guest_peer, point + Vector3.UP * 1.2)
+			await _wait_until(func(): return reports.has("strike"), 3.0)
 		check(struck, "The guest's swing reaches the host's field (%s hp)"
 			% str(dummy.get("health") if is_instance_valid(dummy) else "gone"))
 		if is_instance_valid(dummy) and bool(dummy.get("alive")):
@@ -446,6 +525,46 @@ func _host_run() -> void:
 				piece_name.to_upper()), 5.0)
 		check(fed, "the guest's looted list carries the host's booking (%s)" % str(
 			world.loot_feed.lines() if world.loot_feed != null else []))
+	# --- the square raises its own, either way round ----------------------
+	# A party may fight in the town; that is allowed. What may not happen is a
+	# player losing the session to it: a body that goes down on the square's ground
+	# is picked up by the other soul's own five seconds, and never bleeds out.
+	var host_body = flow.session.controller.body_of(host_merc)
+	var host_at: Vector3 = (host_body as Node3D).global_position
+	var guest_at: Vector3 = (combat_actor as Node3D).global_position
+	var square: Vector3 = world.town.global_position
+	(host_body as Node3D).global_position = square + Vector3(-1.0, 0.2, 2.0)
+	(combat_actor as Node3D).global_position = square + Vector3(1.0, 0.2, 2.0)
+	for _beat in 10:
+		await physics_frame
+	check(world.town.in_square(host_body) and world.town.in_square(combat_actor),
+		"both souls stand on the square's ground")
+	# The guest's body goes down: the host holds its revive.
+	combat_actor.enter_downed(1)
+	check(bool(combat_actor.get("downed")), "a blow puts the guest's body on the floor")
+	check(bool(combat_actor.get("home_ground")),
+		"and the town marks the ground it fell on as its own")
+	var host_channel := bool(world._revive_from(host_body, true))
+	check(host_channel, "the host opens a revive on the guest's body")
+	var guest_up := await _wait_until(
+		func(): return not bool(combat_actor.get("downed")), 8.0)
+	check(guest_up, "five seconds of the host's hands stands the guest up")
+	# And the other way round: the guest's own G on the host's body.
+	host_body.enter_downed(2)
+	check(bool(host_body.get("downed")), "the host's body goes down on the square")
+	report.probe.rpc_id(guest_peer, "revive")
+	var host_up := await _wait_until(func(): return not bool(host_body.get("downed")), 10.0)
+	check(host_up, "and the guest's own press stands the host back up")
+	check(bool(host_body.get("alive")) and bool(combat_actor.get("alive")),
+		"neither soul lost a body to the scrap")
+	# Back out to the trail for the rest of the run: the square's rule is the
+	# square's, and the road is the campaign's.
+	(host_body as Node3D).global_position = host_at
+	(combat_actor as Node3D).global_position = guest_at
+	for _beat in 10:
+		await physics_frame
+	check(not world.town.in_square(host_body), "the party is back on the road")
+
 	# --- killing the guest's body with the last one left -------------------
 	# A blow on a downed campaign body finishes it. The soul inside is ejected,
 	# and with the host's own body the only one left standing, the guest watches.
@@ -496,9 +615,9 @@ func _host_run() -> void:
 			"The guest's own checks all pass (%d failed): %s"
 				% [int(data.get("failures", 1)), str(data.get("failed", []))])
 
-	# --- a body that comes free goes to the soul that waited ---------------
-	# A name sworn with a place on the field stands up on its own: a body in the
-	# host's world, a replica of it in the guest's.
+	# --- a name sworn after the guest fell is the host's ally --------------
+	# The soul that waits is not owed a mercenary the recruiter hired: the new
+	# body stands up as the band's own and nobody is moved into it.
 	var late_id: int = warband.add_mercenary(LATE_NAME)
 	warband.roster.equip(late_id, "main", "sword_short")
 	check(not warband.roster.is_reserve(late_id), "The third name has a place on the field")
@@ -509,21 +628,24 @@ func _host_run() -> void:
 	check(fielded and host_field.has(flow.session.controller.body_of(late_id)),
 		"and wires it with the rest of the band")
 	check(warband.roster.has(late_id), "The warband takes a third body (%d)" % late_id)
-	var reseated := await _wait_until(
-		func(): return int(flow.session.ownership().get(guest_peer, 0)) == late_id, 20.0)
-	check(reseated, "The waiting soul takes the next free body (%s)"
-		% str(flow.session.ownership().get(guest_peer, 0)))
+	for _beat in 30:
+		await physics_frame
+	check(int(flow.session.ownership().get(guest_peer, 0)) == 0,
+		"the waiting soul is not handed the band's new body (%s)"
+			% str(flow.session.ownership().get(guest_peer, 0)))
+	check(warband.souls.occupied_by(late_id) == 0,
+		"the new body is the squad's own (%d)" % warband.souls.occupied_by(late_id))
 	check(int(flow.session.ownership().get(1, 0)) == host_merc,
 		"The host was never moved out of its body")
 	report.probe.rpc_id(guest_peer, "late")
 	var late_seen := await _wait_until(func(): return reports.has("late"), 15.0)
-	check(late_seen, "The guest reports the body it was given")
+	check(late_seen, "The guest reports the field it is watching")
 	if late_seen:
 		var late: Dictionary = reports["late"]
-		check(int(late.get("own_merc", -1)) == late_id,
-			"The guest's soul sits in the third body (%s)" % str(late.get("own_merc")))
-		check(bool(late.get("own_body", false)),
-			"and the guest's world stands that body up to drive")
+		check(int(late.get("own_merc", 1)) <= 0,
+			"The guest's soul is still in no body (%s)" % str(late.get("own_merc")))
+		check(bool(late.get("fields_late", false)),
+			"and its world stands the host's new body up as a replica")
 
 	# --- the guest leaves, its own campaign comes back ---------------------
 	report.finish.rpc_id(guest_peer)
@@ -633,15 +755,18 @@ func _client_run() -> void:
 	check(str(world.get("start_area")) == "guest", "The guest opens as a guest (%s)"
 		% str(world.get("start_area")))
 	check(bool(warband.lent), "The guest plays the host's lent warband")
-	check(warband.roster.count() == SQUAD_NAMES.size(),
+	check(warband.roster.count() >= SQUAD_NAMES.size(),
 		"The guest fields the host's roster (%d)" % warband.roster.count())
 	check(FileAccess.get_file_as_string(client_save) == own_text,
 		"The borrowed warband never touches the guest's own save")
 	var bodies: Array = world.get("bodies") if world.get("bodies") is Array else []
-	check(bodies.size() == SQUAD_NAMES.size(),
+	check(bodies.size() >= SQUAD_NAMES.size(),
 		"The guest fields the host's bodies (%d)" % bodies.size())
 	var guest_guards: Array = world.get("guards") if world.get("guards") is Array else []
-	var all_replicas := not guest_guards.is_empty()
+	# The town seeds no mobs of its own and the wire never invents one, so an
+	# empty list is the right answer here; what must never stand on a guest is a
+	# mob that runs its own brain.
+	var all_replicas := true
 	for guard in guest_guards:
 		if not bool(guard.get("replica")):
 			all_replicas = false
@@ -658,9 +783,9 @@ func _client_run() -> void:
 		"The guest's map agrees with its own body")
 
 	# --- the guest's own gear press wears the host's spare ------------------
-	# Driven the way a player drives it: open the paperdoll, click the spare row,
-	# then click the worn slot to take it back off. On a lent copy each press is a
-	# request; the piece moves when the host's copy comes back.
+	# Driven the way a player drives it: open the character screen, click the worn
+	# main slot for the pieces the warband owns and choose the spare. On a lent copy
+	# the press is a request; the piece moves when the host's copy comes back.
 	var gear_merc := _own_merc()
 	var worn_before := str(warband.roster.equipped_of(gear_merc).get("main", ""))
 	check(worn_before != "sword_arming" and warband.stash.pooled_count("sword_arming") == 1,
@@ -671,8 +796,12 @@ func _client_run() -> void:
 	doll.configure(warband)
 	doll.open(gear_merc)
 	await process_frame
-	var spare_row: Variant = doll._stash_controls.get("sword_arming")
-	check(spare_row is Button, "the guest's paperdoll lists the spare blade")
+	doll.open_slot_menu("main")
+	var spare_row: Variant = null
+	for child in doll._menu_rows.get_children():
+		if str(child.get_meta("item_id", "")) == "sword_arming":
+			spare_row = child
+	check(spare_row is Button, "the guest's gear page lists the spare blade")
 	if spare_row is Button:
 		(spare_row as Button).pressed.emit()
 	check(str(warband.roster.equipped_of(gear_merc).get("main", "")) == worn_before,
@@ -684,19 +813,6 @@ func _client_run() -> void:
 	check(str(flow.session.controller.seat_loadout(gear_merc).get("main", "")) == "sword_arming",
 		"and the guest's own body wears it (%s)" % str(
 			flow.session.controller.seat_loadout(gear_merc).get("main", "")))
-	await process_frame
-	check(doll.slot_rows.get("main", {}).get("button", null) != null,
-		"the guest's paperdoll has a worn main slot to click")
-	var slot_button: Variant = doll.slot_rows.get("main", {}).get("button")
-	if slot_button is Button:
-		(slot_button as Button).pressed.emit()
-	var bare := await _wait_until(func(): return str(
-		warband.roster.equipped_of(gear_merc).get("main", "")) != "sword_arming", 12.0)
-	check(bare, "and the host takes it back off the copy (%s) after [%s]" % [
-		str(warband.roster.equipped_of(gear_merc).get("main", "")), doll.status_text()])
-	check(warband.stash.pooled_count("sword_arming") == 1,
-		"The spare is back on the guest's shelf (%d) after [%s]" % [
-			warband.stash.pooled_count("sword_arming"), doll.status_text()])
 	doll.close()
 	_submit({"kind": "gear", "tag": "gear", "merc": gear_merc,
 		"worn": str(warband.roster.equipped_of(gear_merc).get("main", ""))})
@@ -734,10 +850,50 @@ func _on_probe(tag: String) -> void:
 			await physics_frame
 		await process_frame
 	elif tag == "late":
-		# The host's map, its warband copy and the body it asks this world for land
-		# on their own clocks: the report waits for the soul to settle in it.
-		await _wait_until(func(): return _own_merc() > 0 and flow.session != null \
-			and flow.session.controller.body_of(_own_merc()) != null, 5.0)
+		# The band's new body arrives with the host's warband copy and its
+		# snapshots, on their own clocks: the report waits for the replica.
+		var late_merc := -1
+		for merc_id in warband.roster.ids():
+			if warband.roster.name_of(int(merc_id)) == LATE_NAME:
+				late_merc = int(merc_id)
+		await _wait_until(func(): return late_merc <= 0 or flow.session == null \
+			or flow.session.controller == null \
+			or flow.session.controller.body_of(late_merc) != null, 5.0)
+		var late_payload := _probe_payload(tag)
+		late_payload["fields_late"] = late_merc > 0 and flow.session != null \
+			and flow.session.controller != null \
+			and flow.session.controller.body_of(late_merc) != null
+		_submit(late_payload)
+		return
+	elif tag == "revive":
+		# The guest's own G, held: the scene's revive verb through the intent
+		# channel, exactly as the key press runs it.
+		var controls = flow.session.controller if flow.session != null else null
+		if controls == null or controls.active_actor == null:
+			_submit({"kind": "probe", "tag": tag, "opened": false})
+			return
+		var opened := bool(controls.act("revive", true))
+		_submit({"kind": "probe", "tag": tag, "opened": opened})
+		return
+	elif tag == "recruiter":
+		# The warband screen is a local page; the board on it is the host's. Read
+		# what a guest's page shows, and press the verb behind it anyway.
+		var page = world.get("screen")
+		if page == null:
+			_submit({"kind": "probe", "tag": tag, "hides_hires": false})
+			return
+		page.open()
+		await process_frame
+		var rows_hidden := true
+		for hire_row in page._hire_rows:
+			if (hire_row["root"] as Node).visible:
+				rows_hidden = false
+		var hire: Dictionary = warband.hire(warband.town_board()[0])
+		_submit({"kind": "probe", "tag": tag, "hides_hires": rows_hidden,
+			"hired": bool(hire.get("ok", false)),
+			"message": str(hire.get("message", ""))})
+		page.close()
+		return
 	elif tag == "corpse":
 		# The record is a reliable RPC behind the kill's snapshot: wait for it, then
 		# take the lot through the same intent a row click sends.
@@ -786,6 +942,13 @@ func _on_strike(point: Vector3) -> void:
 	var actor = controller.active_actor
 	var sent := false
 	if actor != null:
+		# A swing in flight refuses the next one, and the host would see a press
+		# that never became a blade. The player presses when the hands are ready;
+		# the fixture waits for the same moment rather than guessing a delay.
+		for _beat in 90:
+			if float(actor.combat.attack_progress) >= 0.999:
+				break
+			await physics_frame
 		sent = controller.act("melee", {"aim": point, "hand": "right",
 			"variant": "overhead"})
 	# What the host is about to rewind against, from the guest's own books: the

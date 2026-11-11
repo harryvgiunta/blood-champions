@@ -1,6 +1,7 @@
 extends SceneTree
-## The goatman's fire: the three casts the Hollow's demons throw, on their own
-## cooldowns, through the victim's own `take_damage`.
+## The goatman's fire: the three casts the Hollow's demons throw, and the beam
+## its watcher caster carries, on their own cooldowns, through the victim's own
+## `take_damage`.
 ##
 ## What this owns: the numbers in `demon_fire.gd`'s table; which spells the
 ## master and a keeper carry; a fireball that really flies (so it can be walked
@@ -124,12 +125,22 @@ func _check_table() -> void:
 		"ember rain is 6 a tick every 0.6 s for 3 s in a 2.6 m patch, 1.2 s bloom, 14 s clock")
 	check(int(DemonFireScript.DAMAGE_SOURCE) == 93,
 		"fire is booked to the demon family, beside the watchers, the cultists and the wood")
-	# The three shapes are the three the state machine knows how to resolve, and
-	# each answers for its own reach.
+	var ray := DemonFireScript.spell("fire_ray")
+	check(str(ray.get("shape", "")) == "beam"
+		and is_equal_approx(float(ray.get("damage", 0.0)), 5.0)
+		and is_equal_approx(float(ray.get("tick", 0.0)), 0.2)
+		and is_equal_approx(float(ray.get("duration", 0.0)), 1.2)
+		and is_equal_approx(float(ray.get("radius", 0.0)), 0.55)
+		and is_equal_approx(float(ray.get("windup", 0.0)), 0.85)
+		and is_equal_approx(float(ray.get("cooldown", 0.0)), 11.0),
+		"the caster's ray is 5 a tick every 0.2 s for 1.2 s, 0.85 s tell, 11 s clock")
+	# Every row names a shape the state machine can resolve, and each answers for
+	# its own reach. The three demon casts are the old shapes; the watcher caster
+	# added the beam.
 	for spell_id in DemonFireScript.SPELLS.keys():
 		var row: Dictionary = DemonFireScript.SPELLS[spell_id]
-		check(str(row.get("shape", "")) in ["projectile", "cone", "hazard"],
-			"%s is one of the three shapes a cast resolves" % spell_id)
+		check(str(row.get("shape", "")) in ["projectile", "cone", "hazard", "beam"],
+			"%s is one of the shapes a cast resolves" % spell_id)
 		var reach := float(row.get("range", 0.0))
 		check(DemonFireScript.in_range(row, reach - 0.5)
 			and not DemonFireScript.in_range(row, reach + 0.5),

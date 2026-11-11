@@ -12,6 +12,11 @@ extends Node
 ##   user://saves/c1/warband_state.json      the roster, stash, essence, bookmark
 ##   user://saves/c1/player_state.json       the campaign's own purse
 ##
+## Every one of them is a **sealed container** (`scripts/save_file.gd`), not text:
+## AES-256 over a binary payload with an HMAC-SHA256 tail, so a campaign's numbers
+## are not editable in a text editor and an edited file is refused rather than
+## loaded. The `.json` names are history and the paths are built from them.
+##
 ## Nothing else in the game knows about folders. `bind()` points the two
 ## autoloads' `save_path` at a campaign, so every existing writer - the autosave,
 ## the bookmark, a purchase, the in-world SAVE GAME - keeps writing exactly one
@@ -25,6 +30,8 @@ extends Node
 ## campaign and opens in the cages.
 
 const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
+## The sealed save container every save is written in (`scripts/save_file.gd`).
+const SaveFileScript = preload("res://scripts/save_file.gd")
 
 const ROOT := "user://saves"
 ## Script-mode regressions get their own ledger, so a test can never read, move
@@ -75,20 +82,21 @@ func purse_path(id: String) -> String:
 
 # --- the ledger -------------------------------------------------------------
 
-## Read `index.json`. Anything unreadable is an empty ledger rather than a crash:
-## the campaigns' own files are still on disk, and an edit or a bad write must
-## not take the title down with it.
+## Read `index.json`. Anything unreadable - including a ledger edited outside the
+## game, which is what the container's tag catches - is an empty ledger rather
+## than a crash: the campaigns' own files are still on disk, and an edit or a bad
+## write must not take the title down with it.
 func load_index() -> void:
 	slots.clear()
 	active = ""
-	var text := FileAccess.get_file_as_string(index_path())
-	if text.is_empty():
+	var opened: Dictionary = SaveFileScript.inspect(index_path())
+	if not bool(opened.get("ok", false)):
+		var problem := str(opened.get("problem", ""))
+		if problem != "missing":
+			push_warning("SaveSlots: %s is not a ledger (%s)" % [index_path(), problem])
+			_note("index_refused", {"path": index_path(), "problem": problem})
 		return
-	var parsed: Variant = JSON.parse_string(text)
-	if not parsed is Dictionary:
-		push_warning("SaveSlots: %s is not a ledger" % index_path())
-		return
-	var data: Dictionary = parsed
+	var data: Dictionary = opened.get("data", {})
 	var raw: Variant = data.get("slots", [])
 	if raw is Array:
 		for entry in raw:
@@ -108,15 +116,10 @@ func load_index() -> void:
 		active = wanted
 
 func save_index() -> void:
-	_ensure_dir(root_path)
-	var file := FileAccess.open(index_path(), FileAccess.WRITE)
-	if file == null:
+	if not SaveFileScript.write(index_path(),
+			{"version": INDEX_VERSION, "active": active, "slots": slots}):
 		push_warning("SaveSlots: cannot write %s" % index_path())
 		_note("index_failed", {"path": index_path()})
-		return
-	file.store_string(JSON.stringify(
-		{"version": INDEX_VERSION, "active": active, "slots": slots}, "\t"))
-	file.close()
 
 ## The row for `id`, or -1.
 func find(id: String) -> int:
@@ -269,16 +272,22 @@ func _ensure_dir(path: String) -> void:
 
 ## Move one file by reading and rewriting it, so a save is only ever absent from
 ## both places for the moment between the write and the unlink - never half
-## copied, and never left behind as a second, stale copy of the same campaign.
+## copied, and never left behind as a second, stale copy of the same campaign. The
+## bytes move as bytes: a sealed save is not text, and a legacy JSON save is
+## adopted exactly as it was written.
 func _move_file(from: String, to: String) -> bool:
-	var text := FileAccess.get_file_as_string(from)
-	if text.is_empty():
+	var source := FileAccess.open(from, FileAccess.READ)
+	if source == null:
+		return false
+	var raw := source.get_buffer(source.get_length())
+	source.close()
+	if raw.is_empty():
 		return false
 	_ensure_dir(to.get_base_dir())
 	var file := FileAccess.open(to, FileAccess.WRITE)
 	if file == null:
 		return false
-	file.store_string(text)
+	file.store_buffer(raw)
 	file.close()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(from))
 	return true

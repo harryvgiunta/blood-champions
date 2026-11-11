@@ -55,7 +55,7 @@ func run() -> void:
 			combat.release_draw()
 			check(charges.size() == before + 1, "One mouse release emits one arrow")
 			check(absf(charges[-1] - fraction) < 0.0001, "Damage multiplier equals actual draw fraction")
-			var expected: float = [30.0, 38.0, 50.0][bow] * fraction
+			var expected: float = [35.0, 38.0, 50.0][bow] * fraction
 			check(absf(Combat.damage_for(bow, charges[-1]) - expected) < 0.001, "Released damage scales linearly from zero to full damage")
 			var expected_speed: float = float(Archer.BOW_DATA[bow].speed) * lerpf(0.45,1.0,charges[-1])
 			check(absf(speeds[-1] - expected_speed) < 0.001, "Arrow launch speed scales with the bow and charge")
@@ -131,6 +131,43 @@ func run() -> void:
 	rig.advance_animation(1.23)
 	combat.advance(1.23)
 	check(combat.can_draw(), "A long frame carries release time into recovery without extra delay")
+	# Magical Nock takes the nock, not the draw. The string is still pulled at the
+	# bow's own clock, but nothing visits the quiver: the next shaft is on the
+	# string as the shot settles, the drawing hand stays on the string, and the
+	# bow is ready to draw again a settle later. A plain bow keeps the retrieval.
+	advance(1.55)
+	rig.set_bow(2)
+	rig.bow_no_nock = true
+	check(is_equal_approx(rig.charge_seconds(),3.0), "Magical Nock keeps the longbow's 3 s draw")
+	check(combat.begin_draw(), "a Magical Nock bow draws on the press")
+	advance(1.5)
+	check(rig.phase == "DRAWING" and absf(rig.draw_amount-0.5) < 0.001, "the string is pulled at its own speed (%.2f)" % rig.draw_amount)
+	combat.release_draw()
+	advance(0.45)
+	check(rig.phase == "RECOVER", "the shot settles on the bow's own short settle")
+	check(is_equal_approx(rig.recover_seconds(),0.30), "with no retrieval clock to wait for")
+	check(rig.active_bow.nocked_arrow.visible, "the next shaft is back on the string at once")
+	var quiver_top: Vector3 = rig._quiver.to_global(Vector3(0,0.29,0))
+	var string_hand: Vector3 = rig.string_hand.global_position
+	var on_string := string_hand.distance_to(rig.active_bow.get_nock_position())
+	var on_quiver := string_hand.distance_to(quiver_top)
+	check(on_quiver > 0.30, "the drawing hand never reaches the quiver (%.3f m)" % on_quiver)
+	check(on_string > 0.10, "and the nock is not played by hand (%.3f m)" % on_string)
+	advance(0.20)
+	check(combat.can_draw(), "and the next draw is open a settle later")
+	rig.bow_no_nock = false
+	check(is_equal_approx(rig.charge_seconds(),3.0), "the plain bow draws on the same clock")
+	check(combat.begin_draw(), "the same bow without the row draws again")
+	advance(1.5)
+	combat.release_draw()
+	advance(0.68)
+	check(rig.phase == "RECOVER" and not rig.active_bow.nocked_arrow.visible, "a plain bow spends the shaft and fetches another")
+	quiver_top = rig._quiver.to_global(Vector3(0,0.29,0))
+	string_hand = rig.string_hand.global_position
+	on_quiver = string_hand.distance_to(quiver_top)
+	on_string = string_hand.distance_to(rig.active_bow.get_nock_position())
+	check(on_quiver < 0.10, "and the authored hand is in the quiver at the same beat (%.3f m)" % on_quiver)
+	check(on_string > 0.30, "with the string bare (%.3f m)" % on_string)
 	holder.queue_free()
 	await process_frame
 	print("DRAW_COMBAT_REGRESSION checks=",checks," failures=",failures)

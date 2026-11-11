@@ -15,6 +15,13 @@ extends "res://scripts/warband/cage_watcher.gd"
 ## nothing notices a body walking past at 25 m. The scene polls
 ## the three-group ambush and calls `begin_ambush()` on all three at once; a blow
 ## that lands on the archer springs it the same way.
+##
+## In a run, from level two, the wave also deals every archer one of the ranged
+## fire rites from `DemonFire.RITE_POOL` - the ones that reach its 8-16 m bow
+## ring, Fire Ray among them. It casts on its own clock in
+## `CIRCLE`, between arrows, through the parent `devil_mob` windup; the fire is
+## booked to the archer's own 91 and can take every party body in its shape. A
+## campaign/trail archer has no wave spec and keeps its bow alone.
 
 const ArrowScript = preload("res://scripts/arrow.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -192,6 +199,18 @@ func note_attacker(attacker: Node3D) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	ambush_awake = true
 	super(amount, source_id, headshot)
+
+
+## A rolled rite's damage is the archer's own family (91), not the demons' 93 and
+## not the caster's 90: the shaft and the fire come from the same body.
+func fire_damage_source() -> int:
+	return DAMAGE_SOURCE
+
+
+## A spell is a line or a blast through the field, not a single shaft: it can take
+## every living party body in its shape, not only the quarry this archer faces.
+func fire_targets() -> Array:
+	return _spell_candidates()
 
 
 ## A neighbour's cry inside earshot is a sighting too: an archer that answers one

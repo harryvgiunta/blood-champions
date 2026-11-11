@@ -13,7 +13,6 @@ extends Node3D
 const Archer = preload("res://scripts/archer.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Bow = preload("res://scripts/bow.gd")
-const TrinketArt = preload("res://scripts/trinket_art.gd")
 const ShieldScript = preload("res://scripts/shield.gd")
 const StateScript = preload("res://scripts/player_state.gd")
 
@@ -120,7 +119,6 @@ func _render_item(item_id: String, output: String) -> void:
 	var item: Dictionary = StateScript.ITEMS.get(item_id, {})
 	if item.is_empty():
 		return
-	TrinketArt.clear(_rig.skeleton)
 	_clear_display_art()
 	_show_character()
 	_viewport.size = Vector2i(RENDER_SIZE,RENDER_SIZE)
@@ -153,10 +151,6 @@ func _render_item(item_id: String, output: String) -> void:
 			_apply_armor_set(int(item.get("set",0)))
 			await _capture_region({"center":Vector3(0.0,1.02,0.0), "radius":1.02,
 				"dir":Vector3(0.22,0.08,-1.0)},output)
-		"jewelry":
-			_apply_jewelry(item_id,slot)
-			var radius := 0.095 if slot == "neck" else 0.036
-			await _capture_alpha(Vector3(0.0,0.0,0.0),radius,Vector3(0.45,0.30,-1.0),output)
 		"shield":
 			await _render_shield(item,output)
 		_:
@@ -210,12 +204,10 @@ func _apply_armor_set(set_index: int) -> void:
 
 
 func _apply_pieces(pieces: Dictionary) -> void:
-	TrinketArt.clear(_rig.skeleton)
 	_rig.apply_loadout(StateScript.build_loadout("","",pieces))
 
 
 func _apply_weapon(item_id: String) -> void:
-	TrinketArt.clear(_rig.skeleton)
 	var category := str(StateScript.ITEMS[item_id].get("category",""))
 	var main := item_id
 	var off := ""
@@ -243,7 +235,6 @@ func _clear_display_art() -> void:
 ## A hand torch has no held model: its whole look is the brand and its flame, so
 ## the studio builds the same visual the world hangs off a hand.
 func _apply_torch(_item_id: String) -> void:
-	TrinketArt.clear(_rig.skeleton)
 	_clear_display_art()
 	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
 	_hide_character()
@@ -255,7 +246,6 @@ func _apply_torch(_item_id: String) -> void:
 ## A shaft: the same model the bow looses and the corpse keeps, laid across the
 ## frame head-down so the silhouette reads at slot size.
 func _apply_arrow(_item_id: String) -> void:
-	TrinketArt.clear(_rig.skeleton)
 	_clear_display_art()
 	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
 	_hide_character()
@@ -273,7 +263,6 @@ func _apply_arrow(_item_id: String) -> void:
 ## A carried piece: a roll of boiled linen, banded and folded, in the hand's
 ## place at the icon's own centre.
 func _apply_carried(_item_id: String) -> void:
-	TrinketArt.clear(_rig.skeleton)
 	_clear_display_art()
 	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
 	_hide_character()
@@ -303,18 +292,6 @@ func _apply_carried(_item_id: String) -> void:
 	band.rotation_degrees = Vector3(0.0, 0.0, 74.0)
 	band.position = Vector3(-0.02, 0.0, 0.0)
 	art.add_child(band)
-
-
-func _apply_jewelry(item_id: String, slot: String) -> void:
-	TrinketArt.clear(_rig.skeleton)
-	_clear_display_art()
-	_rig.apply_loadout(StateScript.build_loadout("","",_bare_armor()))
-	_hide_character()
-	var art: Node3D = TrinketArt.display(item_id,slot)
-	if art == null:
-		return
-	art.name = "ItemIconArt"
-	_rig.add_child(art)
 
 
 func _show_character() -> void:
@@ -563,8 +540,6 @@ func _render_probe() -> void:
 		"shield_kite":"res://playtest/_probe_shield.png",
 		"focus_tome":"res://playtest/_probe_focus.png",
 		"staff_fire":"res://playtest/_probe_staff.png",
-		"ring_blood":"res://playtest/_probe_ring.png",
-		"neck_shield":"res://playtest/_probe_neck.png",
 		"armor_plate":"res://playtest/_probe_bundle.png",
 	}
 	for item_id: String in probes:

@@ -1,15 +1,20 @@
 # The gate draft
 
-**A Crab Champions-shaped run loop for Blood Champions.** Design record, not
-shipped behavior. Researched 2026-11-09.
+**A Crab Champions-shaped run loop for Blood Champions.** Design record.
+Researched 2026-11-09. The **shop-cadence slice** (market at 6, full shop at 9)
+and the **first gate/chest slice** (open/elite/swarm trials, four contract pools,
+three offers, 2X chest) are implemented. The wider six-pool/chest-tier system,
+the remaining trials and the meta layer are still proposals.
 
 The live loop is [run.md](run.md); the upgrade pool is
 [upgrade-pool.md](upgrade-pool.md). This document is the argument for changing
 the decision architecture *between* those two: what a cleared level asks the
-party to choose, and what the next chest is allowed to be.
+party to choose, and what the next chest is allowed to be. The wider feature
+research — totems, shop agency, enemy affixes, difficulty/medals, combo, marks —
+is in [crab-feature-backlog.md](crab-feature-backlog.md).
 
 > **The short version.** Blood Champions already has Crab Champions' loot — the
-> 161-row pool was cut from it — but not its decision architecture. Our clear
+> 172-row pool was cut from it — but not its decision architecture. Our clear
 > ends with a slot pull and a faction door. Theirs ends with a contract: a
 > destination, a rule for the next fight, and a promise about the next chest,
 > all visible before the party commits.
@@ -47,28 +52,31 @@ fixed Arena), then the shop, then the elite/boss. The current Japanese wiki
 (updated May 2026) still describes that `5 combat → shop → elite/boss` cycle.
 The English wiki's Difficulty page still describes an older ten-island biome —
 shop at 9, elite/boss at 10 — and warns that its values may be out of date. The
-design uses the **sequence** — combat, then shop, then wall — not the count. Our
-own block is longer: eight combat levels, shop at 9, boss at 10.
+The design uses the **sequence** — combat, then shop, then wall — not the count.
+Our own block is longer: seven combat levels, a market at 6, the full shop at 9,
+and the boss at 10.
 
 If you remember “shop every five levels,” that is the current Crab biome: five
 combat islands, then the shop on the sixth. The shop is not on every fifth
 island globally; it is the sixth island of each seven-island biome.
 
-Blood Champions is not changing that cadence. Its shop is level 9 of each
-ten-level block (`level % 10 == 9`), so it is every ten levels — 9, 19, 29 — not
-every five. A five-level shop cadence would be a separate pacing change to the
-block, not a correction to Crab's structure.
+Blood Champions now keeps the same rhythm in a longer block: a **market at
+level 6** (after five combat levels) and the **full shop at level 9**. The market
+is the mid-block stop; the full shop is the pre-boss stop; the boss stays at 10.
+The block is still ten levels, but it now has the same *combat → shop → wall*
+sequence twice: five combat, market, two combat, shop, boss.
 
 **Cadence comparison.**
 
 | | Crab Champions, current | Blood Champions |
 | --- | --- | --- |
-| Combat levels before the shop | 5 | 8 |
-| Shop position | 6th of 7 | 9th of 10 |
+| Combat levels before the first stop | 5 | 5 (market at 6) |
+| Shop stops | 1 per 7-island biome (6th) | 2 per 10-level block (market 6, full shop 9) |
 | Wall | 7th (elite/boss) | 10th (boss) |
 | Block | 7-island biome | 10-level run block |
 
-The sequence is the same; the length is not. That is the whole correction.
+The sequence is the same; the stops are denser. That is the deliberate
+difference: a longer block needs one more breath.
 
 ### 1.2 The portal is the decision
 
@@ -232,19 +240,18 @@ Crab Champions' body. We want its **decision architecture**, not its skin.
 | Beat | Current behavior | Code |
 | --- | --- | --- |
 | Town | Hearthstead is the lobby. The Weapon Rack binds a ranged and a melee piece; the Start Run Portal begins level 1. | `world_scene.gd`, `town_forge_panel.gd` |
-| 10-level block | Levels 1–8 are waves, level 9 is a shop, level 10 is a boss. | `run_director.gd:_begin_level`, `_kind_for_level` |
-| Clear | Gold, one reward chest, one upgrade pedestal, sometimes the Greed Totem and extra chests. | `_clear_level` |
-| Chest | The opener gets **one random mod** (a boss's hoard gets two, one guaranteed legendary), one piece of armour, gold; the first open revives downed bodies and unseals the gates. | `_open_chest` |
-| Pedestal | Every body draws its own three cards and takes one. The AI takes a random card. | `_stand_pedestal`, `_draft_for_party`, `RunPlayer.draft` |
-| Gates | Three fixed gates — wood, cave, pit — all lead to the same next level; the one taken only chooses the faction/biome. | `GATES`, `_spawn_gates`, `_take_portal`, `advance_level` |
+| 10-level block | Levels 1–5 are waves, level 6 is the market, levels 7–8 are waves, level 9 is the full shop, level 10 is the boss. | `run_director.gd:_begin_level`, `_kind_for_level` |
+| Clear | Gold, one reward chest a player, sometimes extra caches. | `_clear_level` |
+| Chest | A contract chest offers **three rows from its promised surface and tier**, one pick for the soul it stands for; a boss hoard and the mini caches keep the auto-roll. Each opener gets armour and gold; the first main box opened revives downed bodies and the gates unseal when every player has opened theirs. A 2X contract is the same promise twice, and a chest is stood one a soul, so two players under a swarm gate get four boxes. The chest is the run's only growth surface: every body draws its own three cards and takes one, and the AI takes a random card off the host. | `_open_chest`, `_stand_chests`, `_chest_offers`, `RunPlayer.chest_draft` |
+| Gates | Three gates, one per faction; each carries a **contract** (biome + trial + next chest's surface/tier). The gate taken sets the next level's trial and chest. | `GATES`, `_spawn_gates`, `_take_portal`, `advance_level`, `_gate_contracts` |
 | Boss / keys | A boss pays `3 + island/2` keys; keys bank through a wipe and only the Weapon Rack spends them. | `_on_enemy_defeated`, `Roguelite` |
-| Shop | Level 9 stands the stall, the rack and one pedestal; the three gates lead to the boss in the chosen biome. | `_spawn_shop_level` |
+| Shop | Level 6 stands the market (stall and a reward chest, no rack); level 9 stands the full shop (stall, rack and reward chest). Level 6's gates lead back to combat; level 9's gates lead to the boss. | `_spawn_shop_level`, `_stand_stop_chest` |
 
 ### 2.2 What is already Crab-shaped
 
 This is not a greenfield port. The expensive parts exist:
 
-- **The pool.** 161 rows, five families, four tiers; the tier ladder, surfaces,
+- **The pool.** 172 rows, five families, four tiers; the tier ladder, surfaces,
   luck, max stacks, carrier tags and per-body drafts are already the Crab
   acquisition model. `docs/upgrade-pool.md` is explicit that the pool was lifted
   from Crab Champions and re-cut for our verbs.
@@ -253,9 +260,9 @@ This is not a greenfield port. The expensive parts exist:
   faction choice.
 - **The boss spine.** Every tenth level pays keys. The meta loop is already
   “boss → keys → armory,” which is close to Crab's “elite/boss → keys → unlock.”
-- **The per-body draft.** The pedestal already knows how to give each connected
-  player their own three offers, let a guest choose over the wire, and let an AI
-  body pick at random. A chest choice can reuse this machinery.
+- **The per-body draft.** The chest already gives each connected player its own
+  three offers, lets a guest choose over the wire, and lets an AI body pick at
+  random. It is the run's one growth surface.
 - **The co-op contract.** The host owns levels, mobs and rolls; guests send
   requests. That is the right authority model for a party route.
 
@@ -264,9 +271,9 @@ This is not a greenfield port. The expensive parts exist:
 | Decision point | Crab Champions | Blood Champions today | Consequence |
 | --- | --- | --- | --- |
 | After a clear | Up to three portals; island type, modifier and reward category visible; irreversible. | Three gates; only the faction/biome differs; all pay the same chest. | The choice is a preference, not a plan. After a few blocks it is “which faction do I find least annoying?” |
-| Opening the chest | Three offers from the promised category; take one. | One random row from the chest's roll; no choice. | The chest is a slot pull. The player cannot aim a build; the pedestal is the only agency. |
-| Risk | Challenge modifiers, Spiked, Greed, Elite, Gauntlet; visible prices. | Elites appear automatically from wave 2; the Greed Totem is a fixed every-third-level bargain. | Risk is a background rule, not a dial the party chooses. |
-| Pacing | Arena, Horde, Parkour, Challenge, Demolition, Gauntlet, Shop, Anvil. | A wave, a shop, a boss. | The objective is always “kill the queue.” |
+| Opening the chest | Three offers from the promised category; take one. | One random row from the chest's roll; no choice. | The chest was a slot pull. The player could not aim a build, and a separate upgrade node was doing all the work. |
+| Risk | Challenge modifiers, Spiked, Greed, Elite, Gauntlet; visible prices. | Elites appear automatically from wave 2; greed is only on the shelf the stall and the hoard keep. | Risk is a background rule, not a dial the party chooses. |
+| Pacing | Arena, Horde, Parkour, Challenge, Demolition, Gauntlet, Shop, Anvil. | A wave, a market, a shop, a boss. | The objective is still mostly “kill the queue,” but the stops now break the block twice. |
 | Meta | Keys unlock content randomly; medals per weapon; difficulty modifiers. | Keys open a deterministic catalog; one best-level record. | The long-term goal is depth only; no “I cleared that trial with that weapon” stories. |
 
 The project's own design record already names the gap. `docs/upgrade-pool.md`
@@ -282,10 +289,10 @@ document proposes putting the choice back, in our own shape.
 not three destinations. Each contract answers: *where, under what rule, for what
 chest.* The party picks one; the others are gone.
 
-**P2. The chest is a promise.** The contract names the chest's pool and tier
-before the fight. Opening the chest gives every body a choice from that pool. A
-player should be able to say, “I took the Swarm three levels ago because I
-wanted an Arts chest,” and be right.
+**P2. The chest is a promise.** The contract names the chest's surface and tier
+before the fight. Opening the chest gives every body a choice from that surface
+at exactly that tier. A player should be able to say, “I took the Swarm three
+levels ago because I wanted an Ability chest,” and be right.
 
 **P3. Risk is priced, never hidden.** A harder trial pays a visibly better
 chest, more gold or more offers. The price (health, no healing, more bodies,
@@ -301,7 +308,7 @@ catalog, not a gacha. We do not copy the Key Totem's random unlock. Mastery is
 records and medals, not a second random slot machine.
 
 **P6. Co-op shares the route, each body owns the pick.** The host takes the
-gate; every connected body gets its own chest offers from the promised pool.
+gate; every connected body gets its own chest offers from the promised surface.
 The AI takes a random card. The chest still revives the downed.
 
 ### 3.1 The crossing
@@ -313,10 +320,10 @@ The AI takes a random card. The chest still revives the downed.
 | Reward chest category | **Chest pool** (Arms, Arts, Body, Edge, Relic, Greed) + tier | Same promise: the category is chosen before the fight. |
 | Chest: 3 choices, take 1 | Chest: 3 offers, take 1; Hoard 4, take 2 | Same shape, with our per-body offers and armour weld. |
 | Four biomes, finite run then loop | Three factions, endless 10-level blocks | We keep the block, not the finite campaign. |
-| Crystals and a shop island | Gold and the level-9 stall | Existing economy; no new currency. |
+| Crystals and a shop island | Gold, the level-6 market and the level-9 stall | Existing economy; no new currency. |
 | Keys unlock random content | Keys open the deterministic rack | Our identity; no gacha. |
 | Guns and third-person movement | Bow, blade, guard, parry, roll, throw | Our identity; no gun or movement clone. |
-| Weapon mods, perks, relics | Shot, hand, ability, perk, relic | Existing 161-row pool; no new families. |
+| Weapon mods, perks, relics | Shot, hand, ability, perk, relic | Existing 172-row pool; no new families. |
 
 This is a clone of the **decision architecture**, not of the game. The spine,
 the loot, the risk and the build steering cross. The guns, the crab, the finite
@@ -330,7 +337,7 @@ run and the random key totem do not.
 
 ```mermaid
 flowchart TD
-  T[Start Run Portal] --> L1[Level 1 · Starter Contract: Arms chest]
+  T[Start Run Portal] --> L1[Level 1 · Starter Contract: Attack chest]
   L1 --> C1[Open chest · pick 1 of 3]
   C1 --> G1[Three gate contracts]
   G1 -->|route committed| L2[Level 2 · trial + promised chest pool]
@@ -343,36 +350,44 @@ flowchart TD
   B -->|wipe| E[Run ends · keys and record bank]
 ```
 
-The 10-level spine does not change. The shop at 9 and the boss at 10 stay.
-Crab's current biome is shorter — five combat islands, shop, elite/boss — but
-the sequence is the same: combat, then shop, then wall. Our block is a longer
-version of that sequence, with a boss every block. What changes is what stands
-at the reward cluster after every other clear: three **gate contracts** instead
-of three faction doors with identical pay.
+The 10-level spine does not change. The shop at 9 and the boss at 10 stay; a
+market joins them at 6. Crab's current biome is shorter — five combat islands,
+shop, elite/boss — but the sequence is the same: combat, then shop, then wall.
+Our block is a longer version of that sequence, with two stops and a boss every
+block. What changes is what stands at the reward cluster after every other
+clear: three **gate contracts** instead of three faction doors with identical
+pay.
 
-**The shop gap.** If the goal is to feel like Crab's rhythm rather than only
-borrow its doors, the shop cadence is the one structural mismatch left. A
-10-level block cannot put a shop on level 10 — that is the boss — so “every five
-levels” has to become a choice about where the extra stop goes.
+**The shop gap — chosen.** The gap was real: the old block had eight combat
+levels and one shop at 9. A 10-level block cannot put a shop on level 10 — that
+is the boss — so “every five levels” had to become a choice about where the extra
+stop goes. We take **B**.
 
 | Option | Shape | Cost | Verdict |
 | --- | --- | --- | --- |
-| **A. Keep** | 8 combat → shop 9 → boss 10 | none | Preserves the spine and the pre-boss stop; the shop is sparse, every 10 levels. |
-| **B. Mid-block market** | 4 combat → shop 5 → 3 combat → shop 9 → boss 10 | small: `SHOP_LEVELS = [5, 9]`, market stock, tests, docs | **Recommended if we want the rhythm.** Adds a shop halfway through, keeps the full pre-boss shop and boss 10. Two shops raise power, so the level-5 market should be smaller (stall + pedestal, no rack, fewer wares). |
-| **C. Move the shop** | 5 combat → shop 6 → 3 combat → boss 10 | medium: shop kind, tests, economy | Matches Crab's “five combat, then shop” position, but removes the pre-boss shop; boss prep becomes weaker. |
-| **D. Shorten the block** | 5 combat → shop 6 → elite/boss 7 | large: `LEVELS_PER_ISLAND`, boss cadence, keys, depth curve, tests, README | The exact current-Crab shape, but it breaks the “boss every tenth level” promise and rebalances the whole run. Not recommended unless we want a full pacing reset. |
+| **A. Keep** | 8 combat → shop 9 → boss 10 | none | Not chosen: the shop is sparse every ten levels. |
+| **B. Mid-block market** | 5 combat → market 6 → 2 combat → shop 9 → boss 10 | small: `MARKET_LEVEL = 6` alongside `SHOP_LEVEL = 9`, market stock, tests, docs | **Chosen.** The market is the five-combat stop; the full pre-boss shop and boss 10 stay. Two stops raise power, so the market carries fewer wares and no Weapon Rack. |
+| **C. Move the shop** | 5 combat → shop 6 → 3 combat → boss 10 | medium: shop kind, tests, economy | Not chosen: matches Crab's five-combat position, but removes the pre-boss stop. |
+| **D. Shorten the block** | 5 combat → shop 6 → elite/boss 7 | large: `LEVELS_PER_ISLAND`, boss cadence, keys, depth curve, tests, README | Not chosen: the exact current-Crab shape, but it breaks the “boss every tenth level” promise and rebalances the whole run. |
 
-The recommendation is **B** only if the shop cadence is part of the first cut.
-If it is not, **A** is honest: the gate-contract loop works at 10 levels, and the
-shop gap is a separate pacing decision. Do not do **D** just to match a number;
-it changes the key economy, the depth curve and every regression that assumes a
-ten-level block.
+The block now runs **5 combat → market 6 → 2 combat → shop 9 → boss 10**. The
+market is the smaller stop: stall + its own reward chest, no Weapon Rack, `MARKET_WARES`
+instead of `SHOP_WARES` (both still add `shop_offers`). The full shop at 9 is
+untouched. Boss 10, keys and the depth curve are untouched.
 
-B can slide by one level. A shop at **5** is “every five” by level number (four
-combat levels first); a shop at **6** is Crab's five-combat-then-shop position.
-Both keep the pre-boss shop at 9. Pick by whether the level number or the combat
-count is the target. Either way, the first stop should be a smaller market — the
-full shop stays at 9.
+The market can slide by one level: at **6** it is Crab's five-combat-then-shop
+position; at **5** it is “every five” by level number (four combat levels first).
+The implementation uses **6** to match Crab's beat; 5 remains the alternative if
+the level number matters more than the combat count. Either way, the first stop
+is a market, not a second full shop.
+
+**First slice, as landed.** The code implements four contract pools — Arms
+(shot+hand), Arts (ability), Perks and Relics — and three trials: `open`,
+`elite` (one extra elite, budget ×0.9, epic-floor chest) and `swarm` (budget
+×1.5, live cap +6, **2X** chest). `2X` stands a second chest with its own three
+offers, one pick each, rather than a four-take-two modal. The Body/Edge split,
+the Greed/Relic/Upgrade/Spiked contracts and the remaining trials in this
+document are next, not shipped.
 
 ### 4.2 The contract
 
@@ -382,7 +397,7 @@ single source of truth for the next level's trial and chest.
 ```json
 {
   "id": "gate_7_2",
-  "next_level": 7,
+  "next_level": 8,
   "kind": "fight",
   "biome": "caves",
   "faction": "demons",
@@ -391,7 +406,7 @@ single source of truth for the next level's trial and chest.
   "chest": {
     "pool": "arts",
     "tier": "standard",
-    "offers": 4,
+    "offers": 3,
     "picks": 1
   },
   "reward": { "gold_mult": 1.25 },
@@ -402,7 +417,7 @@ single source of truth for the next level's trial and chest.
 
 | Field | Meaning | Notes |
 | --- | --- | --- |
-| `kind` | `fight`, `shop`, or `boss`. | The special levels carry their own contract shape; a shop has no chest, a boss uses the Hoard chest. |
+| `kind` | `fight`, `market`, `shop`, or `boss`. | The special levels carry their own contract shape; a market or shop has no chest, a boss uses the Hoard chest. |
 | `biome` / `faction` | The arena and its enemy table. | One of the existing three; the contract does not invent a fourth island. |
 | `trial` | The rule the level is fought under. | `open`, `duel`, `swarm`, `tithe`, `fog`, `spiked`, `reliquary`, `forge`, `greed`, later `horde` / `gauntlet` / `hunt`. |
 | `trial_params` | Budget, cap, HP price, healing lock, fog density. | Host-only; guests read the resolved values. |
@@ -415,6 +430,10 @@ single source of truth for the next level's trial and chest.
 | `seed` | Reproducible route roll. | The host owns it. |
 
 ### 4.3 The three-card deal
+
+**First slice:** the code deals one `open`, one `elite` and one `swarm` card,
+with three distinct pools. The safe/focus split, forced-pool trials and the
+remaining trial families below are the next deal.
 
 At a combat clear whose next level is also a combat level, the host generates
 three contracts under these rules:
@@ -435,11 +454,12 @@ three contracts under these rules:
 5. **No duplicate pools.** Three cards, three different pools where possible.
    The forced-draw trials (`reliquary`, `forge`, `greed`) are exempt from this
    rule because their card already fixes the pool or tier.
-6. **No trials where the next door is fixed.** A gate taken at level 8 leads to
-   the shop, so those three cards are shop approaches (no trial, no chest
-   pool). The shop's own gates lead to the boss, so they carry the boss faction
-   and the Hoard. Level 10's gates lead to the next island. Trials belong to
-   combat levels 1–8 and 11+.
+6. **No trials where the next door is fixed.** A gate taken at level 5 leads to
+   the market, and a gate taken at level 8 leads to the full shop; those three
+   cards are shop approaches (no trial, no chest pool). The market's own gates
+   lead back to level 7; the full shop's gates lead to the boss. Level 10's
+   gates lead to the next island. Trials belong to combat levels 1–5, 7–8 and
+   11+.
 7. **One trial per level.** No stacking contracts in the launch version. The
    Gauntlet is the only place a trial stacks, and it is a phase-3 objective.
 
@@ -453,15 +473,15 @@ level), not the director's reward `_rng`: the board must not perturb the chest
 or mob rolls when the code order changes. The host rolls; guests receive the
 three payloads.
 
-#### A worked deal, level 6
+#### A worked deal, level 8
 
 | | Gate A | Gate B | Gate C |
 | --- | --- | --- | --- |
 | **Destination** | THE BRIARWOOD · watchers | THE HOLLOW BENEATH · demons | THE BLOOD PIT · clones |
 | **Trial** | OPEN | SWARM | DUEL |
-| **The fight** | standard wave | +50% bodies, live cap +8 | one extra elite, budget ×0.9 |
-| **Chest** | ARMS · 3 offers · common/epic | ARTS · 4 offers · common/epic | BODY · 3 offers · epic+ |
-| **Extra** | — | +25% gold | — |
+| **The fight** | standard wave | +50% bodies, live cap +6 | one extra elite, budget ×0.9 |
+| **Chest** | ATTACK · 3 offers · common | ABILITY · 3 offers · **2X** · common | DAMAGE · 3 offers · epic |
+| **Extra** | — | a second chest | — |
 | **The ask** | “Sharpen the bow.” | “More to kill, more to take.” | “A harder body for a better piece.” |
 
 The player can read the whole decision from the three cards. The gate's physical
@@ -473,48 +493,53 @@ door still carries the faction art; the card is the contract.
 card:
 
 ```
-ARMS · OPEN                    ARTS · SWARM                 BODY · DUEL
+ATTACK · COMMON · OPEN         ABILITY · COMMON · SWARM     DAMAGE · EPIC · OPEN
 THE BRIARWOOD                  THE HOLLOW BENEATH           THE BLOOD PIT
-3 offers · common/epic         4 offers · +25% gold         3 offers · epic+
+3 offers                       2X chest                     3 offers
 ```
 
-A proximity panel shows the three cards side by side, with the nearest gate
-highlighted. The panel is the comparison; the gate is the commitment. `G` takes
-the highlighted gate. Because the choice is now consequential, the first press
-opens the card detail and the second press confirms (or a 0.5 s hold); the exact
-input is a UX decision, not a design blocker. The gates remain sealed until the
-chest is opened, as they are today.
+The first slice writes the contract on a second line under the gate's biome
+label. The proximity triptych, the first-press detail and the hold-to-confirm
+are the next UI step; `G` still takes the gate. The gates remain sealed until
+the chest is opened, as they are today.
 
 **Which chest stands where.** The contract is the promise, so the level-to-chest
 map is fixed:
 
 | Level | The chest |
 | --- | --- |
-| 1 | **Starter Contract** — Arms, standard, 3 offers. There is no prior gate to promise it. |
-| 2–8 | The pool/tier of the gate taken at the previous clear. |
-| 9 | None; the shop and its pedestal stand instead. |
+| 1 | **Starter Contract** — an Attack chest of commons, 3 offers. There is no prior gate to promise it. |
+| 2–5 | The surface/tier the gate taken at the previous clear promised. |
+| 6 | None from a gate; the market stands its own chest. |
+| 7–8 | The surface/tier the gate taken at the previous clear promised. |
+| 9 | None from a gate; the full shop stands its own chest. |
 | 10 | **Hoard** — 4 offers, take 2, one guaranteed legendary. |
-| 11+ | The pool/tier of the gate taken at the previous clear. |
+| 11+ | The surface/tier the gate taken at the previous clear promised. |
 
 **At the chest.** The chest opens the existing draft modal with a contract
 header:
 
 ```
-THE CHEST KEEPS ITS PROMISE · ARMS · 3 OFFERS
-[ Broadhead · common · level 2 ]  [ Steady Draw · common ]  [ Blind Fire · common ]
+THE CHEST KEEPS ITS PROMISE · ATTACK · 3 OFFERS
+[ Heavy Caliber · common ]  [ Grim Harvest · common ]  [ Wind Up · common ]
 ```
 
-Each body gets its own set of offers from the promised pool. The cards show the
+Each body gets its own set of offers from the promised surface. The cards show the
 row's current level and what the next stack does, because a duplicate is
 progress, not a wasted pick. The armour pop, the gold and the revive remain
 exactly as they are. If a body has maxed every legal row in the pool, that
 body's share becomes gold and armour instead of an empty board.
 
+**At the market approach.** The gates taken at level 5 read
+`MARKET · <biome> · spend, then the road continues`; the market has a smaller
+stall and its own chest, no Weapon Rack. Its own gates lead back to combat at
+level 7.
+
 **At the shop approach.** The gates taken at level 8 read
 `SHOP · <biome> · spend, then the boss`; the shop still sells from the full
-stall. The shop's own gates read `BOSS · <biome> · HOARD`; the boss is fought in
-the biome chosen there. Phase 3 may add shop modifiers, but the launch version
-keeps the shop as the breath before the boss.
+stall and carries the rack. The shop's own gates read `BOSS · <biome> · HOARD`;
+the boss is fought in the biome chosen there. Phase 3 may add shop modifiers,
+but the launch version keeps the shop as the breath before the boss.
 
 **At the boss.** Level 10's chest is a **Hoard**: four offers, take two, one
 guaranteed legendary. The boss still pays its keys. The gates after the boss
@@ -537,20 +562,20 @@ enchantment menu.
 Cache, Care Package and the other extra chests still stand on the island and
 still pay one random row; they are bonus, not a second promise, and they do not
 unseal the gates. If we later want them to respect the contract, they can show
-one card from the promised pool, but that is polish, not the launch rule. The
+one card from the promised surface, but that is polish, not the launch rule. The
 boss's extra chests follow the same rule; the Hoard is the main boss chest.
 
 ### 4.5 The six pools
 
-The pool is the promise. It is intentionally narrower than “the whole 161-row
+The pool is the promise. It is intentionally narrower than “the whole 172-row
 catalog,” because the point is to aim a build, not to see more rows.
 
 | Pool | What it draws | Source rows | The build it feeds |
 | --- | --- | ---: | --- |
 | **Arms** | `shot` + `hand` families | 30 + 11 = 41 | The ranged hand and the melee hand: damage, draw, swing, throw. |
 | **Arts** | `ability` family | 60 | Throw, roll, guard, parry and the weapon-family ability rows. |
-| **Body** | `perk` rows whose dominant stats are health, armour, healing, guard, block, damage reduction or lifesteal | split of 48 (pin the census) | Surviving the fight: pool, plate, sustain, defensive verbs. |
-| **Edge** | `perk` rows whose dominant stats are damage, crit, speed, luck, economy or loot | the rest of 48 (pin the census) | Killing faster and getting richer: offence, tempo, luck, gold. |
+| **Body** | `perk` rows whose dominant stats are health, armour, healing, guard, block, damage reduction or lifesteal | split of 59 (pin the census) | Surviving the fight: pool, plate, sustain, defensive verbs. |
+| **Edge** | `perk` rows whose dominant stats are damage, crit, speed, luck, economy or loot | the rest of 59 (pin the census) | Killing faster and getting richer: offence, tempo, luck, gold. |
 | **Relic** | `relic` family | 12 | One unique rule; rarer, fewer offers, build-defining. |
 | **Greed** | every `greed`-rarity row, regardless of family | 14 | A powerful bargain with a real downside; one offer, never a spread. |
 
@@ -562,15 +587,18 @@ catalog before that exclusion, so the implementation pins both the family census
 and the greed census.
 
 The Body/Edge split is an authoring decision, not a runtime heuristic. Add a
-`pool` field to each of the 161 rows and pin the census in
-`tests/roguelite_regression.gd`; a row with no pool is a catalog bug. Every row
-has exactly one **family** pool; the Greed contract is the one draw that ignores
-it. The current families already give Arms, Arts and Relic their boundaries;
-only the 48 perks need a body/edge call.
+`chest surface` index to each of the 172 rows and pin the census in
+`tests/roguelite_regression.gd`; a row on no surface is a catalog bug. The index
+is derived, not typed: a row is on a surface when its family is that surface's
+family (`attack` = shot + hand, `ability` = ability), when it carries one of the
+surface's tags (the weapon families a Weapons chest reads), or when it writes one
+of the surface's keys (`CHEST_KEYS`, `CHEST_PREFIX_KEYS`). A row belongs to every
+surface it acts on, so Glass Cannon is a Damage chest's and a Health chest's.
 
 **Carrier tags still apply.** A bow body is never offered a staff-only row just
-because the Arts chest was promised. Each body rolls its own legal offers from
-the pool. The promise is the pool, not the exact card.
+because the Weapons chest was promised. Each body rolls its own legal offers from
+the surface. The promise is the surface and the tier, not the exact card - and a
+surface is only promised where it can lay out a whole hand at that tier.
 
 ### 4.6 Contract tiers and offer counts
 
@@ -582,7 +610,7 @@ the pool. The promise is the pool, not the exact card.
 | **upgrade** | 2 | the row's current tier | only rows the body already carries; no new rows |
 | **relic** | 2 | the row's current tier | only the relic family |
 | **greed** | 1 | greed | the row's own downside; no spread |
-| **hoard** | 4, take 2 | epic, legendary, greed | boss only; one guaranteed legendary |
+| **hoard** | 4, take 2 | epic, legendary, greed | boss only; one guaranteed legendary. **First slice keeps the auto-roll**; the four-take-two choice is next. |
 
 Starting values:
 
@@ -593,7 +621,7 @@ HOARD_OFFERS       = 4
 HOARD_PICKS        = 2
 TITHE_START_HP     = 0.75   # health cap, not a heal, at level start
 SWARM_BUDGET_MULT  = 1.50
-SWARM_LIVE_CAP_ADD = 8
+SWARM_LIVE_CAP_ADD = 6
 DUEL_BUDGET_MULT   = 0.90
 TRIAL_EXTRA_OFFERS = 1
 ```
@@ -602,30 +630,33 @@ TRIAL_EXTRA_OFFERS = 1
 
 - `coral_amulet`: “The reward chest gives one more upgrade card, not one more
   choice” becomes **+2 chest offers**, matching the source's Coral Amulet.
-- `big_chests`: currently “the pedestal lays out one more card” becomes **+1
-  chest offer**; the pedestal's own count stays in `pedestal_offers` if we want
-  to keep that effect elsewhere.
-- `faulty_chests`: extend from “a pedestal card you did not take stays on the
+- `big_chests`: “the pedestal lays out one more card” became **+1 chest offer**
+  (`chest_offers`), so the row still means what it says now that the chest is the
+  surface that lays the cards out.
+- `faulty_chests`: extend from “a chest card you did not take stays on the
   ground” to **an unchosen chest offer stays on the ground**, once per stack.
   The `keep_offer` key already exists in the pool for this; the chest is where
   it becomes legible.
 - `coral_amulet` / `big_chests` stack, but cap the final offer count at 6 so a
   chest cannot become a second shop.
 - `hoarder` keeps its current identity (extra chest every island, one fewer
-  pedestal card) and does **not** become the source's “take all” relic. Our
+  chest card) and does **not** become the source's “take all” relic. Our
   greed row's bargain is already the extra chest; changing it would rewrite an
   existing build.
 
 **Rarity rule.** Standard and elite chests no longer roll greed. Greed's
-reliable sources become the **Greed contract**, the **Greed Totem**, the **boss
-hoard** and the **stall** (island 2+); a relic chest can still carry a greed
-relic if the relic itself is greed. This gives the Greed contract a reason to
+reliable sources are the **Greed contract**, the **boss hoard** and the **stall**
+(island 2+); a relic chest can still carry a greed relic if the relic itself is
+greed. This gives the Greed contract a reason to
 exist and matches the source's rule that greed is a narrow door, not a random
 sprinkle.
-`Mods.surface_tiers` and `tier_weights` need the corresponding change; the
+`Mods.source_tiers` and `tier_weights` need the corresponding change; the
 regression's ladder assertions must be updated deliberately.
 
 ### 4.7 The trials
+
+**First slice:** only `open`, `elite` and `swarm` are live. The rows below are
+the next trials, not the current build.
 
 Launch set (no new objective code; all reuse the existing wave queue):
 
@@ -633,13 +664,13 @@ Launch set (no new objective code; all reuse the existing wave queue):
 | --- | --- | --- | --- | --- |
 | **Open** | The standard wave. | none | contract pool, 3 offers, standard tier | existing |
 | **Duel** | One extra elite; budget ×0.9. | a heavier body | elite tier (epic+), 3 offers | `_pick_spec(true)`, tier `elite`; floor the remaining budget at 4 |
-| **Swarm** | Budget ×1.5, live cap +8. | more bodies | +1 offer, +25% gold | `wave_budget`, `_live_cap` |
+| **Swarm** | Budget ×1.5, live cap +6. | more bodies | **2X** chest (a second 3-offer chest) | `wave_budget`, `_live_cap`, `_clear_level` |
 | **Tithe** | Start the level with health capped at 75% of max. | health | +1 offer, +20% gold | cap at level start; no heal lock |
 | **Fog** | Denser fog and shorter sight. | information | +1 offer | stage fog/lighting only; no combat math |
 | **Spiked** | The standard wave. | 25% of max health, paid on open. | spiked tier (epic+), 3 offers | tier price; body locked if it cannot pay |
 | **Reliquary** | Budget ×0.9. | fewer bodies | relic pool, 2 offers | pool filter; `relic` tier |
 | **Forge** | Budget ×0.9. | fewer bodies | upgrade tier (owned rows, any pool), 2 offers | owned-row filter; `upgrade` tier |
-| **Greed** | Standard wave, plus a guaranteed Greed Totem. | the greed row's downside | greed pool, 1 offer | existing totem + pool |
+| **Greed** | Standard wave, every row dealt is a greed row. | the greed row's downside | greed pool, 1 offer | pool filter; no new prop |
 
 Phase-2 objectives (new state, not new maps):
 
@@ -653,8 +684,8 @@ Phase-2 objectives (new state, not new maps):
 
 - A trial applies to the next level only. It is cleared when the level is
   cleared; nothing carries unless the contract says so.
-- A trial never appears on a shop or boss level. The shop is the breath; the
-  boss is the wall.
+- A trial never appears on a market, shop or boss level. The market is the
+  breath; the shop is the kit-up; the boss is the wall.
 - A trial's chest is still the contract's pool. Most trials change the **offer
   count / tier / gold**, not the category. The forced-draw trials (`reliquary`,
   `forge`, `greed`) are the exception, and their pool or tier is on the card.
@@ -672,11 +703,11 @@ Phase-2 objectives (new state, not new maps):
 - The host takes the gate. Guests see the same three cards and can mark a
   preference (a ping), but the host's press is the route. This follows the
   existing host-authoritative contract in `run_director.gd`.
-- Every body gets its own chest offers from the promised pool. The host rolls
-  every connected body's offers at the first chest open and stores them in
-  `draft_offers`, exactly like the pedestal, so a guest is choosing from the
-  host's board rather than rolling its own. A guest's `choose` names its own
-  row. The AI takes a random offer.
+- Every body gets its own chest offers from the promised surface. The host rolls
+  every connected body's offers when the chest is stood, stores them in
+  `draft_offers` and carries the table in the chest payload, so a guest is
+  choosing from the host's board rather than rolling its own. A guest's `choose`
+  names its own row. The AI takes a random offer.
 - The chest still revives the downed at half health and unseals the gates. The
   first body to open can unseal; the chest remains for bodies that have not
   picked, as it does today.
@@ -723,20 +754,23 @@ our scale; it is not required for the first pass.
 
 ### 5.1 A bow run
 
-- Level 1 starts with the **Starter Contract: Arms, standard, 3 offers**. The
+- Level 1 starts with the **Starter Contract: an Attack chest of commons, 3 offers**. The
   first chest introduces the promise before the first gate asks a question.
-- At the level 1 clear, the party takes **Duel** in the Briarwood for an elite
-  Arms chest. The extra elite is the price; the epic bias is the pay.
+- At the level 1 clear, the party takes **Duel** in the Briarwood for an Attack
+  chest raised a rung to epic. The extra elite is the price; the rung is the pay.
 - At level 2, the chest offers three shot rows. The player takes **Broadhead**
-  (flat damage), not the biggest rarity. The pedestal adds a mixed card.
-- At level 4, the player takes **Swarm** in the Hollow for an Arts chest with
-  four offers, because the build already has flat damage and wants a verb
+  (flat damage), not the biggest rarity. The 2X chest beside it adds a mixed
+  card.
+- At the level 3 clear, the player takes **Swarm** in the Hollow for an Arts
+  chest at level 4, because the build already has flat damage and wants a verb
   upgrade (throw or guard). The extra bodies are the price.
+- The level 5 clear leads to the **market at 6**; the player spends, opens the
+  market's chest and takes a gate into level 7.
 - At level 7, the player takes an **Open Body** contract to top up health before
-  the shop; level 8's gates lead to the shop; at 9 the stall sells the last
+  the full shop; level 8's gates lead to the shop; at 9 the stall sells the last
   damage piece; at 10 the Hoard pays a legendary and the boss pays keys.
 
-The route is the build: each gate was chosen for a pool, not for the biome the
+The route is the build: each gate was chosen for a chest, not for the biome the
 player likes best.
 
 ### 5.2 A melee/guard run
@@ -754,19 +788,21 @@ player likes best.
 - The party sees three cards. The bow player pings Arms; the melee player pings
   Body; the host takes the compromise (or the card that serves the run's weakest
   body).
-- At the chest, each body picks from the same promised pool, but its own legal
+- At the chest, each body picks from the same promised surface, but its own legal
   rows. The bow player takes a shot row; the melee player takes a hand row; the
   AI takes a random row.
 - The route is shared; the build is personal. That is the co-op shape the
-  existing pedestal already proves works.
+  existing chest draft already proves works.
 
-### 5.4 The shop and boss
+### 5.4 The market, shop and boss
 
-The shop level is not a trial. The gates that lead to it (taken at level 8)
-preview the shop; the shop's own gates preview the boss faction and the Hoard.
-The party spends gold, takes the pedestal, then chooses which faction's boss to
-fight. The boss is the wall; the Hoard is the payoff. After the boss, the three
-gates are normal contracts again, and the next depth block begins.
+The market and the full shop are not trials. The gates that lead to the market
+(taken at level 5) preview the market; its own gates lead back to level 7. The
+gates that lead to the full shop (taken at level 8) preview the shop; the shop's
+own gates preview the boss faction and the Hoard. The party spends gold, opens
+the stop's chest, then chooses which faction's boss to fight. The boss is the wall;
+the Hoard is the payoff. After the boss, the three gates are normal contracts
+again, and the next depth block begins.
 
 ---
 
@@ -776,19 +812,20 @@ gates are normal contracts again, and the next depth block begins.
 
 | Phase | What lands | Why this order |
 | --- | --- | --- |
-| **0. Data and labels** | Add `pool` to the 161 rows; pin the census; add `RouteContract` helpers; gate payload carries the contract; floating card copy. | The contract must be data before it is UI. |
-| **1. Gate draft** | Replace `GATES` with `_gate_contracts(next_level)`; `_spawn_gates` carries the contract; `advance_level(route)` stores the active contract; `_clear_level` uses it for the chest's pool/tier; state/wire includes it. | This is the core loop change; no new combat code. |
-| **1b. Shop cadence (optional)** | If the pacing is in scope, add `SHOP_LEVELS = [5, 9]` (or `[6, 9]`) and a smaller market at the first stop; update `_kind_for_level`, `_begin_level`, `_spawn_shop_level`, docs and tests. | Do this before the route board if it ships with the first cut; it changes the level sequence. |
-| **2. Chest choice** | `_open_chest` builds per-body offers from the promised pool; the existing draft modal chooses one; AI auto-picks; armour/gold/revive unchanged; `coral_amulet` / `big_chests` / `faulty_chests` re-scoped. | This is the “augment” the player feels; it reuses the pedestal machinery. |
-| **3. Launch trials** | Duel, Swarm, Tithe, Fog, Spiked, Reliquary, Forge, Greed; apply budget/cap/HP/fog at `_begin_level`; reset on advance. | Trials turn the contract into a risk/reward decision without new objectives. |
+| **0. Data and labels** | Add `pool` to the 172 rows; pin the census; add `RouteContract` helpers; gate payload carries the contract; floating card copy. | The contract must be data before it is UI. |
+| **1. Gate draft (first slice landed)** | `_gate_contracts(next_level)`; `_spawn_gates` carries the contract; `_take_portal` stores the active contract; `_clear_level` uses its chest; state/wire includes it. | The core loop change; no new combat code. |
+| **1b. Market cadence (landed)** | `MARKET_LEVEL = 6` alongside `SHOP_LEVEL = 9`, a market at 6 and the full shop at 9; `_kind_for_level`, `_begin_level`, `_spawn_shop_level`, HUD and tests updated. | The pacing slice is in; the wider gate/chest systems remain proposals. |
+| **2. Chest choice (first slice landed)** | `_open_chest` uses per-body offers from the promised surface; the existing draft modal chooses one; AI auto-picks; armour/gold/revive unchanged; 2X stands a second chest. The pedestal is gone: the chest is the only growth surface, and `big_chests` / `hoarder` moved to `chest_offers`. `coral_amulet` / `faulty_chests` re-scoping is next. | This is the “augment” the player feels; it reuses the draft machinery. |
+| **3. Launch trials (first slice landed)** | Open, Elite and Swarm are live: `_apply_contract` applies the trial's budget, live cap and extra elites, and `raise_tier` / `_contract_chest` price the rung and the 2X box. Duel, Tithe, Fog, Spiked, Reliquary, Forge and Greed remain proposals. | Trials turn the contract into a risk/reward decision without new objectives. |
 | **4. New objectives** | Horde, Gauntlet, Hunt; goal state in the director; cash-out UI for Gauntlet. | These are the pacing variety layer; they cost the most and should follow the proven decision loop. |
 | **5. Mastery and polish** | Route ledger, trial medals, end-of-run recap, optional Blood Oath modifiers, gate/chest VFX and audio. | Meta only after the run loop is fun without it. |
 
-**Minimum slice.** If only one cut ships, ship **Phase 1 + Phase 2** with three
-launch trials (Open, Duel, Swarm). That is the spine: the gate promises a
-pool/tier, the chest delivers a choice, and one trial tests the risk dial. The
-other trials, objectives and meta are layers on top; do not build them before
-the gate/chest pair is fun in a playtest.
+**Minimum slice.** The market cadence (Phase 1b) is already in. If only one cut
+ships after it, ship **Phase 1 + Phase 2** with three launch trials (Open, Duel,
+Swarm). That is the spine: the gate promises a surface/tier, the chest delivers a
+choice, and one trial tests the risk dial. The other trials, objectives and meta
+are layers on top; do not build them before the gate/chest pair is fun in a
+playtest.
 
 ### 6.2 File map
 
@@ -796,12 +833,12 @@ the gate/chest pair is fun in a playtest.
 | --- | --- |
 | `scripts/roguelite/mod_catalog.gd` | `pool` field and six pool constants; `draft(..., pool)` filter; new surface/tier rules; offer-count helper; census assertions. |
 | `scripts/roguelite/run_player.gd` | `chest_draft(contract)` per body; offer count from the contract + `chest_choices`; avoid auto-taking the row. |
-| `scripts/roguelite/run_director.gd` | `_gate_contracts`, `_spawn_gates`, `_clear_level` contract, `_open_chest` offers, `choose_draft` for chests, trial application in `_begin_level`, state/wire; optional `SHOP_LEVELS` and market variant. |
+| `scripts/roguelite/run_director.gd` | `_gate_contracts`, `_spawn_gates`, `_clear_level` contract, `_open_chest` offers, `choose_draft` for chests, trial application in `_begin_level`, state/wire; `MARKET_LEVEL` and market variant are in. |
 | `scripts/roguelite/roguelite_props.gd` | Gate label card; chest tier glow; contract badge; no new geometry required. |
 | `scripts/roguelite/roguelite_hud.gd` | Route triptych near the gates; chest modal header; contract status; reuse `open_draft`. |
 | `scripts/roguelite/roguelite_stage.gd` | Fog/lighting presets for the Fog trial; no new maps. |
 | `scripts/roguelite/roguelite_meta.gd` | Route ledger fields and migration defaults. |
-| `tests/roguelite_regression.gd` | Contract generation, chest offers, host/guest, boss hoard, shop/boss exceptions, maxed fallback, no keys from trials. |
+| `tests/roguelite_regression.gd` | Contract generation, chest offers, host/guest, boss hoard, market/shop/boss exceptions, maxed fallback, no keys from trials. |
 | `docs/run.md` | Update the live loop once the first phase lands; keep this document as the design record. |
 
 ### 6.3 State and wire
@@ -811,17 +848,15 @@ the gate/chest pair is fun in a playtest.
 - `gate_options`: the three contracts for the next level; carried in each gate's
   payload and re-sent in `state` for a late joiner.
 - `pending_picks`: chest draft offers keyed by prop serial and peer, exactly the
-  `draft_offers` shape the pedestal already uses.
+  shape `draft_offers` already uses.
 - `advance_level(route: Dictionary)` replaces `advance_level(chosen_biome:
   String)`. The host passes the full route; `biome` remains inside it. The
   existing call sites and tests need the new shape; a guest's `advance` request
   is still refused.
-- Generalize the draft path. `choose_draft` and `_open_draft` currently name
-  the pedestal in their status lines and pass `"pedestal"` to
-  `_release_if_spent`; a chest offer uses the same `draft_offers` table, so the
-  release fx and the prompt must read `Props.prop_kind(prop)` instead of
-  hardcoding the pedestal. That is the only structural change the chest choice
-  needs beyond rolling the offers.
+- The draft path is one path. `choose_draft` reads `Props.prop_kind(prop)` for
+  the release fx, and the prompt and the panel name the chest, so one table
+  (`draft_offers`) serves every box that deals cards. That was the only
+  structural change the chest choice needed beyond rolling the offers.
 - The `level` broadcast carries `active_contract`; the `prop` broadcast carries
   `gate_options` per gate. A guest that joins mid-run reads the same contract
   and the same three cards.
@@ -831,10 +866,10 @@ the gate/chest pair is fun in a playtest.
 The regression should prove, not just exercise:
 
 1. **Deal shape.** Three contracts, three distinct factions, at least one
-   `open`, no duplicate pool, no trial at shop/boss.
-2. **Promise.** On a combat level, the chest at level N uses the pool/tier of
-   the gate taken at N-1; level 1 uses the Starter Contract; level 9 has no
-   chest; level 10 uses the Hoard.
+   `open`, no duplicate pool, no trial at market/shop/boss.
+2. **Promise.** On a combat level, the chest at level N uses the surface/tier of
+   the gate taken at N-1; level 1 uses the Starter Contract; levels 6 and 9 have
+   no chest; level 10 uses the Hoard.
 3. **Choice.** A chest offers its contract's offer count (3 base; 2 for
    relic/upgrade; 1 for greed; 4 for the Hoard) of legal rows per body; a guest
    gets its own set; a body takes its `picks` (1, or 2 on the Hoard); a further
@@ -849,9 +884,9 @@ The regression should prove, not just exercise:
 7. **Keys.** No trial, chest or route pays keys; only a boss does.
 8. **Co-op.** The host's route is the party's; a guest's gate press is refused;
    a guest's chest pick is its own.
-9. **Shop cadence (if option B).** The market stands at level 5 (or 6), the
-   full shop at 9, the boss at 10; the market has no Weapon Rack and a smaller
-   stock; keys and boss cadence are unchanged.
+9. **Market cadence.** The market stands at level 6, the full shop at 9, the
+   boss at 10; the market has no Weapon Rack and a smaller stock; keys and boss
+   cadence are unchanged.
 10. **Existing suite.** The full `tests/roguelite_regression.gd` and
     `python tools/run_tests.py` pass with the new contract assertions.
 
@@ -862,19 +897,21 @@ The regression should prove, not just exercise:
 The proposal changes **quality**, not the number of mods per clear. Hold that
 line.
 
-| Per clear | Today | Proposed |
+| Per clear | Before | Landed first slice |
 | --- | ---: | ---: |
-| Chest mods | 1 random (`2` on a boss hoard) | 1 choice from 3 (boss: 2 choices from 4) |
-| Pedestal mods | 1 choice from 3 per body | unchanged |
+| Chest | 1 random row (`2` on a boss hoard) | 1 choice from 3 from the promised surface and tier; 2X stands a second chest of the same promise; a Key chest pays keys and a Gear chest pays armour; the boss hoard still auto-rolls 2 |
+| Growth surfaces | 1 pedestal choice from 3 a body, plus the chest | **merged**: one chest, one choice from 3 a body - the level's own reward |
 | Armour | 1 piece per opener, 0–3 welded mods | unchanged |
-| Gold | base + kills + chest | base + kills + chest, × trial multiplier |
+| Gold | base + kills + chest | base + kills + chest; the harder gate pays a better/2X chest, not a gold multiplier |
 | Keys | boss only | boss only |
 
 Because a choice from a narrow pool is stronger than a random row from the
 chest's roll, the first playtest should watch for a depth jump. Guardrails:
 
-- Standard chest: 3 offers, common/epic, legendary still the existing 4–5.5%
-  chest weight from island 4 on.
+- Standard chest: 3 offers at the one tier the gate promised, off the island's
+  ladder — 16% legendary on island 4, 22% from island 5, bent by luck and raised
+  a rung by the elite trial. The old reward chest's quarter-weight roll (~4% and
+  5.5%) is gone with the pedestal.
 - Elite/spiked: epic+ but no guaranteed legendary outside the Hoard.
 - Offer count cap: 6; no chest becomes a shop.
 - Trial reward is one extra offer or one tier step, not both at launch.
@@ -908,7 +945,7 @@ hiding the others.
 
 **Non-goals for this proposal:** new biomes, new enemy families, a parkour
 island, a crystal currency, a shop-island clone, a weapon-swap system, or a
-replacement for the existing 161-row pool. The proposal is a routing and reward
+replacement for the existing 172-row pool. The proposal is a routing and reward
 layer over what is already built.
 
 ---
@@ -964,9 +1001,9 @@ These are proposed defaults, not blockers:
 | Who takes the gate? | Host, with party pings. | Matches the existing host-authoritative contract. |
 | When do the gates unseal? | After the first chest open, as today; the chest remains for late picks. | No waiting; the chest is still per-body. |
 | Does the boss hoard offer a choice? | Four offers, take two, one legendary. | The boss should feel like the run's ceiling, not a slot pull. |
-| What is the first chest? | Starter Contract: Arms, standard, 3 offers. | Teaches the promise before the first gate. |
-| Does the shop cadence change? | Keep A (shop 9) unless the pacing is in the first cut; then B (shop 5/6 + 9, market at the first stop). | A is the current spine; B is the smallest Crab-shaped rhythm change. |
-| Do trials appear at the shop? | No. | The shop is the breath; the boss is the wall. |
+| What is the first chest? | Starter Contract: an Attack chest of commons, 3 offers. | Teaches the promise before the first gate. |
+| Does the shop cadence change? | Yes: market at 6, full shop at 9, boss at 10. | The chosen Crab-shaped rhythm; it keeps the pre-boss shop and boss cadence. |
+| Do trials appear at the market or shop? | No. | The market is the breath, the shop is the kit-up; the boss is the wall. |
 | Is there a fourth gate? | Not in the launch version. | Three is readable; a fourth is a later meta reward, not a baseline. |
 | Do keys get a new sink? | No. | Keys stay the armory's currency; mastery is records. |
 | Does greed leave standard chests? | Yes; standard/elite chests exclude it. The reliable doors are the Greed contract, the Totem, the Hoard and the stall; a relic chest can still carry a greed relic. | Gives the Greed contract an identity and matches the source's narrow door. |
@@ -1027,13 +1064,13 @@ Short, grim, readable at a glance. The card is a promise, not a poem.
 
 ```
 THE BRIARWOOD              THE HOLLOW BENEATH        THE BLOOD PIT
-ARMS · OPEN                ARTS · SWARM              BODY · DUEL
-3 offers · common/epic     4 offers · +25% gold      3 offers · epic+
+ATTACK · COMMON · OPEN     ABILITY · COMMON · SWARM  DAMAGE · EPIC · OPEN
+3 offers                   2X chest                  3 offers
 "Sharpen the shot."        "More to kill. More to take."  "A heavier body. A better piece."
 ```
 
 ```
-THE CHEST KEEPS ITS PROMISE · ARTS · 4 OFFERS
+THE CHEST KEEPS ITS PROMISE · ATTACK · 4 OFFERS
 ```
 
 ```
@@ -1051,7 +1088,7 @@ HOARD · 4 OFFERS · TAKE 2 · ONE LEGENDARY
 ```json
 {
   "id": "gate_7_2",
-  "next_level": 7,
+  "next_level": 8,
   "kind": "fight",
   "biome": "caves",
   "faction": "demons",
@@ -1063,7 +1100,7 @@ HOARD · 4 OFFERS · TAKE 2 · ONE LEGENDARY
   "chest": {
     "pool": "arts",
     "tier": "standard",
-    "offers": 4,
+    "offers": 3,
     "picks": 1
   },
   "reward": {

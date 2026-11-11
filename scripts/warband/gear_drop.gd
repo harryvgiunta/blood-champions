@@ -16,6 +16,11 @@ extends RefCounted
 ## The hand slots, in the order a body lets go of them: the off hand first, so a
 ## blade is the last thing to leave.
 const DROP_SLOTS := ["off", "main"]
+## Everything the roster can dress a body in, in the order a corpse gives it up:
+## the steel first, then the worn plates. A hireling's death lets go of all of it
+## (`strip_kit`), so the reap that erases his name has nothing left to book back
+## into the shared stash and the kit stays the grave's.
+const KIT_SLOTS := ["off", "main", "head", "chest", "hands", "legs", "feet"]
 ## How far off the body a dropped piece lands. Far enough not to be inside the
 ## capsule the corpse leaves behind, close enough to read as "beside it".
 const DROP_OFFSET := 0.55
@@ -24,10 +29,20 @@ const DROP_OFFSET := 0.55
 ## Nothing is added to the stash here: the caller puts each piece in the world,
 ## and the warband's worth drops by exactly what is lying in the dirt.
 static func strip_hands(warband, merc_id: int) -> Array[String]:
+	return _strip(warband, merc_id, DROP_SLOTS)
+
+## Empty everything a mercenary is dressed in and answer the pieces. The fall's
+## rule is `strip_hands` (a shield is still strapped on); this is the death's, for
+## a body whose loss is the band's: the worn plates leave the record with the
+## steel, so nothing the man was carrying survives him on the books.
+static func strip_kit(warband, merc_id: int) -> Array[String]:
+	return _strip(warband, merc_id, KIT_SLOTS)
+
+static func _strip(warband, merc_id: int, slots: Array) -> Array[String]:
 	var out: Array[String] = []
 	if warband == null or not is_instance_valid(warband) or merc_id <= 0:
 		return out
-	for slot in DROP_SLOTS:
+	for slot in slots:
 		var item_id: String = warband.roster.unequip(merc_id, slot)
 		if not item_id.is_empty():
 			out.append(item_id)

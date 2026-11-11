@@ -31,10 +31,12 @@ extends RefCounted
 ## are the squad's business, not a feed to read; the warband contract forbids a
 ## loot step in the objective and forbids announcing pickups.
 ##
-## The fight itself is the ranger clones' rhythm with the guard made honest, and
-## with every frame accounted for: an ally inside `engage_radius` of a hostile its
-## mode lets it fight is closing, swinging, holding a short guard window, taking a
-## few steps off the line, or re-forming for the next blow. There is no fifth
+## The fight itself is a blood clone's, on the pit's own table. An ally inside
+## `engage_radius` of a hostile its mode lets it fight reads the hostile's wind-up
+## and answers it on the tier's clocks (`FIGHT_TIER` in `clone_ai.gd`: `Hard` by
+## the owner's word) - its guard on `guard_answer` after `reaction` seconds of the
+## telegraph, its feet on `step_chance` and `step_gap` - and puts its blows in on
+## the tier's `swing_gap`, walking its angle between them. There is no fourth
 ## answer, so a body with such a hostile in reach can never fall back to standing
 ## still.
 ##
@@ -43,22 +45,25 @@ extends RefCounted
 ## bow's range, down a clean line, sighted for the flight the arrow actually
 ## flies - because an archer that closes before it shoots has given up the one
 ## thing a bow has, and one that aims at the chest across a bow's length puts the
-## shaft in the dirt. A quiver with nothing in it is the exception that proves it:
-## a bow that cannot be drawn is no weapon at all (`_dry_bow`), so the body counts
-## itself unarmed for the arming errand and keeps the bow's range (`_keep_bow_range`)
-## rather than circling a hostile it can never hurt.
+## shaft in the dirt. How far ahead of a moving body it aims is the tier's `lead`,
+## the same share a clone of its rung leads. A quiver with nothing in it is the
+## exception that proves it: a bow that cannot be drawn is no weapon at all
+## (`_dry_bow`), so the body counts itself unarmed for the arming errand and keeps
+## the bow's range (`_keep_bow_range`) rather than circling a hostile it can never
+## hurt.
 ##
 ## On top of all of that, each body fights the way its own record says it does
 ## (`WarbandContracts.DISPOSITIONS`, read by `_disposition` and resolved by
 ## `profile_of`; `tests/squad_disposition_regression.gd` owns the contract): the
-## ladder above is the same for every body, and a disposition changes four things
-## inside it - the guard it rolls and whether it advances behind one, whether it
-## falls back out of a fight to bind a wound (`_withdraw_step`) or gives ground to
-## re-position a shot (`_kite_step`), which of the skills in its hands it reaches
-## for first (`_cast_step`), and which rank of the band's formation it walks in
-## (`_escort_post`: tanks in front, the melee wall behind them, the bows behind
-## that). A band of eight is eight intentions; nothing else about them differs,
-## because identical base stats are the campaign's rule.
+## ladder above is the same for every body and so is its clock, and a disposition
+## changes three things inside it - whether it advances behind a raised guard,
+## whether it falls back out of a fight to bind a wound (`_withdraw_step`) or gives
+## ground to re-position a shot (`_kite_step`), and which rank of the band's
+## formation it walks in (`_escort_post`: tanks in front, the melee wall behind
+## them, the bows behind that). Which skill it reaches for first is still the
+## disposition's (`_cast_step`), on the tier's cadence. A band of eight is eight
+## intentions; nothing else about them differs, because identical base stats are
+## the campaign's rule.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
@@ -71,6 +76,19 @@ const Arrow = preload("res://scripts/arrow.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 ## The pool's own floor for a raised guard, shared with the soul's `set_block`.
 const Stamina = preload("res://scripts/stamina.gd")
+## The pit's ladder of *how* a body fights (`scripts/clone_ai.gd`). The band
+## spends the same table as its own brain: a squadmate that has locked onto a
+## target fights at the skill of a blood clone of `FIGHT_TIER`, so the two sides
+## of a fight in this game are one set of clocks.
+const CloneAi = preload("res://scripts/clone_ai.gd")
+## The rung the squad fights on. `Hard` is the tier the owner named for the band
+## and the pit's authored body; a regression holds the name to the rung.
+const FIGHT_TIER := 3
+
+## The tier's knobs, resolved once: a `const` cannot call a static function and
+## the fight reads these every frame. Every key is present in the table, so this
+## is a direct read rather than a guarded one.
+var _ai: Dictionary = CloneAi.profile(FIGHT_TIER)
 
 ## Read-only sources the scene owns.
 var controller
@@ -297,51 +315,33 @@ const SEARCH_METRES := 40.0
 
 ## The fight ladder. Every frame a body spends with a hostile in range resolves
 ## to one of these, which is what keeps a squadmate from falling through to a
-## held body while there is still something to kill.
+## held body while there is still something to kill. What each state is *worth*
+## is `_ai`'s: the ladder below reads the clone tier for every clock in it.
 const FIGHT_CLOSE := 0   ## walking onto the target, blade down
 const FIGHT_SWING := 1   ## the blow on this frame
-const FIGHT_GUARD := 2   ## a rolled guard window, shuffling in
-const FIGHT_CIRCLE := 3  ## a few short steps off the line
-const FIGHT_RESET := 4   ## the beat between exchanges: no guard, closing again
+const FIGHT_GUARD := 2   ## a guard window the tier rolled, up for `GUARD_HOLD`
 
-## The guard is a window, never a stance: the chance is rolled fresh for every
-## exchange and the window is shorter than the rhythm it sits in, so an ally
-## never spends the whole fight behind a raised blade.
-const GUARD_CHANCE_MIN := 0.55
-const GUARD_CHANCE_MAX := 0.70
-const GUARD_MIN := 0.35
-const GUARD_MAX := 0.80
+## The guard is a window, never a stance, and the arm has to come back down for
+## the next one to be worth raising: the same pair the pit's clones spend, so an
+## ally's guard reads exactly like a clone's. Whether a wind-up earns one at all
+## is the tier's `guard_answer`, rolled once per blow.
+const GUARD_HOLD := 0.30
+const GUARD_COOLDOWN := 0.9
+## How far past its own blade a body reads a hostile's wind-up and may answer it:
+## the band its swing already covers, so it answers blows that can actually land.
+const THREAT_PAD := 0.9
 
-## A circle is punctuation, not a stance: after 1-3 swings a body may take a few
-## steps off the line and then lunge back in for the next blow.
+## The walk a body keeps inside its own blade: in on the target and round it, the
+## shape a clone's circle keeps (`direction * 0.6 + across * 0.8`), at the walk a
+## clone keeps inside its measure. It is the same step whether the body is waiting
+## on its swing clock, standing in a guard window or between two blows, so a fight
+## is one motion instead of a state machine with three shuffles in it.
 ##
-## Every window here is long and the lateral bias is small on purpose. A body's
-## facing *is* its move direction - `Archer.set_locomotion` snaps the whole rig to
-## it - so a step re-rolled every tenth of a second, with a chance of reversing,
-## spins the squad on the spot: four bodies whirling in little circles was the
-## worst reading of a fight in the game.
-const SWINGS_MIN := 1
-const SWINGS_MAX := 3
-const CIRCLE_CHANCE := 0.5
-const CIRCLE_MIN := 0.55
-const CIRCLE_MAX := 0.95
-const STEP_MIN := 0.40
-const STEP_MAX := 0.70
-## A body never reverses its own feet: it picks a side when the circle opens and
-## keeps it until the exchange is over.
-const CIRCLE_REVERSE := 0.0
-const CIRCLE_LATERAL_MIN := 0.22
-const CIRCLE_LATERAL_MAX := 0.40
-const CIRCLE_BACK_MIN := 0.18
-const CIRCLE_BACK_MAX := 0.35
-
-## The shuffle a body keeps while it holds a guard or re-forms after an exchange:
-## enough movement that it reads as working the angle rather than standing still,
-## small enough that the body keeps pointing at what it is fighting.
-const GUARD_CLOSE := 0.55
-const GUARD_SHUFFLE := 0.14
-const RESET_CLOSE := 0.60
-const RESET_SHUFFLE := 0.16
+## A body's facing *is* its move direction - `Archer.set_locomotion` snaps the
+## whole rig to it - so the side is picked once per body (`orbit`) and never
+## re-rolled: a step re-rolled every tenth of a second spins the squad on the spot.
+const CIRCLE_IN := 0.6
+const CIRCLE_ACROSS := 0.8
 ## How fast a squadmate may swing its heading round, in degrees per second. The
 ## intent is turned towards the wanted direction at this rate instead of being
 ## taken whole, so no roll, sidestep or separation push can snap a body through
@@ -352,9 +352,12 @@ const TURN_RATE := 320.0
 ## Clocks that run down for every ally, whatever it is doing this frame. The
 ## dressing clock is one of them: a bandage takes its seconds wherever the body
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
-## that keeps running behind a fight.
-const TRACK_CLOCKS := ["state_left", "step_left", "side", "retreat", "heal_left", "roam_left",
-	"rest_left", "route_left", "hurt_left", "withdraw_left", "cast_lock"]
+## that keeps running behind a fight. `swing_left`, `guard_cd` and `step_cd` are
+## the tier's own clocks (`swing_gap`, the guard cooldown, `step_gap`), ticked by
+## the same pass so a body that breaks off still pays them.
+const TRACK_CLOCKS := ["state_left", "swing_left", "guard_cd", "step_cd", "side",
+	"retreat", "heal_left", "roam_left", "rest_left", "route_left", "hurt_left",
+	"withdraw_left", "cast_lock"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
 ## hand can hold at all is the union plus a bow, which the squad's `_armed` test
@@ -398,44 +401,37 @@ const BOW_TURN_STEP := 0.25
 #
 # One body's way of fighting (`Contracts.DISPOSITIONS`), read off the roster per
 # mercenary every frame the squad drives it. The party's mode says which fights
-# the band takes; this says how each body takes them, and the numbers below are
-# the whole of the difference - no stat block, no second brain. The campaign's
-# rule is that identical base stats are the only fair ground; a disposition is
-# behaviour on top of it, so the same eighty-health body is a wall, a press or a
-# pair of eyes on the far end of a bow.
+# the band takes; this says how each body takes them, and the keys below are the
+# whole of the difference - no stat block, no second brain. The campaign's rule is
+# that identical base stats are the only fair ground; a disposition is behaviour
+# on top of it, so the same eighty-health body is a wall, a press or a pair of
+# eyes on the far end of a bow.
 #
-#   guard_*      the rolled guard band: a tank is up nearly every exchange, a
-#                melee body attacks more than it guards, a bow cannot guard.
+# What a disposition does *not* own is the fight's clock. How often a body swings,
+# how often it answers a wind-up with its guard or its feet, how fast it walks and
+# how far it leads a shot are the clone tier's (`FIGHT_TIER`), because a squadmate
+# and a blood clone are the same duellist on the same table. A disposition is what
+# that duellist does with the beats it is given.
+#
 #   shield       advance and hold behind the guard rather than at a closed blade.
 #   withdraw     health share under which the body leaves contact to bind a wound
 #                (0 = never; the tank's "never falls back").
 #   kites        give ground when crowded or struck, and loose again from range.
-#   cast_every   seconds between its skill casts, on top of the skill's own
-#                cooldown - the cadence that keeps a squad from reading as a
-#                magic show.
 #
 # Where a body stands in the band's formation is not here: the ranks run in
 # `Contracts.DISPOSITIONS` order, front line first, so one table owns the order a
 # squad walks in and the order the roster screen steps through.
 const TANK_PROFILE := {
-	"guard_chance_min": 0.92, "guard_chance_max": 1.0,
-	"guard_min": 0.45, "guard_max": 0.95,
-	"shield": true, "withdraw": 0.0, "kites": false, "cast_every": 3.0,
+	"shield": true, "withdraw": 0.0, "kites": false,
 }
 ## The share of its own pool a body falls back below. A tank's is zero - it never
 ## gives ground, so its dressing only ever happens on a field it already owns.
 const WITHDRAW_SHARE := 0.30
 const MELEE_PROFILE := {
-	"guard_chance_min": 0.40, "guard_chance_max": 0.55,
-	"guard_min": 0.30, "guard_max": 0.62,
 	"shield": false, "withdraw": WITHDRAW_SHARE, "kites": false,
-	"cast_every": 2.2,
 }
 const BOW_PROFILE := {
-	"guard_chance_min": 0.0, "guard_chance_max": 0.0,
-	"guard_min": GUARD_MIN, "guard_max": GUARD_MAX,
 	"shield": false, "withdraw": WITHDRAW_SHARE, "kites": true,
-	"cast_every": 1.6,
 }
 ## The line a falling-back body has to get behind: below `withdraw` it walks away
 ## from the nearest hostile, and the dressing opens on the first frame nothing
@@ -1329,7 +1325,7 @@ func _kite_step(actor, track: Dictionary, profile: Dictionary, direction: Vector
 			+ float(track.get("delta", 0.0))
 		if float(track["kite_stuck"]) >= KITE_STUCK_SECONDS:
 			return false
-	_enter(track, FIGHT_RESET)
+	_enter(track, FIGHT_CLOSE)
 	actor.combat.stop_block()
 	_steer(actor, -direction, track, true)
 	return true
@@ -1343,17 +1339,22 @@ func _kite_step(actor, track: Dictionary, profile: Dictionary, direction: Vector
 ## does not call on at all, and no rank at all is `ABILITY_OTHER`: used when
 ## nothing preferred fits, so an anointed piece is never dead weight.
 ##
-## `cast_every` is the cadence on top of each skill's own cooldown. Without it the
-## squad would be a magic show: every weapon skill costs a sliver and re-arms in a
+## The cadence on top of each skill's own cooldown is the tier's `cast_gap`, and
+## whether the body performs a skill at all is its `casts`: without them the squad
+## would be a magic show - every weapon skill costs a sliver and re-arms in a
 ## second, and eight bodies firing on every frame they were free would read as a
 ## formation of casters rather than fighters.
 func _cast_step(actor, track: Dictionary, profile: Dictionary, watcher, direction: Vector3,
 		distance: float) -> bool:
 	if float(track.get("cast_lock", 0.0)) > 0.0:
 		return false
-	# A window that is still running is what the body is doing: a rolled guard, a
-	# circle, a swing's own beat. A skill changes the plan, and the plan is not
-	# changed mid-beat.
+	# A tier that performs no item skill never reaches for one: the shallow half of
+	# the pit's ladder is a plain duellist's fight, and the band asks the same table
+	# for its own answer.
+	if not bool(_ai.get("casts", false)):
+		return false
+	# A window that is still running is what the body is doing: a guard, a swing's
+	# own beat. A skill changes the plan, and the plan is not changed mid-beat.
 	if float(track.get("state_left", 0.0)) > 0.0:
 		return false
 	var runner = actor.get("ability")
@@ -1376,7 +1377,7 @@ func _cast_step(actor, track: Dictionary, profile: Dictionary, watcher, directio
 	var best_slot := -1
 	var best_rank := Contracts.ABILITY_NEVER
 	var best_definition: Dictionary = {}
-	for slot in AbilityRules.SLOT_COUNT:
+	for slot in AbilityRules.MAX_SLOT_COUNT:
 		var definition: Dictionary = runner.definition(slot)
 		if definition.is_empty():
 			continue
@@ -1411,8 +1412,7 @@ func _cast_step(actor, track: Dictionary, profile: Dictionary, watcher, directio
 	if not bool(result.get("ok", false)):
 		return false
 	engaged = true
-	track["swing_due"] = false
-	track["cast_lock"] = float(profile.get("cast_every", 2.0))
+	track["cast_lock"] = float(_ai.cast_gap)
 	_enter(track, FIGHT_SWING)
 	_hold(actor)
 	return true
@@ -1435,7 +1435,7 @@ func _cast_fits(actor, definition: Dictionary, watcher, distance: float) -> bool
 		"barrage", "volley", "piercing_shot":
 			return distance <= _bow_reach(actor) and not actor.combat.quiver_empty() \
 				and _clear_shot(actor, watcher)
-		"projectile":
+		"projectile", "beam":
 			return distance <= CAST_RANGE and _clear_shot(actor, watcher)
 		"ward":
 			return float(actor.get("ward_seconds")) <= 0.0
@@ -1651,93 +1651,133 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	if in_reach and not actor.combat.quiver_empty() and _clear_shot(actor, watcher):
 		_fight_bow(actor, track, direction, distance)
 		return
-	var state := int(track.get("state", FIGHT_CLOSE))
-	var left := float(track.get("state_left", 0.0))
-	# A window that is still running is what the body is doing this frame. A
-	# circle keeps its steps even when they carry the body just outside reach:
-	# cutting it short is what made a break-off read as a stumble.
-	if state == FIGHT_CIRCLE and left > 0.0:
-		_circle_step(actor, direction, track)
-		return
-	# A guard holds from slightly beyond reach too - a body does not drop its
-	# blade the instant its target steps back - but a target that has broken
-	# clean away is a chase, and a chase is not shielded.
-	if state == FIGHT_GUARD and left > 0.0 and distance <= reach * 1.35:
-		_guard_step(actor, direction, track, distance)
-		return
-	# A window that has run out is the body's own signal to attack: the guard
-	# drops to the swing, and a circle ends in the lunge back in.
-	if state == FIGHT_GUARD or state == FIGHT_CIRCLE:
+	# The target is inside this body's blade now, and everything below is the
+	# clone's own exchange: read the hostile's wind-up, answer it if the tier's
+	# `reaction` let the body see it in time, and put the blow in on the tier's
+	# cadence. `_ai` is the whole of the rhythm - there is no second table here.
+	var standoff := _standoff_for(actor)
+	var threat := _threat_from(watcher, distance, _blade_span(actor))
+	if threat:
+		track["threat_clock"] = float(track.get("threat_clock", 0.0)) \
+			+ float(track.get("delta", 0.0))
+	else:
+		# Nothing is coming: the answers reset, so the next wind-up is read from
+		# its own first frame rather than from the last fight's clock.
+		track["threat_clock"] = 0.0
+		track["guard_answered"] = false
+		track["step_answered"] = false
+	# A body slower to notice simply eats the blows whose telegraph is shorter than
+	# its tier's `reaction`: the window is the hand, not the eye.
+	var answerable := threat and float(track["threat_clock"]) >= float(_ai.reaction)
+	# One answer per blow, and only the tier's share of the wind-ups earn one. The
+	# roll is spent the moment the swing is seen - never again while it is in the
+	# air - and the guard has to have come back down to be worth raising.
+	if answerable and not bool(track.get("guard_answered", false)) \
+			and float(track.get("guard_cd", 0.0)) <= 0.0 and _can_guard(actor) \
+			and float(actor.combat.attack_progress) >= 0.999:
+		track["guard_answered"] = true
+		if _rng.randf() < float(_ai.guard_answer):
+			_answer_guard(actor, track, direction)
+			return
+	# The same one roll, on the feet instead of the guard.
+	if answerable and not bool(track.get("step_answered", false)) \
+			and not bool(actor.combat.blocking) \
+			and float(track.get("step_cd", 0.0)) <= 0.0:
+		track["step_answered"] = true
+		if _rng.randf() < float(_ai.step_chance):
+			_answer_step(actor, track, direction)
+			return
+	# A guard window the tier rolled is what the body is doing while it runs out. A
+	# body does not lower its blade while the blow it answered is still in the air.
+	if int(track.get("state", FIGHT_CLOSE)) == FIGHT_GUARD:
+		if float(track.get("state_left", 0.0)) > 0.0:
+			_line_step(actor, direction, track)
+			return
 		actor.combat.stop_block()
-		track["swing_due"] = true
 	# Out of reach there is nothing to strike: close in to the standoff and stop
 	# there. A fighter that walks to the mob's own origin leans on it, and a squad
 	# of them shoves a whole pack across the clearing.
-	var standoff := _standoff_for(actor)
 	if distance > standoff:
 		_enter(track, FIGHT_CLOSE)
-		if bool(profile.get("shield", false)):
-			# The front line advances behind its guard: the blade comes up the
-			# moment a hostile is in sight of it and comes down only for the blow,
-			# which is the body that can be leaned on without being opened.
-			_advance(actor, watcher.global_position, track, standoff, true)
-			return
-		actor.combat.stop_block()
-		_advance(actor, watcher.global_position, track, standoff)
+		# The front line advances behind its guard: the blade comes up the moment a
+		# hostile is in sight of it and comes down only for the blow, which is the
+		# body that can be leaned on without being opened. That is a disposition's
+		# difference (`shield`), not a clock's.
+		_advance(actor, watcher.global_position, track, standoff,
+			bool(profile.get("shield", false)))
 		return
 	if bow:
 		_fight_bow(actor, track, direction, distance)
 		return
-	# An exchange this body has already rolled and not yet landed: swing the
-	# moment the blade is free. Re-rolling here is how a body that cannot swing
-	# this frame ends up guarding forever.
-	if not bool(track.get("swing_due", false)) and _blade_free(actor):
-		_roll_exchange(actor, track)
-		var rolled := int(track.get("state", FIGHT_CLOSE))
-		if not bool(track.get("swing_due", false)) and rolled == FIGHT_GUARD:
-			# Show the window on the frame it opens, so a guard is never an
-			# invisible state that only exists in a timer.
-			_guard_step(actor, direction, track, distance)
+	# Inside its own blade: a blow on the tier's cadence, and nothing else this
+	# frame until that cadence has been paid for.
+	if not bool(actor.combat.blocking) and float(track.get("swing_left", 0.0)) <= 0.0:
+		if _swing(actor, track, direction):
 			return
-		if not bool(track.get("swing_due", false)) and rolled == FIGHT_CIRCLE:
-			_circle_step(actor, direction, track)
-			return
-	if _swing(actor, track, direction):
-		return
-	_enter(track, FIGHT_CLOSE)
-	if bool(profile.get("shield", false)):
-		# The beat between exchanges is spent behind the guard, not with the arm
-		# hanging: the same shuffle off the line, and the blade already in the way
-		# of whatever comes at it next. This is the blocking difference - the other
-		# two dispositions roll for a window and stand open between them.
-		_guard_step(actor, direction, track, distance)
-		return
-	actor.combat.stop_block()
-	_close_step(actor, direction, track, distance)
+	_line_step(actor, direction, track)
 
 
+## The guard answer: one window, the body still working its angle in. The re-raise
+## clock starts the moment the arm comes up - a guard is not free again inside the
+## blow it answered - and the window is `GUARD_HOLD`, so the swing that follows is
+## the body's own business again. A spent arm gets no window: the roll was spent,
+## and the body fights open-handed rather than flapping a guard it cannot hold.
+func _answer_guard(actor, track: Dictionary, direction: Vector3) -> void:
+	actor.combat.face_block(direction)
+	track["guard_cd"] = GUARD_COOLDOWN
+	_enter(track, FIGHT_GUARD, GUARD_HOLD)
+	if not _raise_guard(actor, direction):
+		track["guard_cd"] = 0.0
+		_enter(track, FIGHT_CLOSE)
+	_line_step(actor, direction, track)
 
-## What this exchange is, rolled once at the moment the blade comes free, which is
-## the only moment the choice costs anything. A guard is drawn with a fresh chance
-## every exchange - never a cooldown-gated certainty - and the blow is never
-## withheld, only delayed by the short window it was rolled behind. The chance and
-## the window are the body's disposition's: a tank is up nearly every exchange and
-## holds it longer, a melee body spends its turns attacking.
-func _roll_exchange(actor, track: Dictionary) -> void:
-	var profile := profile_of(_disposition(int(track.get("merc_id", 0))))
-	if _can_guard(actor) and _rng.randf() < _rng.randf_range(
-			float(profile.get("guard_chance_min", GUARD_CHANCE_MIN)),
-			float(profile.get("guard_chance_max", GUARD_CHANCE_MAX))):
-		_enter(track, FIGHT_GUARD, _rng.randf_range(
-			float(profile.get("guard_min", GUARD_MIN)),
-			float(profile.get("guard_max", GUARD_MAX))))
+
+## The step answer: the tier's share of the threats it answers are spent on the
+## feet, and `step_gap` is the wait before the next one. The dodge is the body's
+## own (`WarbandBody.try_step`), the same step a player's roll takes, and a body
+## with no room to take it falls back on the squad's blocked-push sidestep.
+func _answer_step(actor, track: Dictionary, direction: Vector3) -> void:
+	track["step_cd"] = float(_ai.step_gap)
+	var tangent := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
+	if actor.has_method("try_step") and bool(actor.try_step(tangent)):
+		_enter(track, FIGHT_CLOSE)
 		return
-	if int(track.get("swings_left", 0)) <= 0:
-		track["swings_left"] = _rng.randi_range(SWINGS_MIN, SWINGS_MAX)
-		if _rng.randf() < CIRCLE_CHANCE:
-			_begin_circle(track)
-			return
-	track["swing_due"] = true
+	track["side"] = SIDESTEP_SECONDS
+	track["sign"] = float(track.get("orbit", 1.0))
+	_line_step(actor, direction, track)
+
+
+## Whether the hostile is in a blow this body can see coming: a clone's own
+## `combat` clock (the pit's bodies) or the `WINDUP` state the frontier's mobs
+## stand in (a watcher, a devil, a beast). A body with neither telegraphs nothing,
+## and a body that is not winding up has nothing to answer.
+func _threat_from(watcher, distance: float, span: float) -> bool:
+	if not is_instance_valid(watcher) or distance > span + THREAT_PAD:
+		return false
+	var other: Variant = watcher.get("combat")
+	if other != null:
+		var progress: Variant = other.get("attack_progress")
+		if progress != null:
+			return float(progress) < 0.999
+	return str(watcher.get("state")) == "WINDUP"
+
+
+## How far this body's right hand actually reaches. The standoff when the rig
+## cannot say, which is what a body built without a weapon profile answers.
+func _blade_span(actor) -> float:
+	var rig = actor.get("rig") if actor != null else null
+	if rig != null and is_instance_valid(rig) and rig.has_method("melee_reach"):
+		return float(rig.melee_reach("right"))
+	return STANDOFF
+
+
+## The walk a body keeps inside its own blade: in on the target and round it. It
+## is the clone's own step (`direction * 0.6 + across * 0.8`) and it is the same
+## step in every state a fight has - waiting on the swing clock, standing in a
+## guard window, or between two blows.
+func _line_step(actor, direction: Vector3, track: Dictionary) -> void:
+	var across := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
+	_steer(actor, direction * CIRCLE_IN + across * CIRCLE_ACROSS, track, false)
 
 
 ## The blow itself. False means the blade was not free this frame, so the caller
@@ -1753,8 +1793,10 @@ func _swing(actor, track: Dictionary, direction: Vector3) -> bool:
 	if not actor.combat.begin_melee("right", variant):
 		return false
 	engaged = true
-	track["swing_due"] = false
-	track["swings_left"] = int(track.get("swings_left", 0)) - 1
+	# The tier's own cadence: the wait *between* committed blows. The telegraph and
+	# the strike are the rig's authored clip, so a slower clone is still a readable
+	# duellist - and an ally is the same duellist.
+	track["swing_left"] = float(_ai.swing_gap)
 	_enter(track, FIGHT_SWING)
 	# The swing is a step as well as a cut: the body keeps its weight going in
 	# rather than cutting from a standstill.
@@ -1768,7 +1810,7 @@ func _swing(actor, track: Dictionary, direction: Vector3) -> bool:
 ## hurt. A body backed against a wall simply stands there - the ground it gave was
 ## the only ground it had.
 func _keep_bow_range(actor, track: Dictionary, direction: Vector3, distance: float) -> void:
-	_enter(track, FIGHT_RESET)
+	_enter(track, FIGHT_CLOSE)
 	actor.combat.stop_block()
 	if distance < BOW_HOLD_MIN:
 		_steer(actor, -direction, track, true)
@@ -1803,10 +1845,10 @@ func _fight_bow(actor, track: Dictionary, direction: Vector3, distance: float) -
 		if float(actor.rig.draw_amount) >= 0.85:
 			actor.combat.release_draw()
 		return
-	# The beat between shots is the same short steps a blade's circle uses, but it
-	# is not a circle: a bow is never breaking off, so it must not leave a window
-	# clock behind for the melee ladder to read.
-	_enter(track, FIGHT_RESET)
+	# The beat between shots is the same line step a blade keeps, and no window
+	# clock: a bow is never breaking off, so it must not leave a guard window behind
+	# for the melee ladder to read.
+	_enter(track, FIGHT_CLOSE)
 	# A body's facing is its walk direction (`Archer.set_locomotion`), so a target
 	# that came round behind the archer would be shot past its own shoulder. The
 	# turn is taken here, between shots, and never across a drawn string.
@@ -1816,7 +1858,7 @@ func _fight_bow(actor, track: Dictionary, direction: Vector3, distance: float) -
 	if distance > BOW_HOLD_MIN:
 		_hold(actor)
 		return
-	_circle_step(actor, direction, track)
+	_line_step(actor, direction, track)
 
 
 ## Whether the body is facing far enough away from `direction` to be worth turning
@@ -1838,7 +1880,10 @@ static func _off_the_target(actor, direction: Vector3) -> bool:
 ##
 ## The flight time is solved twice: the first pass ignores the lift the correction
 ## adds to the line, the second flies the corrected line. `Arrow.GRAVITY` owns the
-## fall, so the missile's own physics re-sights every archer in the squad.
+## fall, so the missile's own physics re-sights every archer in the squad - and how
+## much of the target's walk is led is the tier's `lead`, the share a clone of this
+## rung leads. A shallow clone drops its arrows where the body *was*, and so does a
+## squadmate on that rung.
 func _shot_point(actor, watcher) -> Vector3:
 	var mark: Vector3 = watcher.get_aim_position()
 	var speed := _bow_speed(actor) * BOW_SHOT_CHARGE
@@ -1847,7 +1892,7 @@ func _shot_point(actor, watcher) -> Vector3:
 	var drift := Vector3.ZERO
 	var walk: Variant = watcher.get("velocity")
 	if walk is Vector3:
-		drift = Vector3((walk as Vector3).x, 0.0, (walk as Vector3).z)
+		drift = Vector3((walk as Vector3).x, 0.0, (walk as Vector3).z) * float(_ai.lead)
 	var from: Vector3 = actor.get_aim_position()
 	var aim := mark
 	for pass_index in 2:
@@ -1895,71 +1940,20 @@ func _bow_reach(actor) -> float:
 	return _bow_speed(actor) * BOW_FLIGHT_SECONDS
 
 
-## A break-off beat: a quarter to a half second of steps, each with its own
-## direction and length, then the body lunges back in on the target for its next
-## blow - the clear-distance check above turns the end of the circle into a run.
-func _begin_circle(track: Dictionary) -> void:
-	_enter(track, FIGHT_CIRCLE, _rng.randf_range(CIRCLE_MIN, CIRCLE_MAX))
-	_roll_step(track)
-
-
-## One step of a circle. A reversal is possible on any step but is not the norm: a
-## body that flips every step reads as a glitch, one that never does reads as a
-## script.
-func _roll_step(track: Dictionary) -> void:
-	var orbit := float(track.get("orbit", 1.0))
-	if _rng.randf() < CIRCLE_REVERSE:
-		orbit = -orbit
-	track["orbit"] = orbit
-	track["lateral"] = _rng.randf_range(CIRCLE_LATERAL_MIN, CIRCLE_LATERAL_MAX)
-	track["back"] = _rng.randf_range(CIRCLE_BACK_MIN, CIRCLE_BACK_MAX)
-	track["step_left"] = _rng.randf_range(STEP_MIN, STEP_MAX)
-
-
-## Sideways with a backward bias, re-rolled every step, so the path is rugged and
-## very short instead of an orbit.
-func _circle_step(actor, direction: Vector3, track: Dictionary) -> void:
-	if float(track.get("step_left", 0.0)) <= 0.0:
-		_roll_step(track)
-	var across := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
-	var intent := across * float(track.get("lateral", 0.7)) \
-		- direction * float(track.get("back", 0.35))
-	_steer(actor, intent, track, false)
-
-
-## The guard window: up, pointed at the target, and the body still walking its
-## angle in. The block is raised once and dropped by the swing that follows. The
-## walk in is the same standoff the closing step keeps: a guard is a blade in the
-## way, not a body driving its shoulder into the target.
-func _guard_step(actor, direction: Vector3, track: Dictionary, distance: float = STANDOFF) -> void:
-	_raise_guard(actor, direction)
-	actor.combat.face_block(direction)
-	var across := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
-	_steer(actor, direction * GUARD_CLOSE * _press(distance) + across * GUARD_SHUFFLE,
-		track, false)
-
-
 ## Put the arm up, if the body has the wind to hold it. `Combat.start_block` has
 ## no pool rule of its own - a player's press is gated in `WarbandBody.set_block`
 ## before it is handed over, and the squad writes the same call directly, so it
 ## asks the same floor here. A spent body fights the exchange open-handed rather
 ## than flapping a guard it cannot hold: at zero the body's own tick drops the
 ## arm, and without this rule the squad would raise it again three frames later.
-func _raise_guard(actor, forward: Vector3) -> void:
+## True when the arm is up, which is what the guard answer's window is worth.
+func _raise_guard(actor, forward: Vector3) -> bool:
 	if actor.combat.blocking:
-		return
+		return true
 	var pool: Variant = actor.get("stamina")
 	if pool != null and float(pool) < Stamina.GUARD_MIN:
-		return
-	actor.combat.start_block(forward)
-
-
-## The beat between exchanges with no guard up: work the angle from the standoff,
-## never lean on the body in front of it.
-func _close_step(actor, direction: Vector3, track: Dictionary, distance: float = STANDOFF) -> void:
-	var across := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
-	_steer(actor, direction * RESET_CLOSE * _press(distance) + across * RESET_SHUFFLE,
-		track, false)
+		return false
+	return bool(actor.combat.start_block(forward))
 
 
 ## Where this body wants to stand: its own blade's reach, less a hand's width -
@@ -1974,17 +1968,6 @@ func _standoff_for(actor) -> float:
 		if blade_reach > 0.0:
 			wanted = clampf(blade_reach * 0.78, MIN_GAP + 0.15, STANDOFF)
 	return wanted
-
-
-## How much of a forward step the distance allows: 1 at the outer edge of the
-## standoff, 0 across the whole range a body should be holding, and a negative
-## share when the press has carried it inside `MIN_GAP`, which walks it back out.
-func _press(distance: float) -> float:
-	if distance >= STANDOFF:
-		return 1.0
-	if distance <= MIN_GAP:
-		return -0.9
-	return 0.0
 
 
 ## Put the body in a fight state, with the window it holds when the state has one.
@@ -2064,7 +2047,9 @@ func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0,
 	var gap := to.length() - maxf(stop_at, 0.0)
 	if gap <= 0.08 or to.length_squared() <= 0.0001:
 		if keep_guard:
-			_guard_step(actor, to.normalized(), track, to.length())
+			_raise_guard(actor, to.normalized())
+			actor.combat.face_block(to.normalized())
+			_line_step(actor, to.normalized(), track)
 		else:
 			_hold(actor)
 		return
@@ -2462,12 +2447,14 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 		_rng.seed = 9173
 	if not _track.has(merc_id):
 		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0,
-			"sign": 1.0, "state": FIGHT_CLOSE, "state_left": 0.0, "step_left": 0.0,
+			"sign": 1.0, "state": FIGHT_CLOSE, "state_left": 0.0,
+			"swing_left": 0.0, "guard_cd": 0.0, "step_cd": 0.0,
+			"threat_clock": 0.0, "guard_answered": false, "step_answered": false,
 			"heal_left": 0.0, "bandaging": false, "merc_id": merc_id,
 			"roam_left": 0.0, "rest_left": 0.0, "to_post": false,
 			"roam_to": actor.global_position, "delta": delta,
 			"fetch_key": "", "fetch_best": 0.0, "fetch_left": 0.0,
-			"swings_left": 0, "swing_due": false, "retreat": 0.0,
+			"retreat": 0.0,
 			"anchor": actor.global_position, "anchor_left": POCKET_SECONDS,
 			"crumb": -1, "route": PackedVector3Array(), "route_goal": actor.global_position,
 			"route_left": 0.0, "route_at": 0,
@@ -2475,7 +2462,7 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 			"kite_best": 0.0, "kite_stuck": 0.0,
 			"withdraw_left": 0.0, "withdrawing": false, "withdraw_failed": false,
 			"cast_lock": 0.0,
-			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
+			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0}
 	var track: Dictionary = _track[merc_id]
 	track["delta"] = delta
 	for key in TRACK_CLOCKS:

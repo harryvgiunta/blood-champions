@@ -170,6 +170,11 @@ func _stream(send: Callable, peer_id: int = 0, lossy: bool = false) -> void:
 var shared_warband := false
 ## Host only: guests whose world is up and who can be put into a body.
 var _fielded: Dictionary = {}
+## The player names this session has already sworn a character for. The latch is
+## what makes a guest's own body a joining gift and not a respawn: a name on this
+## book has had its character, and a body that falls afterwards is the band's
+## business like any other.
+var _sworn: Dictionary = {}
 ## Host only: souls on the field with no body, in the order they lost one.
 var _waiting: Array[int] = []
 ## Host only: the body each guest is driving, so the frame-driven flag follows
@@ -239,6 +244,10 @@ func setup(possession_controller: PossessionController, warband_node: WarbandSta
 	controller.lag_tracking = _role == "host" and peer_count() > 1
 	# A guest's own keys ask the host; the host's own keys stay local moves.
 	controller.transfer_requester = Callable(self, "request_body")
+	# And a soul whose body dies is moved by the session's rule, not the
+	# controller's: a guest stays in the character it was sworn, a host may take
+	# any of its own band's free bodies.
+	controller.cycle_on_death = Callable(self, "may_cycle_from")
 	if not controller.possession_changed.is_connected(_on_controller_possession_changed):
 		controller.possession_changed.connect(_on_controller_possession_changed)
 	if warband != null and not warband.changed.is_connected(_on_warband_changed):
@@ -1244,22 +1253,102 @@ func _seat_waiting() -> void:
 		if not _on_field(peer_id) or controller.merc_for_peer(peer_id) > 0:
 			_waiting.erase(peer_id)
 			continue
-		var free := _free_body()
-		if free <= 0:
-			return
+		var seat := _body_for_soul(int(peer_id))
+		if seat <= 0:
+			# The body is still being stood up by the host's world (a character
+			# sworn this frame), or there is genuinely nowhere to put the soul.
+			# Either way it waits: the next seat tick asks again.
+			continue
 		# The body's roster record is what the guest dresses it from: the copy goes
 		# out in the same call and before the map, so a mercenary that joined the
 		# warband since the last copy is already in it when the seat arrives.
 		if shared_warband:
 			# A seat is a new guest: the copy goes out whatever the last one was.
 			_push_warband(true)
-		_host_transfer(peer_id, free)
+		_host_transfer(peer_id, seat)
+
+
+## The body a waiting soul is owed. The host plays the band it owns. A guest does
+## not: a guest plays the character of their own that the host swore for them -
+## named after the player, dressed out of the party's stash - so the mercenaries
+## the recruiter hired stay the host's AI allies and no joining soul steps into
+## one.
+##
+## The body is looked up by the name the player joined with, which is what makes a
+## rejoin give back the character they left. A character that has fallen is not
+## replaced on the field: the soul waits, and the square re-swears the body, which
+## is what keeps a death the campaign's attrition and not a respawn.
+## Whether a soul whose body has just died may take the next free body. The host
+## plays the band it owns, so it may. A guest plays the character the host swore
+## for the name it joined with and nothing else: their soul waits for that body -
+## or for the square to swear a replacement - and never walks into a mercenary the
+## recruiter hired for somebody else.
+func may_cycle_from(peer_id: int, merc_id: int) -> bool:
+	if controller == null:
+		return true
+	if peer_id == controller.local_peer_id:
+		return true
+	if merc_id > 0 and warband != null and warband.roster.is_player(merc_id):
+		return false
+	return not _sworn.has(name_of(peer_id))
+
+
+func _body_for_soul(peer_id: int) -> int:
+	if controller != null and peer_id == controller.local_peer_id:
+		return _free_body()
+	var named := name_of(peer_id)
+	if named.is_empty():
+		# `field_ready` can land before the name does. Enlisting a body under a
+		# placeholder would leave the guest with a character nobody can rejoin.
+		return -1
+	var own: int = warband.player_body_for(named)
+	if own > 0:
+		_sworn[named] = true
+		if warband.souls.is_possessed(own):
+			return -1
+		return own
+	if _sworn.has(named) and not _home_ground():
+		# Their body fell, and the party is not standing on the square: the soul
+		# watches until it is. Only the town raises a replacement.
+		return -1
+	if world == null or not world.has_method("enlist_player"):
+		return _free_body()
+	var sworn := int(world.call("enlist_player", peer_id, named))
+	if sworn <= 0:
+		return _free_body()
+	_sworn[named] = true
+	if warband.souls.has_body(sworn) and not warband.souls.is_possessed(sworn):
+		return sworn
+	# The character was sworn this frame and the world has not stood it up yet:
+	# the seat lands on the next tick, once the router knows the body.
+	return -1
+
+
+## Whether the party stands on the town's own ground - the one place a fallen
+## player's character is sworn again.
+func _home_ground() -> bool:
+	if world == null or controller == null:
+		return false
+	var director = world.get("roguelite")
+	if director != null and is_instance_valid(director) and director.has_method("is_running") \
+			and bool(director.is_running()):
+		return false
+	var town = world.get("town")
+	var focus = controller.focus_body()
+	if town == null or focus == null or not is_instance_valid(focus):
+		return false
+	return bool(town.call("in_square", focus))
+
 
 ## The first living, unoccupied body on the field, in roster order - one the
 ## world says can move first (a prisoner still caged in the opening comes last).
 func _free_body() -> int:
 	var fallback := -1
 	for merc_id in warband.souls.possessable_ids():
+		# A body that belongs to a joining player is theirs and nobody else's: the
+		# host's own hotkeys and a vacant seat both keep off it.
+		if warband.roster.is_player(int(merc_id)):
+			continue
 		var actor := controller.body_of(merc_id)
 		if actor == null or not is_instance_valid(actor) or not actor.alive or actor.downed:
 			continue
@@ -1785,6 +1874,7 @@ func _teardown() -> void:
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	_names.clear()
 	_fielded.clear()
+	_sworn.clear()
 	_waiting.clear()
 	_mob_sent.clear()
 	_mirror_sent = false

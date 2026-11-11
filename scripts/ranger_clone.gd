@@ -33,6 +33,12 @@ const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
+const CloneAi = preload("res://scripts/clone_ai.gd")
+const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
+const AbilitySignatures = preload("res://scripts/ability_signatures.gd")
+const SpellProjectile = preload("res://scripts/spell_projectile.gd")
 
 const MAX_HEALTH := 100.0
 const GOLD := 14
@@ -46,6 +52,30 @@ const BLADE_RANGE := 11.0
 ## The bow only fires backwards of this: closer than that the clone advances
 ## through its own shot lane instead of backing off.
 const BOW_MIN_RANGE := 6.0
+## The brain's own clocks - swing cadence, guard share, reaction delay, sidestep
+## cadence, pace, turn, sight, bow lead and blow weight - are `CloneAi`'s: this
+## body reads one tier and spends it, so the pit can be retuned without touching a
+## clock. The rig's telegraph and strike are its clip's and stay as authored.
+
+## The item skills a clone may roll for itself. A clone is a duellist with a
+## ranger's kit, so it performs the beats that are a blade, a bow or a staff: the
+## shapes this body can aim and the scene can resolve from its own `attacked`
+## road. The list itself is the shared table's (`AbilityRules.AI_KINDS`) - a
+## recruit rolls from the same one - and a `const` alias keeps this module's own
+## name for it.
+const CASTABLE_KINDS := AbilityRules.AI_KINDS
+## One beat's reach for a ground skill is its radius; an aimed one is allowed to
+## pick a body out of the middle distance.
+const CAST_ARROW_REACH := 28.0
+const CAST_SPELL_REACH := 26.0
+## Bodies one clone beat may reach, on top of what the definition asks for: a pit
+## of four bodies does not need a skill that sweeps a crowd of twelve.
+const CAST_MAX_VICTIMS := 6
+## How long a clone that has decided to cast holds its hands off its blade. A cut
+## is performed from a whole stance, so the brain reserves the body: no new swing
+## starts until the clip it is already inside has finished, and if the stance never
+## comes the hold expires and the fight carries on.
+const CAST_HOLD := 1.2
 
 ## What a clone is issued, one rung per depth block - one block is ten levels,
 ## `stage_index + 1` in the director - so the kit steps on the same beat the run
@@ -94,6 +124,23 @@ var depth := 1
 ## kit and hits with it; the island sets this so a wave of them is a fight and not
 ## a firing squad.
 var damage_scale := 1.0
+## Which `CloneAi` tier this body fights on. `-1` takes the session's tier when
+## `configure` runs; a spawner that wants a body of its own writes it first.
+var ai_tier := -1
+## The resolved knobs, read every tick. A clone is born on `Hard` and is never
+## left with an empty table, so a body built without `configure` still fights.
+var _ai: Dictionary = CloneAi.profile(CloneAi.DEFAULT_TIER)
+## The item skill this body rolled for itself when its kit was issued (empty
+## below `Medium`, where the tier performs nothing), and the runner that owns the
+## beat: the cooldown, the stamina, the committed pose and the cue clock.
+var ability_id := ""
+var ability
+## The brain's own wait between performances, beside the skill's cooldown.
+var _cast_wait := 0.0
+## Seconds left on a decided performance: while it runs the hands keep off the
+## blade so the stance the skill needs can arrive.
+var _cast_intent := 0.0
+var _cast_aim := Vector3.ZERO
 var authoritative := true
 var replica := false
 var auto_ai := true
@@ -121,6 +168,15 @@ var _target
 var _retarget := 0.0
 var _guard_hold := 0.0
 var _guard_cooldown := 0.0
+## Set once this blow has had its one guard answer rolled, so the decision is not
+## re-asked every frame the attacker's swing is in the air: a fifth of a chance
+## polled sixty times a second is a certainty.
+var _guard_answered_swing := false
+## The same, for the sidestep: a share polled every frame is a certainty too.
+var _step_answered_swing := false
+## How long this attacker's wind-up has been in the air, against the tier's
+## `reaction`: a clone slower to notice never answers a short one at all.
+var _threat_clock := 0.0
 var _step_cooldown := 0.0
 var _attack_cooldown := 0.0
 var _state_time := 0.0
@@ -192,6 +248,14 @@ func _ready() -> void:
 	combat.damage_enabled = false
 	combat.target_mask = 0
 	combat.shot.connect(_on_bow_released)
+	# The skill runner is the shared one, on the same contract as a ranger's: it
+	# owns *when* a beat happens and this body owns *what* it does, because a
+	# clone's beats land on rangers and not on the wood's mobs.
+	ability = AbilityRunner.new()
+	ability.name = "CloneAbility"
+	add_child(ability)
+	ability.setup(self, rig, combat, 5.8)
+	ability.cue.connect(_on_ability_cue)
 	var cover := CoverMovement.new()
 	add_child(cover)
 	cover.setup(self,_collider)
@@ -213,6 +277,13 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	replica = not is_authoritative
 	attack_mode = mode
 	auto_ai = mode == "scene"
+	# The session's tier unless the spawner named one before configuring: a run
+	# that wants a body of its own writes `ai_tier` first, and everything else
+	# follows the dial `CloneAi.set_tier` turns.
+	if ai_tier < 0:
+		ai_tier = CloneAi.current_tier
+	ai_tier = CloneAi.clamp_tier(ai_tier)
+	_ai = CloneAi.profile(ai_tier)
 	_steering.bias = 1.0 if clone_id % 2 == 0 else -1.0
 	_lod = MobLod.new(clone_id * 3)
 	aggro_range = 40.0 if mode == "direct" else 30.0
@@ -230,6 +301,16 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	_swing_count = 0
 	_target = null
 	_retarget = 0.0
+	_guard_answered_swing = false
+	_step_answered_swing = false
+	_threat_clock = 0.0
+	_attack_cooldown = 0.0
+	_step_cooldown = 0.0
+	_cast_wait = 0.0
+	_cast_intent = 0.0
+	_cast_aim = Vector3.ZERO
+	ability.cancel()
+	ability.cooldowns.fill(0.0)
 	combat.source_id = 400 + clone_id
 	combat.damage_enabled = false
 	combat.target_mask = 0
@@ -251,6 +332,20 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	_body.visible = true
 
 
+## Move this body onto another `CloneAi` tier, in place. A live body keeps its
+## pool, kit and health - only its brain is retuned - so a menu or a lab can walk
+## the ladder while the pit is fighting. Returns the tier now in force.
+func set_ai_tier(tier: int) -> int:
+	ai_tier = CloneAi.clamp_tier(tier)
+	_ai = CloneAi.profile(ai_tier)
+	return ai_tier
+
+
+## The name of the tier this body fights on, for a plate or a log line.
+func ai_tier_name() -> String:
+	return CloneAi.name_of(ai_tier)
+
+
 func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	global_position = point
 	home = point
@@ -263,6 +358,13 @@ func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	_death_handled = false
 	_impact_force = Vector3.ZERO
 	_swing_pending = false
+	_threat_clock = 0.0
+	_step_answered_swing = false
+	_guard_answered_swing = false
+	_cast_wait = 0.0
+	_cast_intent = 0.0
+	_cast_aim = Vector3.ZERO
+	ability.cancel()
 	state = "IDLE"
 	_state_time = 0.0
 	collision_layer = 2
@@ -444,7 +546,9 @@ func _pool_health(life: float = 1.0) -> float:
 ## The run's floor applied to the body: `life` multiplies the pool its depth gave
 ## it, and the verb sets from the depth rather than compounding, so a body scaled
 ## twice is the floor's body, not its square. `rate` is accepted for the shared
-## dialect with the devils; a clone's step and swing clocks are its brain's own.
+## dialect with the devils and spent on nothing: a clone's step and swing clocks
+## are its `CloneAi` tier's, and a floor that scaled both would be two hands on
+## one dial.
 func apply_difficulty(life: float, _rate: float = 1.0) -> void:
 	if not alive:
 		return
@@ -495,7 +599,37 @@ func _roll_loadout() -> void:
 	for slot in ["head","chest","hands","legs","feet"]:
 		pieces[slot] = int(sets[rng.randi_range(0,sets.size() - 1)])
 	rig.apply_loadout(State.build_loadout(_main_item,off,pieces))
+	_roll_ability(rng)
 	_tint_rig()
+
+
+## The one item skill this body performs, rolled off the same seed as its kit so
+## a replica, a reload and a re-configure all name the same beat. Only the tiers
+## from `Medium` up issue one, and only a skill this body's hands can actually
+## perform: the grants table fits a skill to the hand that holds it, so a bow
+## clone rolls a bow's beats and a greatsword clone rolls the great blade's.
+func _roll_ability(rng: RandomNumberGenerator) -> void:
+	ability_id = ""
+	rig.set_ability_loadout([])
+	if not bool(_ai.get("casts", false)):
+		return
+	var pool: Array[String] = []
+	for definition in AbilityRules.ABILITIES:
+		var effect: Dictionary = definition.get("effect", {})
+		if not CASTABLE_KINDS.has(str(effect.get("kind", ""))):
+			continue
+		# A skill that sweeps its own lane only reaches it by moving the body
+		# (the lunge's dash); this brain commits its beat on the spot, so a
+		# travelling skill would cut the air it never crossed.
+		if bool(effect.get("path_damage", false)):
+			continue
+		if not AbilityRules.fits_rig(definition, rig):
+			continue
+		pool.append(str(definition.get("id", "")))
+	if pool.is_empty():
+		return
+	ability_id = pool[rng.randi_range(0,pool.size() - 1)]
+	rig.set_ability_loadout([ability_id])
 
 
 ## Heavy crimson-black: every mesh under the rig gets its own duplicated
@@ -554,9 +688,30 @@ func _step_ai(delta: float, candidates: Array) -> void:
 	_senses.age(delta)
 	stamina = minf(Stamina.MAX,stamina + Stamina.REGEN_PER_SECOND * delta)
 	combat.advance(delta)
+	# A body with no skill has nothing for the runner to clock: `advance` rebuilds
+	# the grant row every tick, and a pit of eight of them is eight rows a frame
+	# spent on a bar nobody will press.
+	if not ability_id.is_empty():
+		ability.advance(delta)
+	_cast_wait = maxf(0.0,_cast_wait - delta)
+	if _cast_intent > 0.0:
+		_cast_intent = maxf(0.0,_cast_intent - delta)
+		if _cast_intent <= 0.0:
+			# The stance never came. The fight is not owed a longer wait: swing,
+			# and decide again once this exchange has been paid for.
+			_cast_wait = maxf(_cast_wait,1.0)
 	if _swing_pending and combat.attack_progress >= STRIKE_PROGRESS:
 		_swing_pending = false
 		_resolve_melee()
+	if ability.active:
+		# A skill is a committed beat: the feet stand, the guard and the blade
+		# wait, and the runner's own clock finishes it. Nothing else may move the
+		# body while its signature is being performed.
+		state = "CAST"
+		_move_intent = Vector3.ZERO
+		_move_speed = 0.0
+		_apply_motion(delta,Vector3.ZERO)
+		return
 	var roster: Array = candidates
 	if roster.is_empty() and is_instance_valid(fallback_target):
 		roster = [fallback_target]
@@ -583,7 +738,7 @@ func _step_ai(delta: float, candidates: Array) -> void:
 		state = "RETURN" if outside else "IDLE"
 		if patrol.length_squared() > 0.0001:
 			_move_intent = _steer(patrol)
-			_move_speed = 4.2 if outside else 2.6
+			_move_speed = _pace(4.2 if outside else 2.6)
 			_apply_motion(delta,_move_intent)
 		else:
 			_apply_motion(delta,Vector3.ZERO)
@@ -595,22 +750,46 @@ func _step_ai(delta: float, candidates: Array) -> void:
 	combat.set_aim(_aim_point(_target,distance))
 	combat.face_block(direction)
 	var threat: bool = _target_attacking(_target) and distance <= float(rig.melee_reach("right")) + 0.9
+	if not threat:
+		_guard_answered_swing = false
+		_step_answered_swing = false
+		_threat_clock = 0.0
+	else:
+		_threat_clock += delta
+	# A clone that is slower to notice simply never answers a short wind-up: the
+	# tier's `reaction` is how much of one has to pass before its hands move.
+	var answerable: bool = threat and _threat_clock >= float(_ai.reaction)
 	if combat.blocking:
 		_guard_hold -= delta
 		if _guard_hold <= 0.0 and not threat:
 			combat.stop_block()
-	elif threat and _guard_cooldown <= 0.0 and combat.attack_progress >= 0.999:
-		if combat.start_block(direction):
+	elif answerable and not _guard_answered_swing and _guard_cooldown <= 0.0 \
+			and combat.attack_progress >= 0.999:
+		# One answer per blow, and only the tier's share of wind-ups earn it: the
+		# roll is spent the moment the swing is seen, never again while it is in
+		# the air.
+		_guard_answered_swing = true
+		if randf() < float(_ai.guard_answer) and combat.start_block(direction):
 			_guard_hold = 0.30
 			_guard_cooldown = 0.9
-	if threat and not combat.blocking and _step_cooldown <= 0.0 and dodge.can_step(is_on_floor(),false):
-		var tangent := Vector3(-direction.z,0.0,direction.x)
-		if clone_id % 2 != 0:
-			tangent = -tangent
-		if dodge.try_step(tangent,is_on_floor(),false):
-			_step_cooldown = 1.6
+	if answerable and not combat.blocking and not _step_answered_swing \
+			and _step_cooldown <= 0.0 and dodge.can_step(is_on_floor(),false):
+		# The same one roll, on the feet instead of the guard.
+		_step_answered_swing = true
+		if randf() < float(_ai.step_chance):
+			var tangent := Vector3(-direction.z,0.0,direction.x)
+			if clone_id % 2 != 0:
+				tangent = -tangent
+			if dodge.try_step(tangent,is_on_floor(),false):
+				_step_cooldown = float(_ai.step_gap)
 	var want_bow := distance > BLADE_RANGE
-	if combat.attack_progress >= 0.999 and not combat.blocking:
+	if _try_ability(distance):
+		state = "CAST"
+		_move_intent = Vector3.ZERO
+		_move_speed = 0.0
+		_apply_motion(delta,Vector3.ZERO)
+		return
+	if combat.attack_progress >= 0.999 and not combat.blocking and _cast_intent <= 0.0:
 		if want_bow and rig.weapon != "bow":
 			rig.set_weapon("bow")
 		elif not want_bow and rig.weapon == "bow":
@@ -639,7 +818,8 @@ func _apply_motion(delta: float, facing_direction: Vector3) -> void:
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
 	if facing_direction.length_squared() > 0.0001:
-		rotation.y = lerp_angle(rotation.y,atan2(-facing_direction.x,-facing_direction.z),minf(delta * 10.0,1.0))
+		rotation.y = lerp_angle(rotation.y,atan2(-facing_direction.x,-facing_direction.z),
+			minf(delta * 10.0 * float(_ai.turn),1.0))
 	var before := global_position
 	MobLod.move(self)
 	position.x = clampf(position.x,-bounds,bounds)
@@ -653,8 +833,17 @@ func _present(actual: Vector3) -> void:
 	rig.set_roll(-1.0,Vector3.FORWARD)
 	rig.set_slide(-1.0,Vector3.FORWARD)
 	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
-	rig.set_locomotion(actual,is_on_floor())
+	# The rig turns onto the walk this clone meant to make, never onto the ground
+	# a stopped blow shoved it across: a facing read from the shove leaves the
+	# clone's back to the body whose blow its guard just stopped.
+	rig.set_locomotion(actual,is_on_floor(),_move_intent)
 	combat.set_motion(actual,actual.length() > 0.4,is_on_floor())
+
+
+## Every pace this brain keeps, on the tier's own speed: the closing run, the
+## circling walk, the shot lane and the patrol.
+func _pace(base: float) -> float:
+	return base * float(_ai.speed)
 
 
 ## The bow is a walking weapon here: the clone closes the gap between shots
@@ -663,17 +852,17 @@ func _present(actual: Vector3) -> void:
 func _bow_step(distance: float, direction: Vector3) -> void:
 	if distance < BOW_MIN_RANGE:
 		_move_intent = -direction
-		_move_speed = 5.4
+		_move_speed = _pace(5.4)
 	elif rig.draw_amount > 0.0 or rig.phase in ["DRAWING","HOLDING"]:
 		var tangent := Vector3(-direction.z,0.0,direction.x) * 0.35
 		if clone_id % 2 != 0:
 			tangent = -tangent
 		_move_intent = _steer(tangent)
-		_move_speed = 1.4
+		_move_speed = _pace(1.4)
 	else:
 		_move_intent = _steer(direction)
-		_move_speed = 4.6
-	if combat.can_draw() and _has_sight(_target):
+		_move_speed = _pace(4.6)
+	if combat.can_draw() and _cast_intent <= 0.0 and _has_sight(_target):
 		combat.begin_draw()
 	elif rig.draw_amount >= 0.92 and rig.phase in ["DRAWING","HOLDING"]:
 		combat.release_draw()
@@ -683,20 +872,23 @@ func _blade_step(distance: float, direction: Vector3) -> void:
 	var reach: float = rig.melee_reach("right")
 	if distance > reach * 0.80:
 		_move_intent = _steer(direction)
-		_move_speed = 5.8
+		_move_speed = _pace(5.8)
 	else:
 		var tangent := Vector3(-direction.z,0.0,direction.x) * 0.55
 		if clone_id % 2 != 0:
 			tangent = -tangent
 		_move_intent = tangent
-		_move_speed = 2.6
-		if _attack_cooldown <= 0.0 and combat.attack_progress >= 0.999 and not combat.blocking \
+		_move_speed = _pace(2.6)
+		if _attack_cooldown <= 0.0 and _cast_intent <= 0.0 \
+				and combat.attack_progress >= 0.999 and not combat.blocking \
 				and _has_sight(_target):
 			var swing := "diagonal_right" if (clone_id + _swing_count) % 2 == 0 else "diagonal_left"
 			if combat.begin_melee("right",swing):
 				_swing_count += 1
 				_swing_pending = true
-				_attack_cooldown = 0.85
+				# The tier's own cadence. The telegraph and the strike are the
+				# rig's clip and stay as authored; this is the wait after it.
+				_attack_cooldown = float(_ai.swing_gap)
 
 
 func _resolve_melee() -> void:
@@ -725,11 +917,306 @@ func _resolve_melee() -> void:
 
 
 func _melee_damage() -> float:
-	if rig.weapon == "dagger":
-		return float(Archer.dagger_profile(0).damage) * damage_scale
 	if rig.weapon == "bow":
 		return 0.0
-	return float(Archer.SWORD_DATA[clampi(rig.sword_index,0,2)].damage) * damage_scale
+	return float(rig.melee_base_damage("right")) * damage_scale * float(_ai.blow)
+
+
+# --- the skill it rolled ---------------------------------------------------
+#
+# `AbilityRunner` owns *when*: the cooldown, the stamina, the committed pose, the
+# rig's own clip and the cue clock. This body owns *what a beat does*, exactly as
+# `WarbandAbilities` does for a ranger - but with the pit's targets and the pit's
+# roads. A blade beat is announced through `attacked`, so the ranger's guard,
+# armour, blood and damage numbers stay the world's business on the same contract
+# the clone's sword already uses; an arrow is a real shaft and a spell a real orb,
+# both authoritative, on the mask the clone's own bow already fires down.
+
+## Attempt the rolled skill. The tier's willingness, the hand that must hold the
+## piece, the stance and the sight are all asked before the runner is touched: a
+## refused key costs a fraction of a second, never a swing.
+func _try_ability(distance: float) -> bool:
+	if ability_id.is_empty() or _cast_wait > 0.0:
+		return false
+	if ability == null or ability.active:
+		return false
+	if not _engaged(_target):
+		return false
+	var definition := AbilityRules.by_id(ability_id)
+	if definition.is_empty() or distance > _cast_reach(definition):
+		return false
+	if not _has_sight(_target):
+		return false
+	var slot := _cast_slot()
+	if slot < 0:
+		# The hands do not hold the piece this skill is fired from right now - a
+		# bow skill while the blade is out. Wait rather than re-asking every frame.
+		_cast_wait = 0.5
+		return false
+	if combat.blocking:
+		return false
+	# A skill still on its own clock is not worth a stance: the reserve below holds
+	# the blade still, and a spent piece would park the fight for its whole
+	# cooldown. Wait out what is left of it and swing in the meantime.
+	if slot < ability.cooldowns.size() and float(ability.cooldowns[slot]) > 0.0:
+		_cast_wait = minf(3.0, float(ability.cooldowns[slot]))
+		return false
+	# The aim is committed before the key, not after: a bow skill's first cue fires
+	# inside `activate` itself, and a beat aimed at nothing is a shot into the dirt.
+	_cast_aim = _aim_point(_target,distance)
+	_cast_intent = CAST_HOLD
+	var answer: Dictionary = ability.activate(slot)
+	if bool(answer.get("ok", false)):
+		_cast_intent = 0.0
+		_cast_wait = float(_ai.cast_gap)
+		return true
+	if str(rig.phase) == "READY":
+		# A whole stance and still refused: it is the skill's own clock or a spent
+		# pool, and neither is bought by holding the blade still.
+		_cast_intent = 0.0
+		_cast_wait = 0.75
+	return false
+
+
+## How far out the body commits to what it rolled: a ground beat reaches its own
+## radius, a spell or an arrow is aimed at whatever the eye can see.
+func _cast_reach(definition: Dictionary) -> float:
+	var effect: Dictionary = definition.get("effect", {})
+	match str(effect.get("kind", "")):
+		"melee_arc", "melee_ring", "melee_wave":
+			# The decision and the cut are the same measure: a clone that committed
+			# a metre outside its own reach would whiff a skill it paid for.
+			return _beat_radius(effect)
+		"projectile":
+			return CAST_SPELL_REACH
+	return CAST_ARROW_REACH
+
+
+## Where the rolled skill sits on the bar the hands grant right now, or -1 when
+## nothing on that bar is this skill.
+func _cast_slot() -> int:
+	var grants := AbilityRules.granted(rig)
+	for slot in grants.size():
+		var definition = grants[slot]
+		if definition is Dictionary and str(definition.get("id", "")) == ability_id:
+			return slot
+	return -1
+
+
+## One performed beat, resolved from the definition the runner is holding so a
+## hand swapped mid-skill can never leave the wrong effect behind.
+func _on_ability_cue(id: String, cue: String, index: int) -> void:
+	if not alive or replica or ability == null or not ability.active:
+		return
+	if str(ability.active_id) != id:
+		return
+	var definition: Dictionary = ability.active_definition
+	if definition.is_empty():
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var aim: Vector3 = _cast_aim if _cast_aim != Vector3.ZERO \
+		else rig.global_position - rig.global_basis.z
+	AbilitySignatures.cue(_fx_parent(), rig, definition, cue, index,
+		_cast_forward(), aim)
+	match str(effect.get("kind", "")):
+		"barrage", "volley", "piercing_shot":
+			_cast_arrows(definition, index)
+		"projectile":
+			_cast_spell(definition)
+		"melee_arc", "melee_ring":
+			_cast_blade(definition, cue)
+		"melee_wave":
+			_cast_wave(definition, cue, index)
+
+
+## Every activation keeps the point it was committed to: a beat's cues may fire
+## inside `activate` itself, before the caller sees the answer, so the aim is set
+## by the brain before the key is pressed and cleared by nothing else.
+
+
+## The line a beat is drawn and thrown down: the aim point it committed to, or
+## the body's own facing when there was nobody to aim at.
+func _cast_forward() -> Vector3:
+	var forward := _cast_aim - global_position if _cast_aim != Vector3.ZERO \
+		else -global_basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		return Vector3.FORWARD
+	return forward.normalized()
+
+
+## The world a beat's art is drawn into: the scene's own root, never the body, so
+## a crescent stays where it was cut.
+func _fx_parent() -> Node3D:
+	var world = get_parent()
+	return world if world is Node3D else self
+
+
+## What one beat is worth: the definition's own price, in the clone's hand.
+func _cast_damage(definition: Dictionary) -> float:
+	return AbilityRules.damage_for(definition, rig) * damage_scale * float(_ai.blow)
+
+
+## A blade beat: an arc in front or a ring around, whoever the roster has inside
+## it. The wind-up and the dash are presentation - the ring and the thrust cut.
+func _cast_blade(definition: Dictionary, cue: String) -> void:
+	if cue == "wind" or cue == "dash":
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var radius := _beat_radius(effect)
+	var arc := float(effect.get("arc_degrees", 360.0))
+	var ring := str(effect.get("kind", "")) == "melee_ring" or arc >= 359.0
+	var damage := _cast_damage(definition)
+	for victim in _beat_victims(global_position, radius, arc, ring):
+		_land_beat(victim, damage)
+
+
+## The reach of a ground beat. The definition authors the shape, but a skill is
+## performed with the blade the body already holds: a shove's own 1.7 m would cut
+## short of where this clone's arm ends, and every cast would be thrown from a
+## metre the sword cannot reach.
+func _beat_radius(effect: Dictionary) -> float:
+	return maxf(float(effect.get("radius", 1.7)), float(rig.melee_reach("right")))
+
+
+## One wave of a three-strike necklace: its own share of the damage, its own
+## reach across the rank, and its own victim count.
+func _cast_wave(definition: Dictionary, cue: String, index: int) -> void:
+	if cue != "wave":
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var scales: Array = effect.get("wave_scales", [])
+	var share := float(scales[index]) if index < scales.size() else 1.0
+	var radius := _beat_radius(effect)
+	var arc := float(effect.get("arc_degrees", 130.0))
+	var per_wave := maxi(1, int(effect.get("victims_per_wave", 3)))
+	var damage := _cast_damage(definition) * share
+	var struck := 0
+	for victim in _beat_victims(global_position, radius, arc, false):
+		if struck >= per_wave:
+			break
+		_land_beat(victim, damage)
+		struck += 1
+
+
+## Barrage / fan volley / piercing shot: a real shaft per beat, down the line the
+## body committed to, with the authored spread and the arrow's own pierce.
+func _cast_arrows(definition: Dictionary, index: int) -> void:
+	if rig.weapon != "bow":
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var kind := str(effect.get("kind", ""))
+	rig.aim_at(_cast_aim if _cast_aim != Vector3.ZERO else rig.global_position - rig.global_basis.z)
+	rig.refresh_bow_pose()
+	var origin: Vector3 = rig.get_arrow_origin()
+	var base := _cast_aim - origin
+	if base.length_squared() < 0.0001:
+		base = -rig.global_basis.z
+	var profile: Dictionary = Archer.BOW_DATA[
+		clampi(int(rig.bow_index),0,Archer.BOW_DATA.size() - 1)]
+	var speed := float(profile.speed) * float(effect.get("arrow_speed_scale", 1.0))
+	var pierce := int(effect.get("pierce", 0))
+	var shots := maxi(1, int(effect.get("shots", 1))) if kind == "volley" else 1
+	var damage := _cast_damage(definition)
+	var excluded: Array[RID] = [get_rid()]
+	if is_instance_valid(rig.active_shield):
+		excluded.append(rig.active_shield.get_rid())
+	for shot in shots:
+		var pattern := index if kind == "barrage" else shot
+		var offsets: Vector2 = AbilityFx.shot_offsets(definition, pattern)
+		var direction := AbilityFx.rotate_direction(base, offsets.x, offsets.y).normalized()
+		var arrow := Arrow.new()
+		arrow.source_id = combat.source_id
+		arrow.shooter = self
+		# Layer 8 is the shield: a raised or carried shield takes the shaft first.
+		arrow.hit_mask = 1 | 4 | 8
+		arrow.authoritative_damage = true
+		get_parent().add_child(arrow)
+		arrow.launch(origin, direction, speed, damage, excluded, origin, pierce)
+		arrow_fired.emit(origin, direction, speed, damage)
+
+
+## Fireball / bone spear / lance: a real orb, authoritative, and its blast is
+## resolved here because a clone's `Combat` owns no target set of its own.
+func _cast_spell(definition: Dictionary) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var origin: Vector3 = rig.cast_origin()
+	var direction := _cast_aim - origin
+	if direction.length_squared() < 0.0001:
+		direction = -rig.global_basis.z
+	var damage := _cast_damage(definition)
+	var mask := 1 | 4 | 8
+	var spell := SpellProjectile.new()
+	spell.kind = str(effect.get("projectile", "fireball"))
+	spell.hit_mask = mask
+	spell.shooter = self
+	spell.source_id = combat.source_id
+	spell.authoritative_damage = true
+	get_parent().add_child(spell)
+	spell.launch(origin, direction.normalized(), float(effect.get("speed", 22.0)),
+		damage, [get_rid()], mask, true, global_position,
+		float(effect.get("radius", 3.0)), int(effect.get("pierce", 0)))
+	spell.set_meta("clone_blast_damage", damage)
+	spell.detonated.connect(_on_clone_spell_detonated.bind(spell))
+
+
+## The burst owns the space it fills: everything of the roster inside the radius
+## takes the authored blow, on the same road a swing does.
+func _on_clone_spell_detonated(centre: Vector3, _direction: Vector3, spell) -> void:
+	if not is_instance_valid(spell):
+		return
+	var radius := float(spell.blast_radius)
+	var damage := float(spell.get_meta("clone_blast_damage", 0.0))
+	if radius <= 0.0 or damage <= 0.0:
+		return
+	for victim in _beat_victims(centre, radius, 360.0, true):
+		_land_beat(victim, damage)
+
+
+## Who one beat reaches: the roster this body is already fighting, filtered by the
+## shape around `centre`. A beat is a swing's cousin, so it reads the same roster
+## the blade does instead of sweeping the world for bodies it never engaged.
+func _beat_victims(centre: Vector3, radius: float, arc: float, ring: bool) -> Array:
+	var out: Array = []
+	var seen := {}
+	var forward := _cast_forward()
+	var right := forward.cross(Vector3.UP)
+	var half := deg_to_rad(clampf(arc,0.0,360.0)) * 0.5
+	for candidate in targets:
+		if out.size() >= CAST_MAX_VICTIMS:
+			break
+		if not _target_alive(candidate) or candidate == self:
+			continue
+		var key: int = candidate.get_instance_id()
+		if seen.has(key):
+			continue
+		var offset: Vector3 = candidate.global_position - centre
+		offset.y = 0.0
+		if offset.length() > radius:
+			continue
+		if not ring and half < PI - 0.01 and offset.length_squared() > 0.0001:
+			if absf(atan2(offset.dot(right),offset.dot(forward))) > half:
+				continue
+		seen[key] = true
+		out.append(candidate)
+	return out
+
+
+## Put one beat's damage on one body, down the road this clone already uses: the
+## frontier and the pit resolve the live ranger's guard and armour from `attacked`,
+## the delve's direct mode strikes the actor and reports through `struck`.
+func _land_beat(victim, damage: float) -> void:
+	if damage <= 0.0 or not _target_alive(victim):
+		return
+	if attack_mode == "scene":
+		attacked.emit(self, damage, victim)
+		return
+	var outcome := Combat.DEFENSE_NONE
+	if victim.has_method("receive_melee"):
+		outcome = int(victim.receive_melee(damage, combat.source_id, global_position, false))
+	elif victim.has_method("take_damage"):
+		victim.take_damage(damage, combat.source_id)
+	struck.emit(victim, damage, global_position, outcome)
 
 
 func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
@@ -737,7 +1224,7 @@ func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge:
 		return
 	if not direction.is_finite() or direction.length_squared() < 0.01:
 		return
-	var damage := Combat.damage_for(rig.bow_index,charge) * damage_scale
+	var damage := Combat.damage_for(rig.bow_index,charge) * damage_scale * float(_ai.blow)
 	var arrow := Arrow.new()
 	arrow.source_id = combat.source_id
 	arrow.shooter = self
@@ -786,9 +1273,8 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 			velocity.x = push.x
 			velocity.z = push.z
-		# One raised guard buys one block for a clone too: it re-raises on its
-		# own cooldown, never by leaning on the guard it already had.
-		combat.break_guard()
+		# The guard stays up: a clone's blade meets every blow it can pay for, and
+		# its own `_guard_hold` clock is what finally lowers it.
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false)
 		return outcome
@@ -883,6 +1369,7 @@ func _die(announce: bool) -> void:
 	collision_layer = 0
 	collision_mask = 1
 	combat.stop()
+	ability.cancel()
 	dodge.reset()
 	if is_instance_valid(rig):
 		rig.set_step(-1.0,Vector3.FORWARD)
@@ -928,7 +1415,10 @@ func _within_aggro(candidate) -> bool:
 	# whole way to whoever hit it, past the aggro range and past its leash.
 	if _senses.aggressive() and candidate == _senses.target:
 		return true
-	if global_position.distance_to(candidate.global_position) > aggro_range:
+	# The tier's own eyes: a shallow clone notices a ranger later. The leash is
+	# the scene's and is never scaled - how far a body may be led is a place's
+	# rule, not a brain's.
+	if global_position.distance_to(candidate.global_position) > aggro_range * float(_ai.sight):
 		return false
 	return global_position.distance_to(home) <= leash
 
@@ -969,7 +1459,7 @@ func _aim_point(candidate, distance: float) -> Vector3:
 	var travel := distance / maxf(speed,1.0)
 	var target_velocity = candidate.get("velocity")
 	if typeof(target_velocity) == TYPE_VECTOR3:
-		point += target_velocity * travel * 0.55
+		point += target_velocity * travel * float(_ai.lead)
 	return point
 
 

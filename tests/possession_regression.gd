@@ -20,21 +20,21 @@ const TEST_SAVE := "user://possession_regression_state.json"
 ## only thing that may differ between bodies is what they carry.
 const KITS: Array[Dictionary] = [
 	{"main": "bow_short", "head": "armor_leather_head", "chest": "armor_leather_chest",
-		"legs": "armor_leather_legs", "neck": "neck_ember", "ring1": "ring_copper"},
+		"legs": "armor_leather_legs", "feet": "armor_leather_feet"},
 	{"main": "bow_recurve", "head": "armor_mail_head", "chest": "armor_mail_chest",
-		"ring1": "ring_silver", "ring2": "ring_dash"},
+		"hands": "armor_leather_hands", "feet": "armor_leather_feet"},
 	{"main": "bow_long", "head": "armor_plate_head", "chest": "armor_plate_chest",
 		"legs": "armor_plate_legs", "feet": "armor_plate_feet"},
 	{"main": "sword_arming", "off": "shield_kite", "chest": "armor_mail_chest",
-		"hands": "armor_mail_hands", "ring1": "ring_melee"},
+		"hands": "armor_mail_hands", "legs": "armor_leather_legs"},
 	{"main": "sword_great", "head": "armor_plate_head", "chest": "armor_plate_chest",
-		"ring1": "ring_ironhide"},
+		"feet": "armor_mail_feet"},
 	{"main": "dagger_iron", "off": "sword_short", "chest": "armor_cloth_chest",
-		"legs": "armor_cloth_legs", "ring1": "ring_swift"},
+		"legs": "armor_cloth_legs", "feet": "armor_cloth_feet"},
 	{"main": "staff_fire", "off": "focus_tome", "head": "armor_cloth_head",
-		"neck": "neck_bone"},
+		"hands": "armor_cloth_hands"},
 	{"main": "sword_short", "off": "dagger_iron", "feet": "armor_makeshift_feet",
-		"ring1": "ring_ranged"},
+		"legs": "armor_makeshift_legs"},
 ]
 
 var checks := 0
@@ -212,8 +212,8 @@ func check_bodies(warband, controller, merc_ids: Array[int]) -> void:
 			"body %d's seat loadout carries its packed armour" % merc_id)
 		check(actor.rig.armor_bits() == packed,
 			"body %d wears exactly the armour its record names" % merc_id)
-		check(str(actor.rig.trinkets.get("neck", "")) == str(kit.get("neck", "")),
-			"body %d wears its own neck piece" % merc_id)
+		check(str(actor.rig.trinkets.get("off", "")) == str(kit.get("off", "")),
+			"body %d wears its own off-hand piece" % merc_id)
 	check(mains.size() == 8, "all eight bodies carry a different main hand")
 
 # --- peer 2 cannot take peer 1's body --------------------------------------

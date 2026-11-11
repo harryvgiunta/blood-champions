@@ -17,10 +17,12 @@ extends RefCounted
 ## not fit the current hands is not on the bar; it stays in the equipped list and
 ## comes back with the other weapon set.
 ##
-## The bar is ten keys. The player's equipped list fills the first eight, then
-## the family starters its hands earn (Snap Shot, Quick Cut, Heavy Swing, Quick
-## Stab, Fireball, Shield Shove, Charge, Focus); the bandage and the healing
-## potion keep the last two and are not the player's to move. `granted` is the
+## The bar is five keys. The player assigns a skill to a key from the character
+## screen's SKILLS page, and that skill fires from that key; the family starters
+## its hands earn (Snap Shot, Quick Cut, Heavy Swing, Quick Stab, Fireball, Shield
+## Shove, Charge, Focus) fill the first free keys behind the assigned ones. The
+## bandage and the healing potion are not on the bar at all: they are the body's
+## own two keys (`Z`/`V`), so medicine never costs a skill a slot. `granted` is the
 ## one layout every HUD, runner and network replica reads.
 ##
 ## A skill is performed with the hands, never the feet: the walk, the sprint and
@@ -40,9 +42,13 @@ extends RefCounted
 ## pressed from. Every skill that travels (the lunge, the boss shove, the shield
 ## charge) declares it; a skill that holds its ground needs no direction.
 
-## The hotbar: ten slots, fired from the number row (1..9 and 0 for the tenth).
-## The equipped list and the automatic rows are laid into these.
-const SLOT_COUNT := 10
+## The hotbar: five keys, fired from the number row (1..5). A run upgrade may buy
+## the bar more keys for that session (`MAX_SLOT_COUNT` is the ceiling, keys 6..0),
+## and the skills a body may assign are laid exactly on the keys the player chose.
+const SLOT_COUNT := 5
+## The most keys a bar can ever have: the five it ships with plus five a session's
+## legendary upgrade can buy. Nothing past this is drawn, assigned or fired.
+const MAX_SLOT_COUNT := 10
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 ## Temporary testing cost: every weapon skill spends a trivial stamina sliver
 ## so the effect can be exercised back to back. The legacy unarmed charge keeps
@@ -88,6 +94,15 @@ const TYPE_SHIELD := "shield"
 ## unusable.
 const FAMILIES := [TYPE_ANY, TYPE_UNARMED, TYPE_BOW, TYPE_SWORD, TYPE_TWO_HAND,
 	TYPE_DAGGER, TYPE_STAFF, TYPE_SHIELD]
+## The `effect.kind`s an AI body may be issued: the shapes it can aim at another
+## body and the scene can resolve off its own blow road. A ward (`stone_skin`,
+## `energy_shield`, `ember_ward`) is a body state a mob has no pool for, a
+## `backstab` needs a crosshair and a blink preflight a mob never runs, and
+## `charge`/`dash` are the player's own legs - none of the three is written onto a
+## clone's bar (`RangerClone.CASTABLE_KINDS`) or onto a recruit's
+## (`RecruitCatalog.skill_for`).
+const AI_KINDS := ["melee_arc", "melee_ring", "melee_wave",
+	"barrage", "volley", "piercing_shot", "projectile"]
 ## Every combat ability's family tags, in catalog order. A row may wear several
 ## tags; `fits_rig`/`fits_gear` answer yes when any tag fits, so a skill shared by
 ## two families is usable from either kit. A family is not a grant: the player
@@ -124,6 +139,7 @@ const ABILITY_FAMILIES := {
 	"rain_of_ash": [TYPE_BOW],
 	"skewer": [TYPE_BOW],
 	"cinder_lance": [TYPE_STAFF],
+	"fire_ray": [TYPE_STAFF],
 	"grave_bloom": [TYPE_STAFF],
 	"ember_ward": [TYPE_STAFF],
 	"rebuke": [TYPE_SHIELD],
@@ -140,17 +156,12 @@ const ABILITY_UNLOCK_COSTS := {
 	"double_slash": 2, "lunge_thrust": 3, "butchers_cut": 3, "gut_hook": 4,
 	"spin_slash": 3, "ground_breaker": 4, "wide_sweep": 3, "executioner": 5,
 	"backstab": 3, "knife_work": 3,
-	"bone_spear": 3, "cinder_lance": 4, "grave_bloom": 4, "ember_ward": 4,
+	"bone_spear": 3, "cinder_lance": 4, "fire_ray": 5, "grave_bloom": 4,
+	"ember_ward": 4,
 	"shield_bash": 2, "shield_charge": 3, "shield_slam": 4, "rebuke": 3,
 	"three_strike": 4, "stone_skin": 4,
 	"dash": 3, "energy_shield": 4,
 }
-## How many player-chosen abilities a body may carry. The eight kit keys hold
-## the equipped list and then the family starters when the hands fit; the last
-## two are the consumables' own.
-const MAX_EQUIPPED := 7
-
-
 ## The family tags an ability wears. Definitions without a row - a consumable,
 ## a test stub - ride every kit. The returned copy is safe for a caller to sort or
 ## join; the table itself stays untouched.
@@ -799,11 +810,11 @@ const ABILITIES := [
 		"cues": [{"at": 0.50, "cue": "ring"}],
 	},
 	{
-		# A body skill: the ring's skill is the player's unlock, so it fits any
-		# weapon loadout once it is on the bar.
+		# A body skill: the skill is the player's unlock, not a worn piece's, so it
+		# fits any weapon loadout once it is on the bar.
 		"id": "dash",
 		"name": "DASH",
-		"item": "ring_dash",
+		"item": "",
 		"slot": 2,
 		"key": "SHIFT + 3",
 		"stamina_cost": 10.0,
@@ -824,7 +835,7 @@ const ABILITIES := [
 	{
 		"id": "energy_shield",
 		"name": "ENERGY SHIELD",
-		"item": "neck_shield",
+		"item": "",
 		"slot": 2,
 		"key": "SHIFT + 3",
 		"stamina_cost": 8.0,
@@ -961,6 +972,24 @@ const ABILITIES := [
 		"cues": [{"at": 0.26, "cue": "cast"}],
 	},
 	{
+		# A held ray, not a bolt: the scene spawns one beam for the length of the
+		# cast and it burns every body its line crosses on a fixed tick. The
+		# authored `damage_scale` is the share of the staff's base a body loses
+		# each **second**, which is why this row's price is read as DPS rather
+		# than as one blow - 50 damage a second off the Ember Staff's 50.
+		"id": "fire_ray", "name": "FIRE RAY", "item": "staff_fire",
+		"slot": 0, "key": "SHIFT + 1", "stamina_cost": 50.0,
+		"cooldown": 18.0, "duration": 1.2, "travel_seconds": 0.0,
+		"speed_scale": 0.0,
+		"sound": "fire", "animation": "Staff_Fireball_Cast",
+		"lean": -0.02,
+		"icon": "res://assets/ui/abilities/fire_ray.png",
+		"description": "A held ray of fire that burns everything in its line.",
+		"effect": {"kind": "beam", "damage_scale": 1.0, "range": 16.0,
+			"radius": 0.55, "tick_seconds": 0.2, "stagger": 0.0},
+		"cues": [{"at": 0.0, "cue": "beam"}],
+	},
+	{
 		"id": "grave_bloom", "name": "GRAVE BLOOM", "item": "staff_bone",
 		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 55.0,
 		"cooldown": 14.0, "duration": 0.7, "travel_seconds": 0.0, "speed_scale": 0.0,
@@ -1034,16 +1063,16 @@ const ABILITIES := [
 		"effect": {"kind": "ward", "absorb": 0.33, "stamina_scale": 1.6, "seconds": 5.0},
 		"cues": [{"at": 0.20, "cue": "ward"}],
 	},
-	# The two consumables. They are not the kit's: nothing is worn to grant them
-	# and nothing is anointed, so `granted` appends them after the kit's skills -
-	# the bandage on key 9 and the potion on key 0 until the player moves them.
-	# The body owns the channel; the runner owns the key and the cooldown.
+	# The two consumables. They are not the kit's and not on the bar at all:
+	# nothing is worn to grant them, so they are fired from the body's own two
+	# keys (`Z` and `V`) and never take a hotbar slot from a skill. The body owns
+	# the channel; the runner owns the key and the cooldown.
 	{
 		"id": "bandage",
 		"name": "BANDAGE",
 		"item": "",
 		"slot": 0,
-		"key": "9",
+		"key": "Z",
 		"stamina_cost": 0.0,
 		"cooldown": 9.0,
 		"duration": 0.0,
@@ -1056,7 +1085,7 @@ const ABILITIES := [
 		"name": "HEALING POTION",
 		"item": "",
 		"slot": 0,
-		"key": "0",
+		"key": "V",
 		"stamina_cost": 0.0,
 		"cooldown": 12.0,
 		"duration": 0.0,
@@ -1134,23 +1163,11 @@ static func main_item(rig) -> String:
 
 
 
-## The two consumables every body carries on the bar, after the equipped list:
-## a bandage and a healing potion are worn by nobody and unlocked by nothing, so
-## they cannot come from a piece. The kit keeps the slots before them, which is
-## what leaves the default bandage on key 9 and the potion on key 0.
+## The two consumables a body carries beside the bar: a bandage and a healing
+## potion are worn by nobody and unlocked by nothing, so they cannot come from a
+## piece and the player never assigns them. Each fires from its own body key
+## (`Z`, `V`) - the bar is for skills alone.
 const CONSUMABLE_IDS := ["bandage", "healing_potion"]
-
-static var _consumables: Array = []
-
-static func consumable_definitions() -> Array:
-	# Built once: `granted` runs on every HUD frame and on every dressing, and the
-	# two definitions never change.
-	if _consumables.is_empty():
-		for id in CONSUMABLE_IDS:
-			var definition := by_id(id)
-			if not definition.is_empty():
-				_consumables.append(definition)
-	return _consumables
 
 
 ## The starter skills a body's hands earn. A family starter is automatic and
@@ -1241,72 +1258,72 @@ static func starter_grants(rig) -> Array:
 	return out
 
 
-## The bar this body fires: the abilities the player has equipped on it, in
-## their own order, then the family starters its hands earn, then the bare-hand
-## fallback when no starter did, then the two consumables. An equipped ability
-## whose family tags do not fit the hands the body is holding right now is
-## simply not on the bar - switching a weapon set swaps the visible row without
-## forgetting what the player equipped.
+## How many keys this body's bar has: the five the game ships with, plus what the
+## run's own upgrades bought it this session (`rig.ability_extra_slots`), never
+## past `MAX_SLOT_COUNT`. The screen that draws the bar reads the same number, so
+## a placeholder it shows is a key the fight can fire.
+static func slots_for(rig) -> int:
+	var extra := 0
+	if is_instance_valid(rig):
+		var raw: Variant = rig.get("ability_extra_slots")
+		if raw is int or raw is float:
+			extra = clampi(int(raw), 0, MAX_SLOT_COUNT - SLOT_COUNT)
+	return SLOT_COUNT + extra
+
+
+## The bar this body fires: one grant per key, and a skill sits on the key the
+## player put it on. A key the player left empty stays empty, the family starters
+## its hands earn fill the first free keys behind them, and the bare-hand charge
+## takes the first free key when no starter did. A skill whose family tags do not
+## fit the hands the body is holding right now is not drawn - switching a weapon
+## set swaps the visible row without forgetting what the player assigned.
+##
+## The bandage and the potion are not on this bar: they have their own two keys on
+## the body (`Z`/`V`), so a skill never has to share a key with medicine.
 static func granted(rig) -> Array:
 	if not is_instance_valid(rig):
-		return _empty_slots()
-	var grants: Array = []
+		return []
+	var out: Array = []
+	for _slot in slots_for(rig):
+		out.append({})
 	var seen: Dictionary = {}
-	for id in equipped_ids(rig.get("ability_loadout")):
+	var assigned := equipped_ids(rig.get("ability_loadout"))
+	for index in mini(assigned.size(), out.size()):
+		var id := str(assigned[index])
+		if id.is_empty() or seen.has(id):
+			continue
 		var definition := by_id(id)
-		if definition.is_empty() or seen.has(id) or not fits_rig(definition, rig):
+		if definition.is_empty() or not fits_rig(definition, rig):
 			continue
 		seen[id] = true
-		grants.append(definition)
+		out[index] = definition
 	for starter in starter_grants(rig):
 		var id := str(starter.get("id", ""))
 		if id.is_empty() or seen.has(id) or not fits_rig(starter, rig):
 			continue
+		var free := _first_free(out)
+		if free < 0:
+			break
 		seen[id] = true
-		grants.append(starter)
+		out[free] = starter
 	# No main hand and no starter grant: the bare-handed charge is the one thing
 	# an AI body has left to do.
 	if main_item(rig).is_empty():
 		var charge := by_id("charge")
 		if not charge.is_empty() and not seen.has("charge"):
-			seen["charge"] = true
-			grants.append(charge)
-	grants.append_array(consumable_definitions())
-	return _layout(grants)
-
-## Fill the ten keys in the order the grants arrived. The first eight are the
-## kit's (the player's equipped list, then the starter/fallback); the bandage
-## keeps key 9 and the potion key 0, so a body can always bind a wound and always
-## has a draught. Extra kit grants past the eighth are dropped rather than
-## displacing the fixed pair.
-static func _layout(grants: Array) -> Array:
-	var out: Array = _empty_slots()
-	var kit_slots := SLOT_COUNT - CONSUMABLE_IDS.size()
-	var kit_index := 0
-	var consumables := {}
-	for definition in grants:
-		var id := str(definition.get("id", ""))
-		if id.is_empty():
-			continue
-		if CONSUMABLE_IDS.has(id):
-			consumables[id] = definition
-			continue
-		if kit_index >= kit_slots:
-			continue
-		out[kit_index] = definition
-		kit_index += 1
-	for offset in CONSUMABLE_IDS.size():
-		var id := str(CONSUMABLE_IDS[offset])
-		if consumables.has(id):
-			out[kit_slots + offset] = consumables[id]
+			var free := _first_free(out)
+			if free >= 0:
+				seen["charge"] = true
+				out[free] = charge
 	return out
 
 
-static func _empty_slots() -> Array:
-	var out: Array = []
-	for _slot in SLOT_COUNT:
-		out.append({})
-	return out
+## The first key in `out` that fires nothing, `-1` when the bar is full.
+static func _first_free(out: Array) -> int:
+	for index in out.size():
+		if (out[index] as Dictionary).is_empty():
+			return index
+	return -1
 
 
 ## Sanitise an ability-id list: strings or arrays, duplicates and unknown ids
@@ -1326,17 +1343,33 @@ static func skill_ids(value: Variant) -> Array[String]:
 	return out
 
 
-## The ids a player may equip: real catalog skills with the starter, the
-## bare-hand fallback and the consumables removed. A hand-written list or a saved
-## record cannot smuggle an automatic skill into an equip slot.
+## The ids a player has assigned to the bar, one per key: real catalog skills
+## with the starter, the bare-hand fallback and the consumables removed, and an
+## empty string for a key the player left empty - the *position* is the
+## assignment, so a hole in the middle of the row is a deliberate empty key and
+## never a reason for the skills behind it to slide forward.
 static func equipped_ids(value: Variant) -> Array[String]:
 	var out: Array[String] = []
-	for id in skill_ids(value):
-		if is_automatic(id):
+	var raw: Array = []
+	if value is String:
+		raw = [value]
+	elif value is Array:
+		raw = value
+	for item in raw:
+		if out.size() >= MAX_SLOT_COUNT:
+			break
+		var id := str(item)
+		if id.is_empty():
+			out.append("")
+			continue
+		if is_automatic(id) or out.has(id) or by_id(id).is_empty():
+			# A refused id keeps its key's position: dropping it would move the
+			# skills behind it onto keys the player never chose.
+			out.append("")
 			continue
 		out.append(id)
-		if out.size() >= MAX_EQUIPPED:
-			break
+	while not out.is_empty() and out[out.size() - 1].is_empty():
+		out.resize(out.size() - 1)
 	return out
 
 
@@ -1347,9 +1380,10 @@ static func hand_slot(entry: Dictionary) -> int:
 
 
 static func definition_for(rig, slot: int) -> Dictionary:
-	if slot < 0 or slot >= SLOT_COUNT:
+	var grants := granted(rig)
+	if slot < 0 or slot >= grants.size():
 		return {}
-	return granted(rig)[slot]
+	return grants[slot]
 
 
 static func damage_for(definition: Dictionary, rig) -> float:
@@ -1374,7 +1408,7 @@ static func damage_for(definition: Dictionary, rig) -> float:
 	# scene reads this one function, so the frontier, the arena and the delve
 	# cannot drift apart.
 	match str(effect.get("kind", "")):
-		"barrage", "volley", "piercing_shot", "projectile":
+		"barrage", "volley", "piercing_shot", "projectile", "beam":
 			if STAFF_ITEMS.has(item):
 				return damage * spell_scale(rig)
 			return damage * ranged_scale(rig) + flat_bonus(rig, "flat_ranged")

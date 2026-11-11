@@ -1,13 +1,16 @@
 class_name VendorMenu
 extends Control
-## One of the town's three keepers, as a ledger panel: the stock they hold on the
-## left, the shared stash on the right, and the purse over both.
+## One of the town's three keepers, as a ledger panel: the medicine they hold on
+## the left, the band's spares on the right, and the purse over both.
 ##
 ## The panel is deliberately thin. Stock is exactly the keeper's entry in
-## `PlayerState.VENDORS` (filtered to real, priced catalogue ids), buying goes
-## through `Warband.buy_gear` and selling through `Warband.sell_gear`, so the
-## prices, the refusal rules and the stash write live in one place. The menu only
-## decides what is on the board and what the keeper says about it.
+## `PlayerState.VENDORS` (filtered to real, priced catalogue ids) - and every
+## keeper's entry is medicine now, because steel is opened at the Weapon Rack and
+## won out of chests, never bought. Buying goes through `Warband.buy_gear` (a dose
+## into the band's pack) and selling through `Warband.sell_gear` (a spare the band
+## carried out of a run), so the prices, the refusal rules and the stock write
+## live in one place. The menu only decides what is on the board and what the
+## keeper says about it.
 ##
 ## A `Control`, not a `CanvasLayer`: the town (or the world embedding it) owns
 ## the layer, and the same node walks from keeper to keeper with `configure()`.
@@ -38,6 +41,9 @@ var _built := false
 
 var _keeper: Label
 var _line: Label
+## What the band is carrying of each medicine, under the keeper's line: the count
+## a press of BUY raises and a bandage spends.
+var _pack: Label
 var _purse: Label
 var _status: Label
 var _stock_list: VBoxContainer
@@ -95,6 +101,12 @@ func keeper_line() -> String:
 
 func status_text() -> String:
 	return str(_status.text) if _status != null else ""
+
+## The band's medicine as one line, drawn under the keeper's own.
+func pack_line() -> String:
+	var bandages := int(_warband.supply_count("bandage")) if _warband != null else 0
+	var potions := int(_warband.supply_count("potion")) if _warband != null else 0
+	return "IN THE PACK  ·  BANDAGES %d  ·  POTIONS %d" % [bandages, potions]
 
 ## The keeper's stock, filtered to ids this build actually carries at a price.
 ## Rows: `{item_id, name, category, price, affordable, bundle}`. `price` is what
@@ -188,6 +200,7 @@ func refresh() -> void:
 	if not _built:
 		return
 	_purse.text = "%d G" % (_warband.gold() if _warband != null else 0)
+	_pack.text = pack_line()
 	_fill_lists()
 	changed.emit()
 
@@ -250,13 +263,14 @@ func _build() -> void:
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_line = _label(column, "", 13, MUTED)
 	_line.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
+	_pack = _label(column, "", 12, MUTED)
 
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 14)
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(columns)
-	_stock_list = _column(columns, "STOCK  ·  BUY")
-	_stash_list = _column(columns, "SHARED STASH  ·  SELL")
+	_stock_list = _column(columns, "MEDICINE  ·  BUY")
+	_stash_list = _column(columns, "SPARES  ·  SELL")
 
 	_status = _label(column, "", 12, LedgerThemeScript.TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -305,7 +319,7 @@ func _fill_lists() -> void:
 		_stock_row(row)
 	var stash := stash_rows()
 	if stash.is_empty():
-		_label(_stash_list, "Nothing pooled to sell.", 13, MUTED)
+		_label(_stash_list, "Nothing out of a run to sell.", 13, MUTED)
 	for row in stash:
 		_stash_row(row)
 

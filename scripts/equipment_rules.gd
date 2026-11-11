@@ -1,20 +1,24 @@
 extends RefCounted
-## Pure equipment vocabulary for the warband's ten equipment slots: the slot list,
-## the category rules and the auto-slot routing. Nothing here touches a roster or a
-## stash - the paperdoll and the loot ask what a piece may wear, and commit the
-## move itself.
+## Pure equipment vocabulary for the warband's seven equipment slots: the slot
+## list, the category rules and the auto-slot routing. Nothing here touches a
+## roster or a stash - the paperdoll and the loot ask what a piece may wear, and
+## commit the move itself.
+##
+## The slots are steel and armour only. There is no neck and no ring: a body's
+## growth is the run's upgrades and the skills it carries, so nothing worn has to
+## be managed in a slot the fight never reads.
 
-const SLOTS := ["head","chest","hands","legs","feet","neck","ring1","ring2","main","off"]
+const SLOTS := ["head","chest","hands","legs","feet","main","off"]
 const SLOT_LABELS := {
 	"head":"Head", "chest":"Chest", "hands":"Hands", "legs":"Legs", "feet":"Boots",
-	"neck":"Neck", "ring1":"Ring 1", "ring2":"Ring 2", "main":"Main Hand", "off":"Off-Hand",
+	"main":"Main Hand", "off":"Off-Hand",
 }
-## Every category the catalog uses. `armor_bundle` and `misc` are carried, never
-## worn: a bundle of mail is a purchase, and a bandage is a dressing. `ammo` is
-## the third carried kind - shafts the shared quiver counts and a bow spends.
-const CATEGORIES := ["1h","2h","bow","staff","shield","focus","armor","jewelry",
+## Every category the catalog uses. `misc` is carried, never worn: a bandage is a
+## dressing. `ammo` is the other carried kind - shafts the quiver counts and a bow
+## spends.
+const CATEGORIES := ["1h","2h","bow","staff","shield","focus","armor",
 	"armor_bundle","misc","ammo"]
-const EQUIPPABLE := ["1h","2h","bow","staff","shield","focus","armor","jewelry"]
+const EQUIPPABLE := ["1h","2h","bow","staff","shield","focus","armor"]
 const TWO_HANDED := ["2h","bow","staff"]
 
 static func slot_label(slot: String) -> String:
@@ -48,38 +52,18 @@ static func allowed(item: Dictionary, slot: String) -> bool:
 			return slot == "off"
 		"armor":
 			return slot == str(item.get("slot", ""))
-		"jewelry":
-			match str(item.get("slot", "")):
-				"neck":
-					return slot == "neck"
-				"ring":
-					return slot == "ring1" or slot == "ring2"
 	return false
 
-## The slot a fresh equip would choose: one-handers go to the main hand, off
-## pieces to the off hand, armor and necklaces are fixed, and a ring fills the
-## first empty ring slot before replacing ring 1.
-static func auto_slot(item: Dictionary, equipped: Dictionary) -> String:
-	var category := str(item.get("category", ""))
-	match category:
+## The slot a fresh equip would choose: a one-hander to the main hand, an off
+## piece to the off hand, armour to its own slot. Nothing else is worn. The worn
+## kit is still an argument because a caller's question is "where would this go
+## on that body" even when this answer never reads it.
+static func auto_slot(item: Dictionary, _equipped: Dictionary) -> String:
+	match str(item.get("category", "")):
 		"1h", "2h", "bow", "staff":
 			return "main"
 		"shield", "focus":
 			return "off"
 		"armor":
 			return str(item.get("slot", ""))
-		"jewelry":
-			match str(item.get("slot", "")):
-				"neck":
-					return "neck"
-				"ring":
-					if _slot_id(equipped, "ring1").is_empty():
-						return "ring1"
-					if _slot_id(equipped, "ring2").is_empty():
-						return "ring2"
-					return "ring1"
 	return ""
-
-## The id in one slot of a caller's own copy of the worn kit (`{"main": id, ...}`).
-static func _slot_id(equipped: Dictionary, slot: String) -> String:
-	return str(equipped.get(slot, ""))

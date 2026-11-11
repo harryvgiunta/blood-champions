@@ -45,6 +45,8 @@ TESTS = [
     "cover_movement_regression",
     "running_slide_regression",
     "swing_reach_regression",
+    "guard_states_regression",
+    "guard_pose_regression",
     "hitbox_regression",
     "logging_regression",
     "corpse_regression",
@@ -65,9 +67,13 @@ WARBAND_TESTS = [
     "corpse_loot_regression",
     "warband_ui_regression",
     "watcher_variants_regression",
+    "watcher_caster_regression",
+    "watcher_archer_casting_regression",
     "town_hub_regression",
     "town_stockade_regression",
     "roguelite_regression",
+    "admin_console_regression",
+    "ability_chest_regression",
     "ability_upgrades_regression",
     "ability_fx_regression",
     "mobile_fire_regression",
@@ -76,6 +82,7 @@ WARBAND_TESTS = [
     "squad_steering_regression",
     "squad_party_mode_regression",
     "squad_disposition_regression",
+    "recruit_regression",
     "torch_light_regression",
     "game_flow_regression",
     "quartermaster_regression",
@@ -96,6 +103,7 @@ WARBAND_TESTS = [
     "warband_netcode_regression",
     "warband_ranged_regression",
     "audio_regression",
+    "settings_regression",
     "perf_overlay_regression",
 ]
 ## ENet tests: two real processes on one machine, so they never share the pool.
@@ -122,7 +130,7 @@ TIMEOUT = 90.0
 TOTAL_BUDGET = 240.0
 ## The top of the allowed band, for the tests that walk a fixed clock or a
 ## kilometre of world. They must still fit inside two minutes.
-TIMEOUTS = {"cover_movement_regression": 120.0: 120.0,
+TIMEOUTS = {"cover_movement_regression": 120.0,
             "escape_run_regression": 120.0}
 
 

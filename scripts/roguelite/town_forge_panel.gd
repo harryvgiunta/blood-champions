@@ -11,7 +11,6 @@ extends Control
 ## where the same page re-binds the hands the bodies are actually holding.
 
 const Weapons = preload("res://scripts/roguelite/weapon_registry.gd")
-const MetaScript = preload("res://scripts/roguelite/roguelite_meta.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityIndex = preload("res://scripts/roguelite/ability_index.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -144,11 +143,12 @@ func _refresh() -> void:
 			_portal_rows(meta)
 		"abilities":
 			_title.text = "THE ABILITY BOOK"
-			_subtitle.text = "%d keys. Unlock a skill once, then equip it on a body whose hands fit its family." % int(meta.keys)
-			_ability_rows(meta)
+			_subtitle.text = ("Skills are found, not bought: an ABILITY chest pays "
+				+ "one. Equip an open skill on a body whose hands fit its family.")
+			_ability_rows()
 		_:
 			_title.text = "THE WEAPON RACK"
-			_subtitle.text = "%d keys. Every weapon is here: press a locked row to open it and take it up." % int(meta.keys)
+			_subtitle.text = "%d keys. Every weapon is here: press a locked row to open it into the stash and wear it." % int(meta.keys)
 			_rack_rows(meta)
 
 
@@ -177,21 +177,39 @@ func _button(text: String, colour: Color, callback: Callable, disabled: bool = f
 	return button
 
 
+## The pair a body is carrying, read straight out of the inventory: the same
+## `Weapons.hand_pair` the run itself uses, so the rack, the character page and
+## the island can never name three different weapons.
+func _carried(context: Dictionary) -> Dictionary:
+	var warband = context.get("warband")
+	if warband == null:
+		return {"ranged": "", "melee": ""}
+	return Weapons.hand_pair(warband.roster, int(context.get("merc", -1)))
+
+
 func _rack_rows(meta) -> void:
-	var ranged_id: String = meta.loadout_for(MetaScript.RANGED_SLOT)
-	var melee_id: String = meta.loadout_for(MetaScript.MELEE_SLOT)
+	var context := _ability_context()
+	if context.is_empty():
+		_row("No body stands on the rack ground.", MUTED, 28)
+		return
+	var pair := _carried(context)
+	var ranged_id := str(pair.get("ranged", ""))
+	var melee_id := str(pair.get("melee", ""))
 	var ranged_def: Dictionary = Weapons.get_weapon(ranged_id)
 	var melee_def: Dictionary = Weapons.get_weapon(melee_id)
-	_row("RANGED  ·  %s" % str(ranged_def.get("name", ranged_id)), BRASS, 26)
-	_row(str(ranged_def.get("description", "")), MUTED, 34)
-	_row("MELEE  ·  %s" % str(melee_def.get("name", melee_id)), BRASS, 26)
-	_row(str(melee_def.get("description", "")), MUTED, 34)
+	_row("BODY  ·  %s" % str(context["name"]), BRASS, 26)
+	_row("RANGED  ·  %s" % str(ranged_def.get("name", "empty hand")), BRASS, 24)
+	_row(str(ranged_def.get("description", "")) if not ranged_def.is_empty() \
+		else "No bow or staff in this body's kit: the rack hands one over.", MUTED, 30)
+	_row("MELEE  ·  %s" % str(melee_def.get("name", "empty hand")), BRASS, 24)
+	_row(str(melee_def.get("description", "")) if not melee_def.is_empty() \
+		else "No blade in this body's kit: the rack hands one over.", MUTED, 30)
 	_row("THE RANGED RACK", MUTED, 24)
-	for id in Weapons.ids_for_slot(MetaScript.RANGED_SLOT):
-		_rack_row(meta, MetaScript.RANGED_SLOT, str(id), ranged_id)
+	for id in Weapons.ids_for_slot(Weapons.RANGED):
+		_rack_row(meta, Weapons.RANGED, str(id), ranged_id)
 	_row("THE MELEE RACK", MUTED, 24)
-	for id in Weapons.ids_for_slot(MetaScript.MELEE_SLOT):
-		_rack_row(meta, MetaScript.MELEE_SLOT, str(id), melee_id)
+	for id in Weapons.ids_for_slot(Weapons.MELEE):
+		_rack_row(meta, Weapons.MELEE, str(id), melee_id)
 
 
 ## One piece on the rack: open and equipped, open, or locked with its price. The
@@ -214,48 +232,64 @@ func _rack_row(meta, slot: String, weapon_id: String, equipped_id: String) -> vo
 			BRASS if affordable else LOCKED, _unlock_and_bind.bind(slot, weapon_id))
 
 
+## Opening a piece is two bookings: the player's ledger pays the keys, and the
+## warband forges the piece into the shared stash - the inventory is the one place
+## a body can then pick it up from.
 func _unlock_and_bind(slot: String, weapon_id: String) -> void:
 	var meta = _meta()
 	if meta == null:
 		return
 	var result: Dictionary = meta.unlock_weapon(weapon_id)
-	_message.text = str(result.get("message", ""))
-	_message.add_theme_color_override("font_color",
-		GOOD if bool(result.get("ok", false)) else BLOOD)
 	if not bool(result.get("ok", false)):
+		_say(str(result.get("message", "")), false)
 		_refresh()
 		return
 	_bind(slot, weapon_id)
 
 
+## Wear the piece in the hand the run carries it in. In a run that is the run
+## director's call - the island's pair is re-read out of the kit and the rig is
+## re-dressed; in the town the warband's own `equip_hand` does it, and the body
+## the square stands up is dressed from the roster as any wardrobe change is.
 func _bind(slot: String, weapon_id: String) -> void:
-	var meta = _meta()
-	if meta == null:
+	var world = town.get("host") if town != null else null
+	if world == null:
+		_say("No world to carry that piece.", false)
+		_refresh()
 		return
-	var result: Dictionary = meta.set_loadout_slot(slot, weapon_id)
-	_message.text = str(result.get("message", ""))
-	_message.add_theme_color_override("font_color",
-		GOOD if bool(result.get("ok", false)) else BLOOD)
-	if bool(result.get("ok", false)):
-		_apply_to_bodies(slot, weapon_id)
+	# A piece the keys have opened is owed to the stash, once: an open row the
+	# ledger has not booked as forged is granted here - the inventory is always
+	# where the hand takes the piece from. A weapon the player has since worn and
+	# sold is not re-minted by pressing the row again.
+	var warband = world.get("warband")
+	var meta = _meta()
+	if warband != null and meta != null and meta.needs_forge(weapon_id):
+		if warband.stash.owns(weapon_id, warband.roster):
+			# A ledger from before the forge already has the piece: book it and
+			# mint no spare.
+			meta.mark_forged(weapon_id)
+		else:
+			var forged: Dictionary = warband.grant_gear(weapon_id)
+			if bool(forged.get("ok", false)):
+				meta.mark_forged(weapon_id)
+	var director = world.get("roguelite")
+	var result: Dictionary
+	if director != null and bool(director.is_running()):
+		result = director.rebind_hand(int(director.local_peer()), slot, weapon_id)
+	else:
+		var context := _ability_context()
+		var held = context.get("warband")
+		if held == null or int(context.get("merc", -1)) <= 0:
+			result = {"ok": false, "message": "No body stands on the rack ground."}
+		else:
+			result = held.equip_hand(int(context["merc"]), slot, weapon_id)
+	_say(str(result.get("message", "")), bool(result.get("ok", false)))
 	_refresh()
 
 
-## The rack's choice has to reach the bodies it was made for: the square's dress,
-## or a live run's hands at a shop level.
-func _apply_to_bodies(slot: String, weapon_id: String) -> void:
-	if town == null:
-		return
-	var world = town.get("host")
-	if world == null:
-		return
-	var director = world.get("roguelite")
-	if director != null and bool(director.is_running()):
-		if director.has_method("rebind_hand"):
-			director.rebind_hand(director.local_peer(), slot, weapon_id)
-		return
-	if world.has_method("refresh_town_dress"):
-		world.refresh_town_dress()
+func _say(text: String, good: bool) -> void:
+	_message.text = text
+	_message.add_theme_color_override("font_color", GOOD if good else BLOOD)
 
 
 ## The body whose hands decide what can be equipped. The rack is opened from the
@@ -282,7 +316,7 @@ func _ability_context() -> Dictionary:
 		"name": str(warband.roster.name_of(merc)), "gear": gear}
 
 
-func _ability_rows(meta) -> void:
+func _ability_rows() -> void:
 	var context := _ability_context()
 	if context.is_empty():
 		_row("No body stands on the rack ground.", MUTED, 28)
@@ -305,11 +339,13 @@ func _ability_rows(meta) -> void:
 			equipped += 1
 	_row("BODY  ·  %s  ·  %s" % [str(context["name"]),
 		_hand_summary(gear)], BRASS, 28)
-	_row("%d / %d equipped  ·  the eight kit keys hold the family starters and these; the last two are the bandage and potion." % [
-		equipped, AbilityRules.MAX_EQUIPPED], MUTED, 30)
+	_row("%d / %d keys taken  ·  the five keys hold the family starters and these; medicine has its own two keys." % [
+		equipped, AbilityRules.SLOT_COUNT], MUTED, 30)
 	var index := AbilityIndex.counts()
 	_row("%d active skills in this book  ·  %d ability upgrades live in the pool, not here." % [
 		int(index.active), int(index.upgrade)], MUTED, 28)
+	_row("An ABILITY chest stands three skills and keeps one; the first chest of "
+		+ "every island is one.", MUTED, 28)
 	for entry in book:
 		var id := str(entry.get("id", ""))
 		var definition := AbilityRules.by_id(id)
@@ -327,12 +363,11 @@ func _ability_rows(meta) -> void:
 			label.tooltip_text = description
 			continue
 		if not bool(entry.get("unlocked", false)):
-			var price := int(entry.get("cost", 3))
-			var affordable := int(meta.keys) >= price
-			var unlock := _button("  %s  ·  %s   [LOCKED  ·  %d KEYS]" % [
-				display, family, price], BRASS if affordable else LOCKED,
-				_unlock_ability.bind(id))
-			unlock.tooltip_text = description
+			# No key price any more: a skill is opened by an ABILITY chest, and a
+			# row the player has not found is a row the rack cannot sell.
+			var locked := _row("  %s  ·  %s   [NOT FOUND  ·  AN ABILITY CHEST PAYS IT]" % [
+				display, family], LOCKED, 28)
+			locked.tooltip_text = description
 			continue
 		if bool(entry.get("equipped", false)):
 			var take_off := _button("  %s  ·  %s   [EQUIPPED%s]" % [display, family,
@@ -357,17 +392,6 @@ func _hand_summary(gear: Dictionary) -> String:
 	return "  +  ".join(PackedStringArray(parts))
 
 
-func _unlock_ability(ability_id: String) -> void:
-	var meta = _meta()
-	if meta == null:
-		return
-	var result: Dictionary = meta.unlock_ability(ability_id)
-	_message.text = str(result.get("message", ""))
-	_message.add_theme_color_override("font_color",
-		GOOD if bool(result.get("ok", false)) else BLOOD)
-	_refresh()
-
-
 func _toggle_ability(merc_id: int, ability_id: String) -> void:
 	var context := _ability_context()
 	if context.is_empty():
@@ -380,10 +404,15 @@ func _toggle_ability(merc_id: int, ability_id: String) -> void:
 
 
 func _portal_rows(meta) -> void:
-	var ranged_def: Dictionary = Weapons.get_weapon(meta.loadout_for(MetaScript.RANGED_SLOT))
-	var melee_def: Dictionary = Weapons.get_weapon(meta.loadout_for(MetaScript.MELEE_SLOT))
-	_row("CARRYING  ·  %s  |  %s" % [str(ranged_def.get("name", "")),
-		str(melee_def.get("name", ""))], INK, 26)
+	var context := _ability_context()
+	var pair := _carried(context) if not context.is_empty() else {"ranged": "", "melee": ""}
+	var ranged_def: Dictionary = Weapons.get_weapon(str(pair.get("ranged", "")))
+	var melee_def: Dictionary = Weapons.get_weapon(str(pair.get("melee", "")))
+	_row("CARRYING  ·  %s  |  %s" % [
+		str(ranged_def.get("name", "empty hand")),
+		str(melee_def.get("name", "empty hand"))], INK, 26)
+	_row("The pair the portal carries is the kit the body is wearing: put a weapon " +
+"in its hands on the rack or the character page.", MUTED, 30)
 	_row("Every wave is a level. Every tenth level is a boss, and a shop level " +
 "stands right before it. The deepest band keeps the record.", MUTED, 44)
 	_row("Keys banked: %d  ·  runs fought: %d  ·  best level: %d" % [

@@ -13,16 +13,20 @@ extends SceneTree
 ##      best shield and the one-hander the pool holds - a melee body takes the
 ##      greatsword, a bow takes the bow, and a pickup only displaces what it is
 ##      actually worth more than to that body;
-##   4. the behaviour: a tank advances and waits behind its guard and never falls
-##      back, a melee body falls back under 30% to bind its wound and goes at the
-##      densest knot, a bow gives ground when struck or crowded and looses again
-##      from range, and each of them casts the skill its order names first.
+##   4. the behaviour: the fight's clock is the blood clone's (`check_guard` - the
+##      pit's `Hard` rung answers wind-ups, swings and leads a shot, and no
+##      disposition owns a number in it), a tank advances behind its guard and
+##      never falls back, a melee body falls back under 30% to bind its wound and
+##      goes at the densest knot, a bow gives ground when struck or crowded and
+##      looses again from range, and each of them casts the skill its order names
+##      first.
 ##
 ## The bodies here are doubles: the fight ladder writes intent, blocks and
 ## abilities through the same handholds a rigged mercenary offers, so what is
 ## measured is the disposition's rule and nothing of the scene.
 
 const SquadScript = preload("res://scripts/warband/squad_drive.gd")
+const CloneAi = preload("res://scripts/clone_ai.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
@@ -60,7 +64,7 @@ func run() -> void:
 	check_withdraw()
 	check_kite()
 	check_dry_bow()
-	check_blocking()
+	check_guard()
 	check_cluster()
 	check_casting()
 	check_escort_rank()
@@ -432,9 +436,12 @@ class FakeRig extends RefCounted:
 	var bow_index := 0
 	var staff_active := false
 	var off_weapon_active := false
+	## Whether a blow may start this frame. Off by default: a body in this harness
+	## is a duellist whose swing clock is measured, not one that trades punches.
+	var can_swing := false
 
 	func can_begin_melee(_hand: String) -> bool:
-		return false
+		return can_swing
 
 
 class FakeCombat extends RefCounted:
@@ -445,6 +452,7 @@ class FakeCombat extends RefCounted:
 	var aim_point := Vector3.ZERO
 	var dry := false
 	var draws := 0
+	var swings := 0
 
 	func stop_block() -> void:
 		blocking = false
@@ -458,6 +466,10 @@ class FakeCombat extends RefCounted:
 
 	func stop() -> void:
 		blocking = false
+
+	func begin_melee(_hand: String, _variant: String) -> bool:
+		swings += 1
+		return true
 
 	func set_aim(point: Vector3) -> void:
 		aim_point = point
@@ -476,10 +488,12 @@ class FakeCombat extends RefCounted:
 		pass
 
 
-## A hostile: a position, the flag the target search reads and an aim point.
+## A hostile: a position, the flag the target search reads, a state (`WINDUP` is
+## the telegraph a squadmate answers) and an aim point.
 class FakeWatcher extends Node3D:
 	var alive := true
 	var last_hitter = null
+	var state := "IDLE"
 
 	func get_aim_position() -> Vector3:
 		return global_position + Vector3(0.0, 1.4, 0.0)
@@ -561,7 +575,9 @@ func _watcher_at(at: Vector3) -> FakeWatcher:
 ## them for a body in the open with nothing to do.
 func _track(merc_id: int) -> Dictionary:
 	return {"merc_id": merc_id, "delta": 1.0 / 20.0, "side": 0.0, "sign": 1.0,
-		"state": 0, "state_left": 0.0, "step_left": 0.0, "cast_lock": 0.0,
+		"state": 0, "state_left": 0.0, "cast_lock": 0.0,
+		"swing_left": 0.0, "guard_cd": 0.0, "step_cd": 0.0,
+		"threat_clock": 0.0, "guard_answered": false, "step_answered": false,
 		"withdraw_left": 0.0, "withdrawing": false, "withdraw_failed": false,
 		"hurt_left": 0.0, "orbit": 1.0, "retreat": 0.0}
 
@@ -699,8 +715,8 @@ func check_dry_bow() -> void:
 
 	var track := _track(8)
 	drive._fight_watcher(body, host, track)
-	check(int(track.get("state", -1)) != SquadScript.FIGHT_CIRCLE,
-		"a dry bow never circles a hostile it cannot hurt")
+	check(not body.combat.blocking,
+		"a dry bow never plants behind a guard it cannot raise")
 	check(Vector2(body.last_intent).normalized().dot(Vector2(-1.0, 0.0)) > 0.9,
 		"it gives ground out of a blade's measure (%s)" % str(body.last_intent))
 	check(body.running, "at a jog")
@@ -715,8 +731,8 @@ func check_dry_bow() -> void:
 	# string, whichever door the ladder came through.
 	var close := _track(8)
 	drive._fight_bow(body, close, Vector3.RIGHT, 2.0)
-	check(int(close.get("state", -1)) != SquadScript.FIGHT_CIRCLE,
-		"and the close-fight path never circles it either")
+	check(not body.combat.blocking and float(body.last_intent.x) < 0.0,
+		"and the close-fight path gives ground off it rather than trading")
 	check(body.combat.draws == 0, "while a dry string is never drawn")
 
 	# A shaft in the quiver puts the bow back to work: the same body counts as
@@ -728,60 +744,122 @@ func check_dry_bow() -> void:
 	check(body.combat.draws == 1, "and the bow draws again")
 
 
-## A tank advances behind its guard and waits behind it between exchanges; a
-## melee body walks with the blade down and stands open.
-func check_blocking() -> void:
-	var host = _watcher_at(Vector3(5.0, 0.0, 0.0))
+## What the fight's clock is. It is the pit's: a squadmate reads a hostile's
+## wind-up and answers it on `CloneAi`'s `Hard` rung - the guard on `guard_answer`
+## once `reaction` seconds of the telegraph have passed, the feet on
+## `step_chance`/`step_gap` - and swings on `swing_gap`. A disposition owns none of
+## that: it owns the shield it advances behind, the ground it gives and the knot it
+## picks. What a body does with the beats it is given is the whole difference
+## between a tank, a melee body and a bow.
+func check_guard() -> void:
+	check(SquadScript.FIGHT_TIER == 3
+			and CloneAi.name_of(SquadScript.FIGHT_TIER) == "Hard",
+		"the squad fights on the pit's Hard rung (%s)"
+			% CloneAi.name_of(SquadScript.FIGHT_TIER))
+	var hard: Dictionary = CloneAi.profile(SquadScript.FIGHT_TIER)
+	# The dispositions grant no clock of their own: a key that came off the clone
+	# ladder has no business in one, or the band would be two hands on one dial.
+	const CLOCKS := ["swing_gap", "blow", "guard_answer", "reaction", "step_gap",
+		"step_chance", "speed", "turn", "sight", "lead", "casts", "cast_gap",
+		"guard_chance_min", "guard_max", "cast_every"]
+	for style in [Contracts.DISPOSITION_TANK, Contracts.DISPOSITION_MELEE,
+			Contracts.DISPOSITION_BOW]:
+		var profile: Dictionary = SquadScript.profile_of(style)
+		for key in CLOCKS:
+			check(not profile.has(key),
+				"the %s disposition owns no fight clock (%s)" % [style, key])
+
+	var host = _watcher_at(Vector3(1.3, 0.0, 0.0))
+	var body := _body_at(Vector3.ZERO)
+	body.rig.weapon = "sword"
+	var drive = _squad_for(5, Contracts.DISPOSITION_TANK)
+	drive.watchers = [host]
+	check(drive._ai == hard, "and spends that tier's own table")
+
+	# Nothing is coming: a hostile standing still is answered with footwork, never
+	# with a shield. The guard is an answer to a wind-up, not a stance.
+	var idle := _track(5)
+	drive._fight_watcher(body, host, idle)
+	check(not body.combat.blocking, "a body is not shielded against nothing")
+	check(int(idle.get("state", -1)) != SquadScript.FIGHT_GUARD,
+		"and keeps no guard window on a hostile that is not swinging")
+
+	# A wind-up this body has not had the tier's `reaction` to see is not answered
+	# at all: the hand waits for the clock, so a short telegraph is simply eaten.
+	host.state = "WINDUP"
+	var young := _track(5)
+	drive._fight_watcher(body, host, young)
+	check(not bool(young.get("guard_answered", false)),
+		"a wind-up younger than the tier's reaction is not answered")
+	check(not body.combat.blocking, "and no arm comes up for it")
+
+	# Over a run of readable wind-ups the share is the tier's: one in five. Two
+	# frames a trial, because the first is the clock reaching `reaction` and the
+	# second is the one the body may answer on.
+	var raised := 0
+	var answered := 0
+	for trial in 200:
+		var track: Dictionary = drive._track_for(200 + trial, body, 1.0 / 20.0)
+		drive._fight_watcher(body, host, track)
+		track = drive._track_for(200 + trial, body, 1.0 / 20.0)
+		drive._fight_watcher(body, host, track)
+		if bool(track.get("guard_answered", false)):
+			answered += 1
+		if body.combat.blocking:
+			raised += 1
+		body.combat.blocking = false
+	check(answered == 200, "every readable wind-up is answered once (%d)" % answered)
+	check(raised > 16 and raised < 64,
+		"one in five is answered with the guard, as the tier rolls it (%d of 200)"
+			% raised)
+
+	# The cadence is `swing_gap` and nothing else: a blow, the wait, the next blow.
+	host.state = "IDLE"
+	body.rig.can_swing = true
+	body.combat.swings = 0
+	var cadence: Dictionary = drive._track_for(5, body, 1.0 / 60.0)
+	for frame in 125:
+		cadence = drive._track_for(5, body, 1.0 / 60.0)
+		drive._fight_watcher(body, host, cadence)
+	check(body.combat.swings == 2,
+		"the tier's 1.05 s gap is two blows in two seconds (%d)" % body.combat.swings)
+	body.rig.can_swing = false
+
+	# The tank's own tell is the shield it closes behind, not a guard share: the
+	# front line advances with the blade up, the rest walk in open.
+	host.global_position = Vector3(6.0, 0.0, 0.0)
 	var tank_body := _body_at(Vector3.ZERO)
 	tank_body.rig.weapon = "sword"
-	var tank = _squad_for(5, Contracts.DISPOSITION_TANK)
+	var tank = _squad_for(9, Contracts.DISPOSITION_TANK)
 	tank.watchers = [host]
-	var tank_track := _track(5)
-	tank._fight_watcher(tank_body, host, tank_track)
+	tank._fight_watcher(tank_body, host, _track(9))
 	check(tank_body.combat.blocking, "a tank closes behind a raised guard")
-	check(Vector2(tank_body.last_intent).x > 0.5,
-		"and it is still closing (%s)" % str(tank_body.last_intent))
-
-	var press_body := _body_at(Vector3(0.0, 0.0, 2.0))
+	var press_body := _body_at(Vector3.ZERO)
 	press_body.rig.weapon = "sword"
-	var press = _squad_for(6, Contracts.DISPOSITION_MELEE)
+	var press = _squad_for(10, Contracts.DISPOSITION_MELEE)
 	press.watchers = [host]
-	press._fight_watcher(press_body, host, _track(6))
+	press._fight_watcher(press_body, host, _track(10))
 	check(not press_body.combat.blocking, "a melee body closes with the blade down")
 
-	# At contact the difference is the same: the tank waits behind the guard, the
-	# melee body stands in the beat between exchanges.
-	host.global_position = Vector3(1.3, 0.0, 0.0)
-	tank._fight_watcher(tank_body, host, tank_track)
-	check(tank_body.combat.blocking, "a tank holds its guard at contact")
-	press._fight_watcher(press_body, host, _track(6))
-	check(not press_body.combat.blocking, "a melee body stands open at contact")
-
-	# A spent tank is the one thing a shield cannot buy: the body's own tick drops
-	# the arm at zero (`_resolve_motion`), so the squad asks the same pool floor a
-	# player's press does instead of raising a guard it cannot hold.
+	# A spent body is the one thing a shield cannot buy: the answer asks the same
+	# pool floor a player's press does instead of raising a guard it cannot hold.
 	var spent_body := _body_at(Vector3.ZERO)
 	spent_body.rig.weapon = "sword"
 	spent_body.stamina = Stamina.GUARD_MIN - 1.0
-	var spent = _squad_for(7, Contracts.DISPOSITION_TANK)
-	spent.watchers = [host]
-	spent._fight_watcher(spent_body, host, _track(7))
+	var spent = _squad_for(11, Contracts.DISPOSITION_TANK)
+	var spent_track := _track(11)
+	spent._answer_guard(spent_body, spent_track, Vector3.RIGHT)
 	check(not spent_body.combat.blocking,
-		"a tank under the guard floor does not raise an arm")
+		"a body under the guard floor does not raise an arm")
+	check(float(spent_track.get("guard_cd", 0.0)) <= 0.0,
+		"and spends no re-raise clock on a window it never opened")
 	spent_body.stamina = Stamina.MAX
-	spent._fight_watcher(spent_body, host, _track(7))
+	spent._answer_guard(spent_body, spent_track, Vector3.RIGHT)
 	check(spent_body.combat.blocking,
-		"and the same tank raises one again once the pool knits back")
+		"and the same body raises one again once the pool knits back")
 
-	# The rolled window is the disposition's too.
 	var tank_profile: Dictionary = SquadScript.profile_of(Contracts.DISPOSITION_TANK)
 	var melee_profile: Dictionary = SquadScript.profile_of(Contracts.DISPOSITION_MELEE)
-	check(float(tank_profile["guard_chance_min"]) >= 0.9,
-		"a tank is up nearly every exchange (%s)" % str(tank_profile["guard_chance_min"]))
-	check(float(melee_profile["guard_chance_min"]) < 0.5,
-		"a melee body spends its turns attacking (%s)" % str(melee_profile["guard_chance_min"]))
-	check(float(tank_profile["guard_max"]) > float(melee_profile["guard_max"]),
-		"and holds the window longer")
 	check(is_equal_approx(float(tank_profile["withdraw"]), 0.0),
 		"a tank's falling-back share is zero: it never gives ground")
 	check(is_equal_approx(float(melee_profile["withdraw"]), SquadScript.WITHDRAW_SHARE)

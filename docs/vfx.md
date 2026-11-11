@@ -15,7 +15,7 @@ produces the same files on every machine.
 `tools/icon_forge.py` is the only source of `assets/ui/abilities/*.png`.
 
 ```
-python tools/icon_forge.py                  # all 37 icons at 256 px
+python tools/icon_forge.py                  # all 38 icons at 256 px
 python tools/icon_forge.py --only fireball,dash --master
 python tools/icon_forge.py --sheet --preview 26
 ```
@@ -35,13 +35,13 @@ flat one.
   metalness, grain direction, specular and rim strength, emissive and ink. A new
   material is one dictionary entry.
 - **A shared ground.** Every icon sits on the same lacquer disc with a
-  family-coloured rim and a low family glow: 37 drawings that read as one set.
+  family-coloured rim and a low family glow: one set rather than 38 drawings.
   The disc is inset so the hotbar's own frame still shows around it.
 - **Boldness is a size decision.** Every mark is at least ~3.5% of the canvas
   wide, because the hotbar shows icons at 26 px. Details that only exist at
   256 px are kept for the 96 px card; nothing load-bearing is thin.
-- **The set is the catalog.** 35 combat skills plus the bandage and the healing
-  potion: 37 icons, one file per ability, no file used twice.
+- **The set is the catalog.** 36 combat skills plus the bandage and the healing
+  potion: 38 icons, one file per ability, no file used twice.
 
 `AbilityRules.icon_texture(id)` answers `null` for a row with no file and
 `ability_slot.gd` then draws the skill's acronym; that fallback is for a peeled
@@ -150,7 +150,7 @@ floor on both sides.
 
 | Gate | Command |
 | --- | --- |
-| Icons (37, unique, 256 px), texture set, flipbook wiring, and that every one-shot frees itself | `Godot --headless --path . --script res://tests/ability_fx_regression.gd` |
+| Icons (38, unique, 256 px), texture set, flipbook wiring, and that every one-shot frees itself | `Godot --headless --path . --script res://tests/ability_fx_regression.gd` |
 | The bar, the ledger and the consumables | `hotbar_regression`, `ability_upgrades_regression` |
 | The arena's procs, host and guest paths | `roguelite_regression`, `warband_abilities_regression` |
 | Icons by eye, at 256 and at 26 | `python tools/icon_forge.py --sheet --preview 26` |

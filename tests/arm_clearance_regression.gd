@@ -257,6 +257,24 @@ func run() -> void:
 				advance(rig.melee_seconds("left")+0.2,"Offhand sword diagonal and recovery")
 				if failures>0:
 					break
+	# A Magical Nock shot spends its recovery on the settle instead of the quiver
+	# retrieval, so the drawing hand and the bow take a path of their own. Last, so
+	# the authored sections above keep their own timeline.
+	if failures==0:
+		rig.set_weapon("bow")
+		rig.set_bow(2)
+		rig.aim_at(Vector3(0,1.7,-30))
+		rig.bow_no_nock = true
+		for fraction in [0.0,0.5,1.0]:
+			rig.begin_draw()
+			advance(3.0*fraction,"Magical Nock draw")
+			if failures>0:
+				break
+			rig.release_string()
+			advance(1.23,"Magical Nock settle")
+			if failures>0:
+				break
+		rig.bow_no_nock = false
 	holder.queue_free()
 	await process_frame
 	print("ARM_CLEARANCE_REGRESSION samples=",samples," failures=",failures)

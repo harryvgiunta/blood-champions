@@ -10,6 +10,12 @@ var active := false
 var direction := Vector3.FORWARD
 var progress := 0.0
 var speed := 0.0
+## Per-instance tuning: a run's `slide_speed` and `slide_duration` land here, so
+## the slide can be faster or longer without the archer's pose outrunning it -
+## the rig reads `progress`, so a longer slide plays the same curve slower.
+var duration := DURATION
+var start_speed := START_SPEED
+var end_speed := END_SPEED
 var _start_direction := Vector3.FORWARD
 
 func try_start(body: CharacterBody3D, stance: Node, sprinting: bool, rolling: bool) -> bool:
@@ -24,7 +30,7 @@ func try_start(body: CharacterBody3D, stance: Node, sprinting: bool, rolling: bo
 	direction = travel.normalized()
 	_start_direction = direction
 	progress = 0.0
-	speed = START_SPEED
+	speed = start_speed
 	active = true
 	stance.crouch_requested = true
 	return true
@@ -35,7 +41,7 @@ func step(delta: float, body: CharacterBody3D, stance: Node, desired_direction: 
 	if not body.is_on_floor() or not stance.crouch_requested or stance.active or rolling:
 		reset()
 		return Vector3.ZERO
-	progress = minf(1.0,progress + delta / DURATION)
+	progress = minf(1.0,progress + delta / maxf(duration,0.01))
 	if progress >= 1.0:
 		reset()
 		return Vector3.ZERO
@@ -45,7 +51,7 @@ func step(delta: float, body: CharacterBody3D, stance: Node, desired_direction: 
 		var target := _start_direction.rotated(Vector3.UP,angle)
 		var turn := clampf(direction.signed_angle_to(target,Vector3.UP),-STEER_RATE*delta,STEER_RATE*delta)
 		direction = direction.rotated(Vector3.UP,turn).normalized()
-	speed = lerpf(START_SPEED,END_SPEED,progress)
+	speed = lerpf(start_speed,end_speed,progress)
 	return direction * speed
 
 func after_move(body: CharacterBody3D, actual_velocity: Vector3) -> void:

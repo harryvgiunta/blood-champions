@@ -9,6 +9,7 @@ config/description="Blood Champions: spawn into the town, kit up at the rack, an
 
 [autoload]
 Log="*res://scripts/log.gd"
+Settings="*res://scripts/settings_store.gd"
 SaveSlots="*res://scripts/warband/save_slots.gd"
 Audio="*res://scripts/audio/audio_manager.gd"
 PlayerState="*res://scripts/player_state.gd"

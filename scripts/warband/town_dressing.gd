@@ -149,7 +149,7 @@ static func _toward(at: Vector3, target: Vector3) -> float:
 ## The recruiter's and the keeper's booths. Each is four posts around the desk
 ## `town_hub.gd` built, a crossbar frame, a hide awning pitched over it, the
 ## keeper's tally board, and the goods hanging off the front bar: charms and
-## hides for the recruiter, strings of plain steel for the quartermaster.
+## hides for the recruiter, bundled dressings for the quartermaster's medicine.
 static func _build_counters(root: Root, scene: Node3D, mats: Dictionary,
 		own: Dictionary) -> void:
 	var holder := _group(root, "Counters")

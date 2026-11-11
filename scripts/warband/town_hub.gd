@@ -38,7 +38,6 @@ const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
-const State = preload("res://scripts/player_state.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
@@ -174,14 +173,6 @@ const SPAWN_POSTS := [
 	Vector3(-3.0, 0.0, 3.0), Vector3(-1.2, 0.0, 4.2), Vector3(0.8, 0.0, 4.4),
 	Vector3(2.6, 0.0, 3.2), Vector3(3.4, 0.0, 1.0), Vector3(-4.4, 0.0, 1.2),
 	Vector3(4.2, 0.0, -1.2), Vector3(-3.6, 0.0, -1.6),
-]
-
-## Spares the collective stash starts with, so the paperdoll has something to
-## move from the first minute.
-const TOWN_SPARES := [
-	"sword_arming", "shield_buckler", "bow_short", "focus_skull", "focus_tome",
-	"armor_leather_head", "armor_leather_chest", "ring_copper", "ring_health",
-	"dagger_ironwood", "club_makeshift", "branch_heavy", "shield_wood",
 ]
 
 ## The world scene that embeds this town, or null when the town stands alone.
@@ -872,8 +863,9 @@ func _build_recruiter_desk() -> Node3D:
 	lamp.name = "DeskLamp"
 	return desk
 
-## The keeper's counter: plain steel into the collective stash for gold. The
-## desk is the recruiter's twin, so the square reads as one market.
+## The keeper's counter: the band's medicine for gold - dressings and draughts
+## into the warband's own stock. The desk is the recruiter's twin, so the square
+## reads as one market.
 func _build_quartermaster_desk() -> Node3D:
 	var desk := Node3D.new()
 	desk.name = "QuartermasterDesk"
@@ -882,17 +874,25 @@ func _build_quartermaster_desk() -> Node3D:
 	Geo.box(desk, Vector3(2.0, 0.12, 0.9), Vector3(0.0, 0.92, 0.0), _wood)
 	for x in [-0.82, 0.82]:
 		Geo.box(desk, Vector3(0.14, 0.86, 0.8), Vector3(x, 0.43, 0.0), _wood)
-	Geo.box(desk, Vector3(0.5, 0.08, 0.24), Vector3(-0.35, 1.02, 0.0),
-		Geo.material(Color(0.42, 0.44, 0.46), 0.7, 0.35))
-	Geo.box(desk, Vector3(0.24, 0.24, 0.3), Vector3(0.5, 1.06, 0.0),
+	# The medicine chest: a folding of linen on the boards and a crate of
+	# stoppered draughts beside it.
+	for index in 3:
+		Geo.box(desk, Vector3(0.46, 0.05, 0.3),
+			Vector3(-0.35, 0.985 + float(index) * 0.052, 0.0),
+			Geo.material(Color(0.86, 0.82, 0.72), 0.0, 0.98))
+	Geo.box(desk, Vector3(0.26, 0.2, 0.32), Vector3(0.5, 1.04, 0.0),
 		Geo.material(Color(0.55, 0.44, 0.28), 0.3, 0.7))
+	for index in 2:
+		Geo.cylinder(desk, 0.04, 0.045, 0.13,
+			Vector3(0.44 + float(index) * 0.12, 1.2, 0.02),
+			Geo.material(Color(0.62, 0.13, 0.12), 0.0, 0.35), 10)
 	var lamp := _lamp(desk, Vector3(0.0, 1.5, 0.0), Color(0.78, 0.84, 1.0), 0.95, 5.0)
 	lamp.name = "DeskLamp"
 	return desk
 
 ## One of the three market stalls: the same trestle as the recruiter's and the
-## keeper's, dressed with the goods that stall actually trades in - Orla's rack
-## of bows and staves, Brann's anvil and laid-out blades, Vey's folded plates.
+## keeper's, dressed with the goods that stall actually trades in - Orla's hung
+## herbs and folded linen, Brann's rows of draughts, Vey's stack of dressings.
 ## The keeper's name is over the *keeper* (`town_folk.gd`), not over the boards:
 ## a market is people, not labels. `seat` is the `PlayerState.VENDORS` index the
 ## counter opens.
@@ -903,34 +903,47 @@ func _build_vendor_counter(node_name: String, at: Vector3, accent: Color,
 	counter.position = at
 	add_child(counter)
 	var iron := Geo.material(Color(0.30, 0.29, 0.28), 0.6, 0.55)
-	var steel := Geo.material(Color(0.46, 0.47, 0.49), 0.75, 0.35)
 	Geo.box(counter, Vector3(2.0, 0.12, 0.9), Vector3(0.0, 0.92, 0.0), _wood)
 	for x in [-0.82, 0.82]:
 		Geo.box(counter, Vector3(0.14, 0.86, 0.8), Vector3(x, 0.43, 0.0), _wood)
+	# Every counter in the market trades in medicine now, so the goods on the
+	# boards are what a band comes to buy: herb, linen and a stoppered draught.
+	var linen := Geo.material(Color(0.86, 0.82, 0.72), 0.0, 0.98)
+	var herb := Geo.material(Color(0.38, 0.44, 0.26), 0.0, 0.95)
+	var draught := Geo.material(Color(0.62, 0.13, 0.12), 0.0, 0.35)
 	match seat:
 		0:
-			# Orla: bows and staves leaning on the back bar, a tally board in front.
+			# Orla: bundles of dried herb hung off the back bar, a folded stack of
+			# boiled linen laid out in front of them.
 			for index in 4:
 				var slot_x := -0.76 + float(index) * 0.5
-				Geo.beam(counter, Vector3(slot_x, 1.0, -0.24),
-					Vector3(slot_x + 0.08, 2.05, -0.34), 0.028, _wood, 6)
-			Geo.box(counter, Vector3(0.5, 0.05, 0.26), Vector3(-0.4, 0.99, 0.22),
-				Geo.material(Color(0.55, 0.52, 0.44), 0.0, 0.95))
-		1:
-			# Brann: the anvil, three blades laid out, and the hammer beside them.
-			Geo.box(counter, Vector3(0.44, 0.2, 0.24), Vector3(0.5, 1.08, 0.0), iron)
+				Geo.beam(counter, Vector3(slot_x, 1.02, -0.26),
+					Vector3(slot_x + 0.06, 1.58, -0.32), 0.016, _wood, 5)
+				Geo.sphere(counter, 0.072, Vector3(slot_x + 0.06, 1.64, -0.32),
+					herb, Vector3(0.8, 1.35, 0.8))
 			for index in 3:
-				Geo.box(counter, Vector3(0.68, 0.03, 0.055),
-					Vector3(-0.38, 0.995, -0.2 + float(index) * 0.2), steel)
-			Geo.beam(counter, Vector3(-0.86, 0.98, 0.14),
-				Vector3(-0.6, 1.3, 0.14), 0.022, _wood, 6)
+				Geo.box(counter, Vector3(0.46, 0.045, 0.34),
+					Vector3(-0.34, 0.985 + float(index) * 0.046, 0.16), linen)
+		1:
+			# Brann: rows of stoppered draughts and the mortar that ground them.
+			for row in 3:
+				for column in 3:
+					Geo.cylinder(counter, 0.045, 0.05, 0.16,
+						Vector3(-0.54 + float(column) * 0.17, 1.03,
+							-0.18 + float(row) * 0.16), draught, 10)
+			Geo.sphere(counter, 0.11, Vector3(0.56, 1.01, 0.0), iron,
+				Vector3(1.0, 0.55, 1.0))
 		2:
-			# Vey: folded armour plates and a helm waiting to be fitted.
+			# Vey: the band's medicine in both hands - a stack of dressings for the
+			# patrol and a crate of draughts to send out with it.
 			for index in 4:
-				Geo.box(counter, Vector3(0.62, 0.05, 0.5),
-					Vector3(-0.3, 0.99 + float(index) * 0.055, 0.0), iron)
-			Geo.sphere(counter, 0.16, Vector3(0.52, 1.06, 0.0), steel,
-				Vector3(1.0, 0.9, 1.1))
+				Geo.box(counter, Vector3(0.52, 0.05, 0.42),
+					Vector3(-0.36, 0.985 + float(index) * 0.052, -0.02), linen)
+			for index in 4:
+				Geo.cylinder(counter, 0.042, 0.048, 0.15,
+					Vector3(0.40 + float(index % 2) * 0.11, 1.04,
+						-0.12 + float(index / 2) * 0.15), draught, 10)
+			Geo.box(counter, Vector3(0.34, 0.2, 0.36), Vector3(0.46, 0.96, -0.02), iron)
 	var lamp := _lamp(counter, Vector3(0.0, 1.5, 0.0), accent, 0.85, 4.5)
 	lamp.name = "StallLamp"
 	return counter
@@ -1029,18 +1042,25 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 		"stash":
 			_hide_panels()
 			paperdoll.open(controller.merc_for_peer(peer_id))
-			hud.set_status("The shared stash is open: click a free piece to wear it.", 4.0)
+			hud.set_status("The band's kit is open: click a worn slot to take it off.", 4.0)
 		"recruiter":
+			# The board is the host's: an oath is a gold price on the host's purse
+			# and a body in the host's band, so a guest standing at the desk is
+			# told whose hire it is rather than shown a list it cannot buy from.
+			if peer_id != 1:
+				hud.set_status("The Gold Recruiter deals with the host.", 3.0)
+				return service
 			_hide_panels()
 			screen.open()
 			var hiring := "Hire from the recruiter board: every oath under the cap costs" \
-				+ " nothing, and every body arms itself out of the shared stash."
+				+ " nothing, and every body walks out in the kit the board sold it -" \
+				+ " a level-one body, and that kit never changes."
 			screen.set_status(hiring)
 			hud.set_status(hiring, 5.0)
 		"quartermaster":
 			_hide_panels()
 			quartermaster.open()
-			hud.set_status("The quartermaster sells plain steel and arrows into the shared stash.", 4.0)
+			hud.set_status("The quartermaster sells the band's medicine: dressings and draughts.", 4.0)
 		"vendor_orla":
 			_open_vendor(0)
 		"vendor_brann":
@@ -1223,14 +1243,11 @@ func _panel_open() -> bool:
 ## A first-run warband, so the square is playable from its first minute. An
 ## existing warband (from a save or the camp) is never touched. The world calls
 ## this only when the campaign starts in the town; a camp start has already stood
-## its prisoners up. The body comes out of `seed_starting_band` with the one club
-## the campaign issues and nothing else, and is never dressed here: the square only
-## stocks the shared stash and the quiver, so the rest of the kit is won off the
-## kills it makes.
+## its prisoners up. The body comes out of `seed_starting_band` carrying the pair
+## the campaign issues, and that is all the town hands over: the square stocks no
+## spares, so the stash stands empty outside a run and every other piece is opened
+## at the Weapon Rack or won off a chest.
 func seed_warband() -> void:
 	if not warband.roster.is_empty():
 		return
 	warband.seed_starting_band()
-	for item_id in TOWN_SPARES:
-		if State.ITEMS.has(str(item_id)):
-			warband.stash.add(str(item_id), 1)

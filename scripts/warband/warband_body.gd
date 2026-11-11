@@ -12,10 +12,11 @@ signal downed_ended(slot: int)
 ## A hostile is about to land a blow or a shaft on this body (`note_attacker`). The
 ## squad listens: its party mode decides whether that is a fight the band answers.
 signal struck_by(attacker: Node3D)
-## A raised bare guard took a blow and came down: the fighter must raise it again.
-## A shield is the exception (`receive_melee`) and never emits this. The scene says
-## so on the soul's own body, because a guard that dropped with the button still
-## held looks like a button that stopped working.
+## A held guard came down because the pool behind it ran out. A stopped blow never
+## emits this - it spends the pool and leaves the arm up - so this is the one
+## drop the player did not ask for, and the scene says so on the soul's own body:
+## an arm that comes down with the button still held looks like a button that
+## stopped working.
 signal guard_broken(slot: int)
 
 const Archer = preload("res://scripts/archer.gd")
@@ -30,6 +31,11 @@ const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
+## The colour a body is known by: its name plate and the ring under its feet. The
+## same four are used wherever a player has to tell one body - or one chest - from
+## another, so "mine is the teal one" is a rule a party learns once.
+const RING_COLOURS := [Color("70c4cb"), Color("e4a75f"), Color("bfa1dc"),
+	Color("86c48a")]
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
@@ -81,10 +87,39 @@ var alive := true
 ## The arena run this body is fighting, when one is on (`RoguelitePlayer`). Null
 ## in the campaign: every hook below is a no-op on the wood's own rules.
 var roguelite = null
+## True once a run's Speed kit has been written into this body's roll, step and
+## slide, so the campaign's own constants are put back the frame the run ends.
+var _movement_tuned := false
 ## True while a run holds this body: a downed body cannot bleed out and cannot be
 ## finished, because the run wakes it when the island is cleared. The flag is the
 ## body's own so the snapshot and the downed clock need no knowledge of the mode.
 var roguelite_hold_downed := false
+## True for one of the band's hirelings: a body nobody's soul is inside, and every
+## body the recruiter's board sold - a bought recruit is the board's whatever soul
+## rides him, and his kit was sold with him. His fall is the band's loss, so it is
+## read as one: he lies for `WarbandContracts.MERCENARY_DOWNED_SECONDS` rather than
+## the soul's thirty, the arena's hold and the town's square do not keep him on the
+## ground, and any blow that lands on him there finishes him. Nothing stands him up
+## when the clock runs out - no clear, no chest, no square - and the roster's
+## ordinary reap erases the name, which is the whole of the permanence. Only a
+## revive channel inside the ten seconds picks him up.
+## `WorldScene` sets it on the frame a body goes down, from the record and the soul
+## router, so a body a human is inside keeps the campaign's own and longer rule.
+var expendable := false
+## The admin console's god switch (`F9`). It is a debug door, never a run rule:
+## a body the console has marked takes no blow at all - no downing, no bleed, no
+## bounds price - on the square and on the island alike, because the switch is
+## read here rather than by either mode's own damage path. Static because the
+## switch is the operator's, not one body's.
+static var god_mode := false
+## True while this body stands on the town's own ground. The square is the
+## warband's home, so a body knocked down there is never carried off: the bleed
+## clock stops killing and starts counting to the moment the town stands it back
+## up, and a blow on a body already down cannot finish it. PvP in the market
+## square still puts a player on the floor - it just never takes them out of the
+## session. `WorldScene` sets this on the frame a body goes down, from where the
+## body fell; the arena's own hold outranks it.
+var home_ground := false
 # Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
 # true while DOWNED - the body keeps its collision, its model and its claim on
 # the slot, and only a finisher or the bleed clock kills it - so every existing
@@ -131,7 +166,7 @@ var jump_requested := false
 var stamina := Stamina.MAX
 var max_stamina := Stamina.MAX
 ## Worn trinket kit and its summed modifiers (see `TrinketStats`).
-var trinkets: Dictionary = {"neck":"", "ring1":"", "ring2":"", "off":""}
+var trinkets: Dictionary = {"off":""}
 var trinket_stats: Dictionary = {}
 ## The procs this body's kit arms, armed at dress time.
 ## Energy Shield ward: while it runs, `absorb` of every hit is paid from
@@ -142,6 +177,11 @@ var ward_stamina_scale := 2.0
 var _exhausted := false
 var consume_kind := ""
 var _consume_elapsed := 0.0
+## Each medicine's own readiness, in seconds: the item table authors 9 s for a
+## dressing and 12 s for a draught. The two keys are the body's own (`Z`, `V`), so
+## the clock lives here with the channel instead of on a bar slot the player had
+## to keep for medicine.
+var consume_ready := {"bandage": 0.0, "potion": 0.0}
 var _heal_remaining := 0.0
 var _heal_rate := 0.0
 var input_age := 0.0
@@ -203,6 +243,13 @@ var history: Array = []
 var prediction_corrections := 0
 var _last_motion := Vector3.ZERO
 var _last_running := false
+## A block press the body could not honour on the frame it arrived: a roll it is
+## committed to, or a stagger holding the arms. The press is held for this long and
+## raised the frame the body is free, so a defensive click is never swallowed by an
+## animation the player cannot cancel. Long enough to outlast a dodge roll.
+const BLOCK_PRESS_BUFFER := 0.75
+var _block_request := Vector3.ZERO
+var _block_request_left := 0.0
 ## A predicted body's own translation only matches the host within this
 ## tolerance; anything above it is replayed from the authoritative state. A
 ## standing body still lands within half a walking frame, so the floor absorbs
@@ -301,14 +348,13 @@ func _ready() -> void:
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label.no_depth_test = true
 	add_child(_label)
-	var colors := [Color("70c4cb"),Color("e4a75f"),Color("bfa1dc"),Color("86c48a")]
-	_label.modulate = colors[slot % colors.size()]
+	_label.modulate = RING_COLOURS[slot % RING_COLOURS.size()]
 	var circle := TorusMesh.new()
 	circle.inner_radius = 0.38
 	circle.outer_radius = 0.43
 	circle.rings = 24
 	circle.ring_segments = 6
-	_ground_ring = Geo.mesh_node(self,circle,Geo.material(colors[slot % colors.size()]),Vector3(0,0.025,0))
+	_ground_ring = Geo.mesh_node(self,circle,Geo.material(RING_COLOURS[slot % RING_COLOURS.size()]),Vector3(0,0.025,0))
 	# Built and parked with the body: the drop carries its own drip, and no scene
 	# has to know that it does.
 	_bleed_drip = BleedDrip.new()
@@ -362,6 +408,7 @@ func revive() -> void:
 	run_requested = false
 	jump_requested = false
 	input_age = 0.0
+	_block_request_left = 0.0
 	reset_stance()
 	health = max_health
 	_regen_elapsed = 0.0
@@ -380,6 +427,7 @@ func revive() -> void:
 	downed = false
 	downed_seconds = 0.0
 	downed_by = -1
+	expendable = false
 	# The rig stands up and stops bleeding here exactly as it does on a revive.
 	_clear_downed_state()
 	combat.stop()
@@ -457,6 +505,12 @@ func _hold_corpse() -> void:
 	if _bleed_drip != null:
 		_bleed_drip.detach()
 
+## How long this body has on the ground before the bleed takes it. A hireling's
+## ten seconds is his own: see `expendable`.
+func downed_limit() -> float:
+	return WarbandContracts.MERCENARY_DOWNED_SECONDS if expendable \
+		else WarbandContracts.DOWNED_BLEED_SECONDS
+
 ## How long this body has lain on the ground, as a 0..1 share of the bleed clock.
 ## The rig carries it so the drip (and anything later) reads the same number the
 ## clock that kills the body runs on.
@@ -467,10 +521,9 @@ func _tick_downed_presentation(delta: float) -> void:
 	# A replica reads how long it has been lying here locally, so a remote body's
 	# drip quickens too; nothing in this function decides a death.
 	if not authoritative:
-		downed_seconds = minf(downed_seconds + maxf(delta, 0.0),
-			WarbandContracts.DOWNED_BLEED_SECONDS)
+		downed_seconds = minf(downed_seconds + maxf(delta, 0.0), downed_limit())
 	if is_instance_valid(rig):
-		rig.blood_loss = DownedRules.bleed_fraction(downed_seconds)
+		rig.blood_loss = DownedRules.bleed_fraction(downed_seconds, downed_limit())
 
 ## Ghost of the Warband: a blow overkilled by at most 10% knocks this body down
 ## instead of killing it.
@@ -522,6 +575,13 @@ func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTIO
 	downed = false
 	downed_seconds = 0.0
 	downed_by = -1
+	# The rule is about the fall in front of us, and the next fall is asked again
+	# by the world (`WorldScene._on_body_downed`): a picked-up hireling is a body
+	# standing in the band like any other until he goes down once more.
+	expendable = false
+	# The town's hold is about where the body *fell*: once it is back on its feet
+	# the ground is read again on the next fall.
+	home_ground = false
 	health_state = WarbandContracts.HealthState.ALIVE
 	health = DownedRules.revive_health(max_health, fraction)
 	_regen_elapsed = 0.0
@@ -652,9 +712,10 @@ func press_jump(roll_requested: bool) -> void:
 	if not alive or downed or not cover.prepare_jump():
 		return
 	_exposure_tick = -1
-	# A leap ends the guard, the swing and the cover latch, but never the hands:
-	# a body that jumps with a bow drawn - or a skill under way - keeps it
-	# (`stop_for_airborne`).
+	# A leap ends the cover latch, the throw and the cover attack, but never the
+	# hands or the guard: a body that jumps with a bow drawn, a skill under way
+	# or a blade raised keeps it (`stop_for_airborne`), and a guard can be raised
+	# again on the way down.
 	combat.stop_for_airborne()
 	dodge.reset()
 	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,grounded,roll_requested) or jump_requested
@@ -676,9 +737,38 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 		# waits for it to knit back instead of leaning on a free defence.
 		if stamina < Stamina.GUARD_MIN:
 			return
-		combat.start_block(forward)
+		# The guard is the reflex action and takes the hands from whatever they were
+		# doing; a press the body cannot honour yet is held rather than discarded
+		# (`_flush_block_request`).
+		_block_request = forward
+		_block_request_left = BLOCK_PRESS_BUFFER
+		if combat.start_block(forward,true):
+			_block_request_left = 0.0
 	else:
+		_block_request_left = 0.0
 		combat.stop_block()
+
+## Spend a held block press the moment the body can take it. A roll and a stagger
+## are the two states a guard cannot interrupt, so the press waits for them; an
+## action the player chose *after* the press (a cut, a throw, a skill, a drink)
+## owns the hands instead, and the press is spent rather than stealing it back.
+func _flush_block_request(delta: float) -> void:
+	if _block_request_left <= 0.0:
+		return
+	_block_request_left = maxf(0.0,_block_request_left-delta)
+	if combat.blocking or _block_request_left <= 0.0:
+		_block_request_left = 0.0
+		return
+	if rig.weapon not in ["sword","dagger"] or stamina < Stamina.GUARD_MIN:
+		_block_request_left = 0.0
+		return
+	if combat.stagger_time > 0.0 or rig._roll_progress >= 0.0:
+		return
+	if rig.phase != "READY" or rig.is_melee() or rig.is_ability() or rig.is_consuming():
+		_block_request_left = 0.0
+		return
+	if combat.start_block(_block_request,true):
+		_block_request_left = 0.0
 
 ## The striker behind the blow or the shaft about to land, named first - the same
 ## call a mob gets from every blade and missile (`arrow.gd`, `combat.gd`), and the
@@ -708,8 +798,12 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
-		# A paired guard is the off blade in the way rather than a held line: it
-		# spends no pool and there is no guard on it to break.
+		# A stopped blow is paid for in wind and in ground, never in guard: the
+		# arm stays exactly where the player put it, so a crowd is held off by the
+		# held blade instead of by clicking the same button again between blows.
+		# The pool is the whole price, and `_resolve_motion` is what takes the arm
+		# down when it runs dry. A shield is now the same rule as a blade - it
+		# simply costs less.
 		if rig.weapon != "dual":
 			stamina = maxf(0.0,stamina-combat.block_stamina_cost())
 			var push := global_position - attacker_position
@@ -718,14 +812,6 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 				push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 				velocity.x = push.x
 				velocity.z = push.z
-			# The blow was stopped and the pool paid `block_stamina_cost` for it.
-			# What that does to the guard is what stopped it: a shield is a boss to
-			# be hit, so the arm stays up and only the stamina goes - the pool is the
-			# wall's whole price. A bare blade cannot hold its line, so one raised
-			# guard buys one block and the crowd cannot be stood off by the button.
-			if not rig.shield_equipped:
-				combat.break_guard()
-				guard_broken.emit(slot)
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			# The raised dagger absorbs the impact: half damage, and the attacker's
 			# swing continues. A turned blow rolls no stagger, blunt or not.
@@ -987,6 +1073,15 @@ func roguelite_move_scale() -> float:
 	return float(roguelite.move_scale())
 
 
+## The Speed chest's kit: the roll, the side step and the slide ask this once a
+## frame, and a body with no run behind it gets an empty answer and its own
+## constants.
+func roguelite_movement() -> Dictionary:
+	if roguelite == null:
+		return {}
+	return roguelite.movement()
+
+
 ## Danger Close and Eagle Eye ask this at the body a blow is landing on, from the
 ## shared melee resolver.
 func roguelite_proximity(at: Vector3) -> float:
@@ -1056,6 +1151,8 @@ func _tick_ward(delta: float) -> void:
 ## caller - it must take exactly a share of what the body has left, whatever gear
 ## it is wearing. Returns the life actually paid.
 func pay_cost(fraction: float) -> float:
+	if god_mode:
+		return 0.0
 	if not authoritative or not alive or downed or fraction <= 0.0:
 		return 0.0
 	var paid := maxf(0.0, health * clampf(fraction, 0.0, 1.0))
@@ -1070,6 +1167,8 @@ func pay_cost(fraction: float) -> float:
 ## a body that does die keeps its corpse where it fell.
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true,
 		weapon_class: String = "") -> void:
+	if god_mode:
+		return
 	if not authoritative or not alive or source_id == slot:
 		return
 	# A headshot is only worth a head if this blow is the arrow that named it: the
@@ -1083,8 +1182,11 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	if downed:
 		# A body the arena is holding waits out the wave as a spectator: the run
 		# wakes it when the island is cleared, so a finisher on the dirt has
-		# nothing to finish yet.
-		if roguelite_hold_downed:
+		# nothing to finish yet. And the town keeps its own: a blow on a body
+		# lying in the square is not a finisher, because the square is where the
+		# band gets its feet back. Neither holds a hireling - nothing owns his
+		# fall but the ten seconds, so a second blow on him there ends it.
+		if not expendable and (roguelite_hold_downed or home_ground):
 			return
 		# A blow on a downed body is a finisher, not damage: lying in the dirt,
 		# any blow that lands ends it - and an arrow in the head takes the head
@@ -1117,8 +1219,11 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		rig.set_hit_react(seconds)
 		dodge.reset()
 	if bool(outcome.died) or bool(outcome.downed):
-		# Nothing is killed outright: the wood puts a body on its chest and the
-		# bleed clock is the only thing here that carries a body off.
+		# Nothing is killed outright: the wood puts a body on its chest, and the
+		# bleed clock - or the blow that lands on it there - is the only thing here
+		# that carries a body off. Nothing here re-derives the overkill threshold;
+		# the outcome above is the resolver's. A hireling's clock is his ten
+		# seconds and his death is final (`expendable`).
 		enter_downed(source_id)
 		return
 	# Still standing, so the blow is heard: the share of the pool it took decides
@@ -1136,16 +1241,52 @@ func try_consume(kind: String) -> bool:
 		return false
 	if not Archer.CONSUMABLE_DATA.has(kind) or health >= max_health-0.001:
 		return false
+	if float(consume_ready.get(kind, 0.0)) > 0.0:
+		return false
 	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active or ability.active:
+		return false
+	# A dressing and a draught are bought, not free: the band's stock is the gate
+	# and the channel spends one of it. The squad's own field bandaging is a
+	# different thing entirely and never comes out of this pack.
+	if consumable_stock(kind) <= 0:
 		return false
 	combat.stop()
 	if not rig.begin_consumable(kind):
 		return false
+	var stock = _supplies()
+	if stock != null:
+		stock.take_supply(kind)
 	consume_kind = kind
 	_consume_elapsed = 0.0
+	consume_ready[kind] = _consume_cooldown(kind)
 	return true
 
+
+## How long one medicine stays spent after a dose: the catalogue's own cooldown
+## for the row (`bandage`, `healing_potion`), and zero for a kind with no row.
+func _consume_cooldown(kind: String) -> float:
+	var id := "healing_potion" if kind == "potion" else kind
+	return maxf(0.0, float(AbilityRules.by_id(id).get("cooldown", 0.0)))
+
+## The warband's books, where the band's medicine is counted. Null in a scene
+## that has no autoload (a bare-body harness), which reads as an empty pack.
+func _supplies():
+	return get_node_or_null("/root/Warband")
+
+
+## Doses of one medicine the band is carrying: 0 when nothing is left, so the
+## key can refuse and say so.
+func consumable_stock(kind: String) -> int:
+	var stock = _supplies()
+	if stock == null or not stock.has_method("supply_count"):
+		return 0
+	return int(stock.supply_count(kind))
+
+
 func _advance_consumable(delta: float) -> void:
+	for kind in consume_ready:
+		if float(consume_ready[kind]) > 0.0:
+			consume_ready[kind] = maxf(0.0, float(consume_ready[kind]) - delta)
 	if consume_kind != "":
 		if not rig.is_consuming():
 			consume_kind = ""
@@ -1192,6 +1333,23 @@ func _advance_health_regen(delta: float) -> void:
 		_regen_elapsed -= WarbandContracts.HEALTH_REGEN_SECONDS
 		health = minf(max_health, health + WarbandContracts.HEALTH_REGEN_AMOUNT)
 
+## Health on hit: what a piece of kit pays its wielder back for a wound it opens.
+## The arena run's own `heal` takes the call when one is on, because that is where
+## Bloodthirst's refusal lives; the campaign body simply mends. Answers the health
+## actually gained, and never on a replica, in the arena, or with a running
+## consumable channel to interfere with.
+func heal_from_hit(amount: float) -> float:
+	if amount <= 0.0 or not authoritative or not alive or downed:
+		return 0.0
+	if health >= max_health:
+		return 0.0
+	var before := health
+	if roguelite != null and roguelite.has_method("heal"):
+		roguelite.heal(amount)
+	else:
+		health = minf(max_health, health + amount)
+	return maxf(0.0, health - before)
+
 func _cancel_consumable() -> void:
 	if consume_kind != "":
 		consume_kind = ""
@@ -1232,12 +1390,23 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 		# hold the revive channel.
 		if authoritative:
 			downed_seconds += delta
-			# An arena run holds the bleed clock: a player who goes down while a
-			# wave is live stays down as a spectator until the island is cleared,
-			# and is woken at half HP off the reward chest.
-			if not roguelite_hold_downed and DownedRules.bled_out(downed_seconds):
-				_die(downed_by)
+			if DownedRules.bled_out(downed_seconds, downed_limit()):
+				# An arena run holds the bleed clock: a player who goes down while
+				# a wave is live stays down as a spectator until the island is
+				# cleared, and is woken at half HP off the reward chest. The town
+				# does the same thing more slowly: the clock runs out and the body
+				# stands back up, so a scrap in the square can floor a player but
+				# never ends their session. Neither holds a hireling - his ten
+				# seconds are the campaign's own and they kill wherever he fell.
+				if expendable:
+					_die(downed_by)
+				elif not roguelite_hold_downed:
+					if home_ground:
+						revive_from_downed()
+					else:
+						_die(downed_by)
 		return
+	_flush_block_request(delta)
 	input_age += delta
 	if authoritative:
 		# Every authoritative body consumes its queued intent, including the
@@ -1311,7 +1480,11 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	rig.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	rig.set_step(dodge.progress if dodge.active else -1.0,dodge.direction)
-	rig.set_locomotion(_last_motion,is_on_floor() and not roll.active)
+	# The rig turns onto the walk this body asked for, never onto the ground it
+	# was shoved across: a guard that stops a blow is charged a step backwards,
+	# and a facing read from that step pivots the fighter away from the attacker.
+	rig.set_locomotion(_last_motion,is_on_floor() and not roll.active,
+		Vector3(move_direction.x,0.0,move_direction.y))
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(_last_motion,_last_running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	Perf.begin("body.combat")
@@ -1322,11 +1495,57 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 	_footsteps.update(delta,self,rig,is_local)
 	Perf.end()
 
+## The run's Speed kit, written into the three movement state machines once a
+## frame: the roll's speed, the side step's travel and recovery, and the slide's
+## clock and speed. A body with no run behind it keeps its own constants, and one
+## whose run has just ended gets them put back - so a campaign body is never
+## walking on a run's leftover tuning.
+func _tune_movement() -> void:
+	if roguelite == null:
+		if not _movement_tuned:
+			return
+		_movement_tuned = false
+		dodge.travel = DodgeStep.TRAVEL
+		dodge.duration = DodgeStep.DURATION
+		dodge.recovery = 1.0
+		roll.speed = DodgeRoll.SPEED
+		slide.duration = RunningSlide.DURATION
+		slide.start_speed = RunningSlide.START_SPEED
+		slide.end_speed = RunningSlide.END_SPEED
+		return
+	_movement_tuned = true
+	var kit: Dictionary = roguelite_movement()
+	var step_distance := float(kit.get("step_distance", 0.0))
+	var step_speed := float(kit.get("step_speed", 0.0))
+	var step_recovery := float(kit.get("step_recovery", 0.0))
+	var roll_distance := float(kit.get("roll_distance", 0.0))
+	var roll_speed := float(kit.get("roll_speed", 0.0))
+	var slide_speed := float(kit.get("slide_speed", 0.0))
+	var slide_duration := float(kit.get("slide_duration", 0.0))
+	dodge.travel = maxf(0.1, DodgeStep.TRAVEL + step_distance)
+	# The step's own clock is its speed: the same travel in less time is a faster
+	# step, and the rig follows `progress`, so the pose keeps up with it.
+	dodge.duration = DodgeStep.DURATION / maxf(0.2, 1.0 + step_speed)
+	# A step that could be recovered in nothing at all is not a cooldown: the
+	# floor keeps a stack of Speed cards from turning the step into a walk.
+	dodge.recovery = clampf(1.0 - step_recovery, 0.4, 1.0)
+	# `roll_distance` is metres, paid on the roll's own clock rather than by
+	# stretching it, because the rig animates the roll over `DodgeRoll.DURATION`.
+	roll.speed = maxf(0.1, (DodgeRoll.TRAVEL + roll_distance)
+		/ DodgeRoll.DURATION * maxf(0.2, 1.0 + roll_speed))
+	slide.duration = maxf(0.05, RunningSlide.DURATION
+		* maxf(0.2, 1.0 + slide_duration))
+	var slide_scale := maxf(0.2, 1.0 + slide_speed)
+	slide.start_speed = RunningSlide.START_SPEED * slide_scale
+	slide.end_speed = RunningSlide.END_SPEED * slide_scale
+
+
 ## One tick's movement intent: the walk target plus every velocity the state
 ## machines produced, in the single order the authority and a predicting peer
 ## share. The record is what `_integrate` consumes, so a rollback can replay a
 ## frame without advancing a state machine twice.
 func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dictionary:
+	_tune_movement()
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
@@ -1344,10 +1563,12 @@ func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dicti
 		stamina_rate = Stamina.REGEN_PER_SECOND * TrinketStats.stamina_regen(trinket_stats)
 	stamina = clampf(stamina + delta * stamina_rate,0,max_stamina)
 	if combat.blocking and stamina <= 0.0:
-		# Out of wind the arm comes down by itself. It stays down until the pool
-		# is back over `GUARD_MIN`, so the drop cannot be undone by a press on
-		# the same frame.
+		# Out of wind the arm comes down by itself, and that is the only thing
+		# that takes a guard the player is holding: no landed blow does. It stays
+		# down until the pool is back over `GUARD_MIN`, so the drop cannot be
+		# undone by a press on the same frame.
 		combat.break_guard()
+		guard_broken.emit(slot)
 	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_exhausted = true
 	elif stamina >= Stamina.SPRINT_RESUME:
@@ -1370,7 +1591,7 @@ func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dicti
 		var step_velocity: Vector3 = dodge.velocity()
 		committed = step_velocity
 	if roll.active:
-		committed = Vector3(roll.direction.x * DodgeRoll.SPEED,0.0,roll.direction.z * DodgeRoll.SPEED)
+		committed = roll.velocity()
 	var record := {"dir": Vector2(direction.x,direction.z), "run": running, "speed": walk_speed,
 		"replace": committed, "cap": 0.0,
 		"separation": not was_in_cover and not roll.active,
@@ -1661,7 +1882,8 @@ func _predict_body(delta: float, actors: Array) -> void:
 	# and a host that is holding a frame must not freeze the run this peer is
 	# actually making. Combat and ability clips still read the snapshot.
 	if prediction_active():
-		rig.set_locomotion(_last_motion,is_on_floor() and not roll.active)
+		rig.set_locomotion(_last_motion,is_on_floor() and not roll.active,
+			Vector3(move_direction.x,0.0,move_direction.y))
 
 
 ## True while this peer owns and integrates the body itself. Cover is a

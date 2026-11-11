@@ -76,7 +76,13 @@ func _check_catalog() -> void:
 	check(EquipmentRules.allowed(item, "off"), "the torch is legal in the off hand")
 	check(not EquipmentRules.allowed(item, "main"), "the torch is never a main hand")
 	check(EquipmentRules.auto_slot(item, {}) == "off", "a fresh equip puts it in the off hand")
-	check(QuartermasterScript.STOCK.has("torch_hand"), "the quartermaster sells the torch")
+	# No counter sells a torch any more: the keepers trade in medicine, and a
+	# held piece comes out of the field. The piece itself is unchanged, and the
+	# drop this test walks below is how a body gets one.
+	check(not QuartermasterScript.STOCK.has("torch_hand"),
+		"the quartermaster's counter sells no torch")
+	check(not State.ITEMS["torch_hand"].has("supply"),
+		"and the torch is not medicine either")
 
 
 # --- the light -------------------------------------------------------------

@@ -36,6 +36,7 @@ extends "res://scripts/forest_mob.gd"
 const ArmorData = preload("res://scripts/armor_data.gd")
 ## The item catalog: a variant names catalog pieces and the corpse lists them.
 const Catalog = preload("res://scripts/player_state.gd")
+const Vfx = preload("res://scripts/vfx_library.gd")
 
 ## The species the wood fields. `mob_id` is the species, and it is what the scene
 ## sets before the body enters the tree; a scene that forgets gets the warden,
@@ -383,6 +384,22 @@ func _ready() -> void:
 	# A body with no quarry holds its post unless the scene gave it a disc to
 	# walk: the road's chain does, the warcamps and the archers do not.
 	profile["roam"] = patrol_radius
+
+
+## The chest coal is what a demon gets; a watcher's body is broader and darker,
+## and a run's caster or archer can cast from any angle, so every watcher cast
+## also opens a ring on the ground under it. That ring is the part a player
+## reading the fight from behind can see before the spell.
+func _begin_cast(spell_id: String, row: Dictionary, direction: Vector3) -> void:
+	super(spell_id, row, direction)
+	if not is_instance_valid(_cast_tell):
+		return
+	var ring := Vfx.decal(get_parent() as Node3D,
+		global_position + Vector3.UP * 0.02, Vfx.RING, Vector2(3.2, 3.2),
+		Color(1.0, 0.55, 0.20, 0.75),
+		maxf(float(row.get("windup", 0.8)), 0.2), true, 0.8)
+	if ring != null:
+		ring.reparent(_cast_tell, true)
 
 
 # --- the mob surface the scenes call ---------------------------------------
@@ -906,6 +923,24 @@ func _candidates() -> Array:
 	if target != null:
 		list.append(target)
 	return list
+
+
+## The bodies a watcher's spell can wound: its own quarry plus every other living
+## party body, filtered by the same safe-ring rule the melee uses. The base
+## `_candidates()` is the single quarry a watcher hunts; a line or a blast is a
+## wider question, and the two casting bodies answer it here.
+func _spell_candidates() -> Array:
+	var list: Array = super._candidates()
+	var out: Array = []
+	for candidate in list:
+		if not is_instance_valid(candidate) or not candidate is Node3D:
+			continue
+		if candidate.get("alive") == false or candidate.get("downed") == true:
+			continue
+		if not _is_hostile(candidate):
+			continue
+		out.append(candidate)
+	return out
 
 
 ## Huntable bodies: alive, and either outside the town's safe ring or the one

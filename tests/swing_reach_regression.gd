@@ -334,6 +334,26 @@ func run() -> void:
 		"One blast strikes at most ten bodies (%d)" % struck(ring))
 	await clear_targets()
 
+	# A guard pressed in the middle of a cut takes the hands: the cut ends there and
+	# the blows it was still owed are never delivered. A press that was ignored until
+	# the swing finished is the one that let a crowd walk in behind it.
+	attacker.rig.set_weapon("sword")
+	attacker.rig.set_sword(0)
+	attacker.rig.set_staff(false,0)
+	var cancelled = target_at(Vector3(0,0,-1.4))
+	await settle()
+	reset_swing()
+	check(attacker.combat.begin_melee("right","diagonal_right"),"A cut starts")
+	advance(attacker.rig._melee_window("right").x*0.6)
+	attacker.stamina = Stamina.MAX
+	attacker.set_block(true,Vector3.BACK)
+	check(attacker.combat.blocking,"A guard press takes the hands mid-cut")
+	check(not attacker.rig.is_melee(),"and the cut is over")
+	advance(1.2)
+	check(cancelled.health == START_HEALTH,"The interrupted cut delivers nothing")
+	attacker.set_block(false,Vector3.ZERO)
+	await clear_targets()
+
 	attacker.combat.target_mask = 4
 	var defender = fighter(1,attacker.position+Vector3(0,0,-1.2))
 	defender.rig.set_sword(0)
@@ -347,20 +367,21 @@ func run() -> void:
 	advance(1.0)
 	check(defender.health == 100.0 and defender.stamina == Stamina.MAX-Combat.BLOCK_STAMINA,
 		"A diagonal cleave honors a raised guard and spends stamina once")
-	# One raised guard buys one block. The blow is what spends it, so the arm
-	# comes down by itself and a crowd cannot be stood off by holding the button:
-	# the guard has to be pressed again for the next blow.
-	check(not defender.combat.blocking,"A landed block drops the guard")
-	reset_swing()
-	attacker.combat.begin_melee("right","diagonal_left")
-	advance(1.0)
-	check(defender.health < 100.0,"The next blow lands while the guard is still down")
-	# A shield is the exception. The boss takes the blow and the pool pays for it,
-	# but the arm never comes down: a shield is made to be blocked on, so the same
-	# raised guard stops the next blow too, for the same charge.
-	defender.health = 100.0
-	defender.combat.stagger_time = 0.0
-	defender.rig.set_hit_react(0.0)
+	# The guard is held, not spent. A crowd is stood off by the blade the player is
+	# holding, and each blow it stops is charged to the pool instead: an arm that
+	# came down between blows was what made a crowd lethal.
+	check(defender.combat.blocking,"A landed block leaves the guard up")
+	for blow in 3:
+		reset_swing()
+		attacker.combat.begin_melee("right","diagonal_right" if blow%2==0 else "diagonal_left")
+		advance(1.0)
+		check(defender.health == 100.0 and defender.combat.blocking,
+			"The held guard stops the crowd's next blow too (%d landed)" % (blow+2))
+		check(is_equal_approx(defender.stamina,Stamina.MAX-Combat.BLOCK_STAMINA*(2.0+blow)),
+			"and every stopped blow is charged to the pool (%.1f)"
+				% (Stamina.MAX-defender.stamina))
+	# A shield used to be the exception to all of this and is now the same rule for
+	# less: the board holds and pays its own cheaper price.
 	defender.rig.set_shield(true)
 	check(defender.rig.shield_equipped,"The defender takes a shield for the block test")
 	defender.stamina = Stamina.MAX
@@ -383,8 +404,9 @@ func run() -> void:
 			% (Stamina.MAX-defender.stamina))
 	defender.rig.set_shield(false)
 	var guarded_health: float = defender.health
-	# The landed blow staggered the defender and only the attacker's clock is
-	# advanced in this harness, so the reaction is cleared by hand.
+	# A fresh pool and no reaction, so the parry below is the only thing deciding
+	# the outcome. Only the attacker's clock is advanced in this harness, so the
+	# reaction is cleared by hand.
 	defender.combat.stagger_time = 0.0
 	defender.rig.set_hit_react(0.0)
 	defender.stamina = 100.0
@@ -406,12 +428,46 @@ func run() -> void:
 			Stamina.MAX - Stamina.GUARD_DRAIN_PER_SECOND * 0.5),
 		"Half a second of guard drains the pool at the guard's own rate (%.1f)"
 			% (Stamina.MAX - defender.stamina))
+	# An empty pool is the one thing that takes a held guard: the arm comes down by
+	# itself and stays down until the pool is back over the floor.
+	defender.stamina = 0.0
+	defender.step(1.0/60.0,[defender])
+	check(not defender.combat.blocking,"An empty pool takes a held guard down")
 	# A spent body cannot raise one at all, so a drop cannot be clicked away.
 	defender.combat.stop_block()
 	defender.stamina = Stamina.GUARD_MIN - 1.0
 	defender.set_block(true,Vector3.BACK)
 	check(not defender.combat.blocking,"A body under the guard floor cannot raise an arm")
 	defender.stamina = Stamina.MAX
+	# A blow the guard stops is paid as a step backwards, and that step is
+	# displacement, not a walk: the body must not turn onto it. A rig that did
+	# ended every bare-blade block facing away from the attacker it had just
+	# stopped, and its next guard cone pointed at the wall behind it.
+	defender.combat.stagger_time = 0.0
+	defender.rig.set_hit_react(0.0)
+	defender.health = 100.0
+	defender.combat.set_motion(Vector3.ZERO,false,true)
+	defender.combat.start_block(Vector3.BACK)
+	defender.combat.advance(Combat.PARRY_WINDOW+0.1)
+	var faced: Vector3 = (-defender.rig.global_basis.z).normalized()
+	var stopped: int = defender.receive_melee(12.0,77,defender.global_position+Vector3(0,0,1.0))
+	check(stopped == Combat.DEFENSE_BLOCK,"a guard held past the parry window stops the blow")
+	# The step the blow was paid in outlives the guard, so the facing rule is
+	# measured with the arm already down - that is the frame the old bug turned the
+	# body onto the ground it had just been shoved across.
+	defender.combat.stop_block()
+	defender.step(1.0/60.0,[defender])
+	var kept: Vector3 = (-defender.rig.global_basis.z).normalized()
+	check(faced.dot(kept) > 0.9,
+		"A stopped blow does not turn the body away from it (%.2f)" % faced.dot(kept))
+	# The body's own walk still owns its facing: the guard's facing is withheld
+	# travel, not a facing the body has lost.
+	defender.move_direction = Vector2(-1.0,0.0)
+	for tick in 8:
+		defender.step(1.0/60.0,[defender])
+	check((-defender.rig.global_basis.z).normalized().dot(Vector3.LEFT) > 0.9,
+		"A walk still turns the body onto its own direction")
+	defender.move_direction = Vector2.ZERO
 
 	world.queue_free()
 	await process_frame

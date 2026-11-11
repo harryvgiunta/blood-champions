@@ -1,15 +1,22 @@
 extends RefCounted
-## Trinket modifiers: necklaces, rings and the off-hand skull foci.
+## Trinket modifiers: the off-hand foci a body wears in the hand it is not
+## fighting with.
 ##
-## One table, one aggregation. Every controller derives the whole kit's
-## bonuses from the equipped ids, so a new trinket only needs an entry here and
-## a catalog row in `PlayerState.ITEMS`. Nothing in this file touches a scene.
+## One table, one aggregation. Every controller derives the whole kit's bonuses
+## from the equipped ids, so a new focus only needs an entry here and a catalog
+## row in `PlayerState.ITEMS`. Nothing in this file touches a scene.
+##
+## There is no neck and no ring: accessories are not worn any more, so the only
+## piece that carries a passive is the off hand's own - a skull that drinks off a
+## kill. A body's growth is the run's upgrades and the skills it carries, and
+## this kit is the one exception, because the skull is a hand's piece like a
+## shield is.
 ##
 ## Fractions are additive multipliers on the base value (`0.10` is +10%);
 ## `health` and `stamina` are flat additions; `heal_on_kill` and
 ## `stamina_on_kill` are flat refills on a kill.
 
-const SLOTS := ["neck", "ring1", "ring2", "off"]
+const SLOTS := ["off"]
 
 const DEFAULT := {
 	"health": 0.0,
@@ -43,34 +50,9 @@ const DEFAULT := {
 const GUARD_CAP := 0.60
 
 const STATS := {
-	# Neck - the amulet is the one trinket that carries a body's numbers, so
-	# every cord in the catalogue does something on its own. The altar's
-	# annointments then stack on top of these, which is why the pieces are the
-	# pieces and a welded stat is a bonus, never the whole of an amulet.
-	"neck_ember": {"stamina":40.0, "stamina_regen":0.10},
-	"neck_bone": {"health":8.0, "stagger":0.10},
-	"neck_heartstone": {"health":25.0},
-	"neck_fervor": {"melee_damage":0.08, "attack_speed":0.06},
-	"neck_luck": {"gold_find":0.25},
-	"neck_shield": {"stamina":30.0, "guard":0.02},
 	# Off hand
 	"focus_skull_life": {"heal_on_kill":15.0},
 	"focus_skull_death": {"stamina_on_kill":15.0},
-	# Rings
-	"ring_dash": {"move_speed":0.06},
-	"ring_health": {"health":25.0},
-	"ring_ranged": {"ranged_damage":0.10},
-	"ring_melee": {"melee_damage":0.10},
-	"ring_swift": {"move_speed":0.08},
-	"ring_haste": {"attack_speed":0.12},
-	"ring_vigor": {"stamina":150.0},
-	"ring_tide": {"stamina_regen":0.30},
-	"ring_ward": {"guard":0.06},
-	"ring_grit": {"stagger":0.25},
-	"ring_bounty": {"gold_find":0.25},
-	"ring_thrower": {"throw_damage":0.25},
-	"ring_echo": {"cooldown":0.15},
-	"ring_ironhide": {"health":20.0, "guard":0.02},
 }
 
 static func definition(id: String) -> Dictionary:
@@ -97,12 +79,9 @@ static func sum(trinkets: Dictionary) -> Dictionary:
 	return total
 
 
-## Convenience for callers that hold the whole ten-slot paperdoll.
+## Convenience for callers that hold the whole worn kit.
 static func for_equipped(equipped: Dictionary) -> Dictionary:
-	var trinkets := {}
-	for slot in SLOTS:
-		trinkets[slot] = str(equipped.get(slot, ""))
-	return sum(trinkets)
+	return sum(kit(equipped))
 
 
 ## The equipped ids that matter, in the same shape `sum` accepts.
@@ -154,7 +133,7 @@ static func cooldown_scale(stats: Dictionary) -> float:
 	return clampf(1.0 - float(stats.get("cooldown", 0.0)), 0.0, 1.0)
 
 
-## Incoming stagger is reduced by the grit trinkets.
+## Incoming stagger is reduced by the kit's grit.
 static func stagger_scale(stats: Dictionary) -> float:
 	return clampf(1.0 - float(stats.get("stagger", 0.0)), 0.0, 1.0)
 

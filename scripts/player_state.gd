@@ -1,12 +1,16 @@
 extends Node
 ## The item catalog every piece of gear is read from, the keepers' stock, and
-## the warband's purse (`credits`), persisted in `user://player_state.json`.
+## the warband's purse (`credits`), persisted in `user://player_state.json` - a
+## sealed container (`scripts/save_file.gd`), not the plain JSON the name and the
+## older builds suggest.
 
 signal changed
 
 const ArmorData = preload("res://scripts/armor_data.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+## The sealed save container: AES-256 over a binary payload with an HMAC tail.
+const SaveFileScript = preload("res://scripts/save_file.gd")
 
 ## A new-game purse large enough to buy any keeper stock outright.
 const STARTING_CREDITS := 99999
@@ -16,7 +20,7 @@ const ITEMS := {
 	"bow_short": {"name":"Shortbow", "short":"Shortbow", "kind":"bow", "index":0, "price":120,
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"Quick ashwood scout bow",
-		"detail":"30 damage at full draw / 1.0 s draw / light and fast"},
+		"detail":"35 damage at full draw / 1.0 s draw / half the re-nock / +2 health per hit"},
 	"bow_recurve": {"name":"Recurve", "short":"Recurve", "kind":"bow", "index":1, "price":220,
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"Balanced horn-and-yew recurve",
@@ -24,7 +28,7 @@ const ITEMS := {
 	"bow_long": {"name":"Longbow", "short":"Longbow", "kind":"bow", "index":2, "price":360,
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"Heavy heartwood war bow",
-		"detail":"50 damage at full draw / 3.0 s draw / slow but crushing"},
+		"detail":"50 damage at full draw / 3.0 s draw / slow but crushing / the starter bow"},
 	"sword_short": {"name":"Shortsword", "short":"Shortswd", "kind":"sword", "index":0, "price":110,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A compact camp blade",
@@ -80,9 +84,16 @@ const ITEMS := {
 		"summary":"Planks off a hut wall, lashed to a forearm",
 		"detail":"Off hand only / light front block / pairs with a one-hander"},
 	"bandage_linen": {"name":"Linen Bandage", "short":"Bandage", "kind":"bandage", "index":0, "price":6,
-		"category":"misc", "slot":"", "heal":0.3,
+		"category":"misc", "slot":"", "heal":0.3, "supply":"bandage",
 		"summary":"A strip of boiled linen, folded and tied off",
-		"detail":"Field dressing / not worn / closes a wound in the shared stash"},
+		"detail":"Field medicine / not worn / one closes key 9's binding"},
+	# The keepers' other shelf: the two things a body can buy to stay standing.
+	# Both are carried stock, not worn gear and not a stash row - the count is the
+	# warband's (`Warband.supplies`), so a purchase is felt on the health bar.
+	"healing_potion": {"name":"Healing Potion", "short":"Potion", "kind":"potion", "index":1, "price":25,
+		"category":"misc", "slot":"", "heal":50.0, "supply":"potion",
+		"summary":"A stoppered draught, red as an open wound",
+		"detail":"Field medicine / not worn / key 0 drinks one for 50 health"},
 	# Salvage off the briar wolves. They are carried, never worn - the warband
 	# strips a pelt in the field and the shared stash counts it - and they are
 	# what a kill is worth in the wood now that the wolves have no blade to drop.
@@ -186,98 +197,6 @@ const ITEMS := {
 		"category":"focus", "slot":"off", "focus":"skull_death",
 		"summary":"A skull lit violet from the inside",
 		"detail":"Off hand only / +15 stamina on every kill"},
-	"neck_ember": {"name":"Ember Charm", "short":"Ember Chm", "kind":"neck", "index":0, "price":120,
-		"category":"jewelry", "slot":"neck",
-		"summary":"A warm cinder on a leather cord",
-		"detail":"Neck only / keeps a little hearth-fire with you"},
-	"neck_bone": {"name":"Bone Talisman", "short":"Bone Talm", "kind":"neck", "index":1, "price":80,
-		"category":"jewelry", "slot":"neck",
-		"summary":"A knuckle of something old on a thong",
-		"detail":"Neck only / a quiet ward against the dark"},
-	"neck_shield": {"name":"Amulet of Energy Shield", "short":"Shield Amulet", "kind":"neck", "index":2, "price":340,
-		"category":"jewelry", "slot":"neck",
-		"summary":"A yellow lodestone humming on a woven cord",
-		"detail":"Neck only / +30 stamina and +2% guard / the ward is now an unlock"},
-	"neck_heartstone": {"name":"Heartstone Amulet", "short":"Heartst Aml", "kind":"neck", "index":3, "price":300,
-		"category":"jewelry", "slot":"neck",
-		"summary":"A red stone that beats once for every breath you take",
-		"detail":"Neck only / +25 health"},
-	"neck_fervor": {"name":"Fervour Chain", "short":"Fervour Chn", "kind":"neck", "index":4, "price":280,
-		"category":"jewelry", "slot":"neck",
-		"summary":"Warm iron links on a cord of rawhide",
-		"detail":"Neck only / +8% melee damage, +6% attack speed"},
-	"neck_luck": {"name":"Fortune Cord", "short":"Fortune Crd", "kind":"neck", "index":5, "price":220,
-		"category":"jewelry", "slot":"neck",
-		"summary":"A knotted cord with a fat green bead at the throat",
-		"detail":"Neck only / +25% gold from every kill"},
-	"ring_copper": {"name":"Copper Ring", "short":"Cu Ring", "kind":"ring", "index":0, "price":40,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A soft hammered band",
-		"detail":"Ring slot only / fits either hand"},
-	"ring_silver": {"name":"Silver Ring", "short":"Ag Ring", "kind":"ring", "index":1, "price":95,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A pale band etched with thornwork",
-		"detail":"Ring slot only / fits either hand"},
-	"ring_blood": {"name":"Bloodstone Ring", "short":"Blood Ring", "kind":"ring", "index":2, "price":160,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A dark stone set in old gold",
-		"detail":"Ring slot only / fits either hand"},
-	"ring_dash": {"name":"Ring of Dash", "short":"Dash Ring", "kind":"ring", "index":3, "price":260,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A cold iron band that leans the moment you look away",
-		"detail":"Ring slot only / +6% movement speed / the dash is now an unlock"},
-	"ring_health": {"name":"Ring of Health", "short":"Health Ring", "kind":"ring", "index":4, "price":180,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Warm as a pulse you can hold",
-		"detail":"Ring slot only / +25 max health"},
-	"ring_ranged": {"name":"Ring of Ranged Damage", "short":"Range Ring", "kind":"ring", "index":5, "price":210,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A knapped obsidian flake in a horn setting",
-		"detail":"Ring slot only / +10% bow damage"},
-	"ring_melee": {"name":"Ring of Melee Damage", "short":"Melee Ring", "kind":"ring", "index":6, "price":210,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Iron from a broken blade, worn smooth",
-		"detail":"Ring slot only / +10% melee damage"},
-	"ring_swift": {"name":"Ring of the Swift", "short":"Swift Ring", "kind":"ring", "index":7, "price":200,
-		"category":"jewelry", "slot":"ring",
-		"summary":"It is always a little ahead of your hand",
-		"detail":"Ring slot only / +8% movement speed"},
-	"ring_haste": {"name":"Ring of Haste", "short":"Haste Ring", "kind":"ring", "index":8, "price":240,
-		"category":"jewelry", "slot":"ring",
-		"summary":"The gold never quite settles",
-		"detail":"Ring slot only / +12% attack speed"},
-	"ring_vigor": {"name":"Ring of Vigor", "short":"Vigor Ring", "kind":"ring", "index":9, "price":200,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Set with a seed that refuses to dry",
-		"detail":"Ring slot only / +150 max stamina"},
-	"ring_tide": {"name":"Ring of the Tide", "short":"Tide Ring", "kind":"ring", "index":10, "price":170,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Green enamel over a spiral of wire",
-		"detail":"Ring slot only / +30% stamina regeneration"},
-	"ring_ward": {"name":"Ring of Warding", "short":"Ward Ring", "kind":"ring", "index":11, "price":230,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A ring of blackened silver that rings when struck",
-		"detail":"Ring slot only / +6% damage reduction"},
-	"ring_bounty": {"name":"Ring of Bounty", "short":"Bounty Ring", "kind":"ring", "index":12, "price":180,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A merchant's seal melted into a band",
-		"detail":"Ring slot only / +25% gold from kills"},
-	"ring_thrower": {"name":"Ring of Throwing", "short":"Throw Ring", "kind":"ring", "index":13, "price":190,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Balanced so well it argues with your wrist",
-		"detail":"Ring slot only / +25% thrown damage"},
-	"ring_echo": {"name":"Ring of Echoes", "short":"Echo Ring", "kind":"ring", "index":14, "price":230,
-		"category":"jewelry", "slot":"ring",
-		"summary":"A hollow band that answers a half-breath late",
-		"detail":"Ring slot only / -15% skill cooldown"},
-	"ring_ironhide": {"name":"Ring of Ironhide", "short":"Iron Ring", "kind":"ring", "index":15, "price":150,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Three links of a mail shirt that lost the rest",
-		"detail":"Ring slot only / +20 max health / +2% damage reduction"},
-	"ring_grit": {"name":"Ring of Grit", "short":"Grit Ring", "kind":"ring", "index":16, "price":190,
-		"category":"jewelry", "slot":"ring",
-		"summary":"Leather and wire, chewed flat",
-		"detail":"Ring slot only / -25% stagger suffered"},
 	"armor_leather_head": {"name":"Leather Hood", "short":"L Hood", "kind":"head", "index":0, "set":0, "price":10,
 		"category":"armor", "slot":"head",
 		"summary":"A soft hood stained by the road",
@@ -415,30 +334,21 @@ const LEGACY_ITEM_ALIASES := {
 static func migrate_item_id(item_id: String) -> String:
 	return str(LEGACY_ITEM_ALIASES.get(item_id, item_id))
 
+## The town's three keepers. They sell **medicine and nothing else**: bandages and
+## healing draughts, bought out of the shared purse and pressed into the warband's
+## own stock (`Warband.supplies`). Steel and armour are not for sale anywhere any
+## more - a body's kit comes off the Weapon Rack's unlocks and out of a run's
+## chests - so every counter here is one the player walks up to when the band is
+## bleeding, not to go shopping for a sword.
 const VENDORS := [
-	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
-		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
+	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bandages and dried herbs, folded on the counter.", "stock":[
+		"bandage_linen",
 	]},
-	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
-		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
-		"axe_makeshift","hatchet_makeshift","throwing_axe","dagger_throwing","javelin_iron",
-		"sword_short","sword_arming","sword_great","dagger_iron",
-		"xbow_heavy","xbow_auto",
-		"shield_buckler","shield_kite","shield_tower","shield_wood",
+	{"name":"Smith Brann", "tag":"APOTHECARY", "line":"Draughts for a body that is done bleeding.", "stock":[
+		"healing_potion",
 	]},
-	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
-		"armor_naked_head","armor_naked_chest","armor_naked_hands","armor_naked_legs","armor_naked_feet",
-		"armor_makeshift_head","armor_makeshift_chest","armor_makeshift_hands","armor_makeshift_legs","armor_makeshift_feet",
-		"armor_leather_head","armor_leather_chest","armor_leather_hands","armor_leather_legs","armor_leather_feet",
-		"armor_mail_head","armor_mail_chest","armor_mail_hands","armor_mail_legs","armor_mail_feet",
-		"armor_plate_head","armor_plate_chest","armor_plate_hands","armor_plate_legs","armor_plate_feet",
-		"armor_cloth_head","armor_cloth_chest","armor_cloth_hands","armor_cloth_legs","armor_cloth_feet",
-		"focus_tome","focus_skull","neck_ember","neck_bone","neck_shield",
-		"neck_heartstone","neck_fervor","neck_luck",
-		"ring_copper","ring_silver","ring_blood","ring_dash","ring_health","ring_ranged",
-		"ring_melee","ring_swift","ring_haste","ring_vigor","ring_tide","ring_ward",
-		"ring_bounty","ring_thrower","ring_echo","ring_ironhide","ring_grit",
-		"focus_skull_life","focus_skull_death",
+	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"The band's medicine: dressings and draughts together.", "stock":[
+		"bandage_linen","healing_potion",
 	]},
 ]
 
@@ -513,7 +423,7 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"bow":bow, "sword":sword, "staff":staff, "dagger":dagger,
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
-			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
+			else {"off":off_id},
 		# The family starters are not equips: the marker rides beside the equipped
 		# list so a later dressing or a stowed piece cannot drop them. An AI body
 		# is dressed without it and gets no starter.
@@ -545,28 +455,26 @@ func _commit() -> void:
 	save_state()
 
 func save_state() -> void:
-	var file := FileAccess.open(save_path, FileAccess.WRITE)
-	if file == null:
-		_note("save_failed", {"path": save_path, "error": error_string(FileAccess.get_open_error())})
+	if not SaveFileScript.write(save_path, {"credits": credits}):
+		_note("save_failed", {"path": save_path})
 		push_warning("Could not write player state to %s" % save_path)
 		return
-	file.store_string(JSON.stringify({"credits":credits}))
-	file.close()
 	_note("save", {"path": save_path, "credits": credits})
 
 ## Only the purse is read back; any other key an older file carries is ignored.
+## A file this build will not open - missing, unreadable, or sealed and edited -
+## falls back to the starting purse rather than to whatever half parsed.
 func load_state() -> void:
-	if not FileAccess.file_exists(save_path):
-		_note("load_missing", {"path": save_path})
+	var opened: Dictionary = SaveFileScript.inspect(save_path)
+	if not bool(opened.get("ok", false)):
+		var problem := str(opened.get("problem", ""))
+		_note("load_missing" if problem == "missing" else "load_failed",
+			{"path": save_path, "problem": problem})
+		if problem != "missing":
+			push_warning("Ignoring %s player state at %s" % [problem, save_path])
 		reset(false)
 		return
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(save_path))
-	if typeof(parsed) != TYPE_DICTIONARY:
-		_note("load_failed", {"path": save_path})
-		push_warning("Ignoring unreadable player state at %s" % save_path)
-		reset(false)
-		return
-	var data: Dictionary = parsed
+	var data: Dictionary = opened.get("data", {})
 	credits = maxi(0, int(data.get("credits", STARTING_CREDITS)))
 	_note("load", {"path": save_path, "credits": credits})
 	changed.emit()

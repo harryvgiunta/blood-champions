@@ -492,7 +492,8 @@ func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int) -> b
 ## passes `dress` false). Dressing the taker out of that pool would lift the piece
 ## straight back out of the pool the take is meant to fill, so a body searching a
 ## corpse below would come up with an empty pack and a full suit. The take stays
-## whole; a body that wants to wear one of the pieces does it from the paperdoll.
+## whole; a body that wants to wear one of the pieces does it from the character
+## screen.
 func _dress_message(item_id: String, collector_peer: int) -> String:
 	var message := "%s goes into %s." % [WarbandPickup.item_name(item_id), _pool_name()]
 	# Peer 0 is the warband itself - a squad soldier or a sweep - and has no body

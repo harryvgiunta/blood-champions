@@ -43,9 +43,11 @@ func setup(owner_actor, owner_rig, owner_combat, walk_speed: float) -> void:
 	rig = owner_rig
 	combat = owner_combat
 	base_speed = maxf(walk_speed, 0.1)
-	cooldowns.resize(AbilityRules.SLOT_COUNT)
+	# The arrays are the widest a bar can ever be, so a run that buys its body
+	# another key mid-fight never has to grow them under an activation.
+	cooldowns.resize(AbilityRules.MAX_SLOT_COUNT)
 	cooldowns.fill(0.0)
-	_grant_ids.resize(AbilityRules.SLOT_COUNT)
+	_grant_ids.resize(AbilityRules.MAX_SLOT_COUNT)
 	_grant_ids.fill("")
 	_refresh_grants()
 
@@ -67,10 +69,6 @@ func activate(slot: int = 0) -> Dictionary:
 	var reason := blocker(slot)
 	if not reason.is_empty():
 		return {"ok": false, "message": reason}
-	# A consumable is a key, not a skill: the body owns the channel (the clip,
-	# the wound, the heal) and the runner owns the key and its cooldown.
-	if definition.has("consume"):
-		return _activate_consumable(definition, slot)
 	# A blade skill or a committed dash needs an upright stance: cancel the
 	# crouch first and only spend the cost once the body can actually stand.
 	if AbilityRules.needs_standing(definition) and not _stand_before_melee():
@@ -108,30 +106,6 @@ func activate(slot: int = 0) -> Dictionary:
 	activated.emit(active_id, definition)
 	_emit_due_cues()
 	return {"ok": true, "definition": definition}
-
-
-## The bandage and the potion: the body starts its own channel and the key takes
-## the definition's cooldown. A refusal is the body's - a whole body, a stagger,
-## a body already binding a wound - and it costs neither stamina nor the key.
-func _activate_consumable(definition: Dictionary, slot: int) -> Dictionary:
-	var kind := str(definition.get("consume", ""))
-	if actor == null or not is_instance_valid(actor) or not actor.has_method("try_consume"):
-		return {"ok": false,
-			"message": "%s cannot be used here." % str(definition.name).capitalize()}
-	if not bool(actor.try_consume(kind)):
-		return {"ok": false, "message": _consume_refusal(definition)}
-	if slot >= 0 and slot < cooldowns.size():
-		cooldowns[slot] = float(definition.get("cooldown", 0.0))
-	return {"ok": true, "definition": definition}
-
-
-## Why the body would not take the piece: the one line the player can act on.
-func _consume_refusal(definition: Dictionary) -> String:
-	if float(actor.get("health")) >= float(actor.get("max_health")) - 0.001:
-		return "You are not wounded."
-	if str(actor.get("consume_kind")) != "":
-		return "Finish the %s first." % str(actor.get("consume_kind")).capitalize()
-	return "%s cannot be used right now." % str(definition.name).capitalize()
 
 
 ## The line the skill is performed down. A travelling skill follows the live
@@ -230,8 +204,13 @@ func _refresh_grants() -> void:
 	if not is_instance_valid(rig):
 		return
 	var grants := AbilityRules.granted(rig)
+	var count := mini(grants.size(), _grant_ids.size())
+	# The bar can shrink when the line that bought its extra keys closes, so the
+	# keys past the row are cleared rather than left firing a stale skill.
+	for slot in range(count, _grant_ids.size()):
+		_grant_ids[slot] = ""
 	var moved := false
-	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+	for slot in count:
 		if str(grants[slot].get("id", "")) != _grant_ids[slot]:
 			moved = true
 			break
@@ -240,10 +219,10 @@ func _refresh_grants() -> void:
 	# Where each skill's timer stood on the key it was on, read before the row
 	# moves. A skill new to the row has none and starts ready.
 	var timers := {}
-	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+	for slot in count:
 		if not _grant_ids[slot].is_empty() and slot < cooldowns.size():
 			timers[_grant_ids[slot]] = cooldowns[slot]
-	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+	for slot in count:
 		var id := str(grants[slot].get("id", ""))
 		if id == _grant_ids[slot]:
 			continue
@@ -311,12 +290,7 @@ func hud_states() -> Array:
 
 func _hud_state(definition: Dictionary, slot: int) -> Dictionary:
 	var cost := _stamina_cost(definition)
-	# A consumable has no runner activation of its own: the channel lives on the
-	# body, so the key reads active while that body is binding the same wound.
 	var running := active and active_slot == slot
-	if not running and definition.has("consume") and is_instance_valid(actor) \
-			and str(actor.get("consume_kind")) == str(definition.get("consume")):
-		running = true
 	return {
 		"id": str(definition.id),
 		"active": running,

@@ -63,8 +63,13 @@ const LOOKS_SURFACES := {
 	# reads as paint on the jaw.
 	"Warband_Beard": {"tint": "hair_tone", "lighten": 1.25},
 }
+## `recover_seconds` is the bow's own retrieval-and-re-nock clock: the row that
+## names none plays the authored recovery (`RECOVER_SECONDS`, 0.95 s), and a
+## scout bow that keeps the string in motion names half of it. `heal_on_hit` is
+## what a landed shaft pays the body that loosed it back, in health.
 const BOW_DATA = [
-	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
+	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0,
+		"length":1.0, "recover_seconds":0.475, "heal_on_hit":2.0},
 	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":84.0, "length":1.4},
 	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":102.0, "length":1.8},
 	{"name":"Twig bow", "subtitle":"A green sapling and a length of cord", "draw_seconds":0.7, "speed":48.0, "length":0.82},
@@ -107,11 +112,15 @@ const CONSUMABLE_DATA = {
 	"bandage": {"name":"Bandage", "seconds":3.0, "heal":35.0, "heal_seconds":3.0, "clip":"Bandage_Wrap", "phase":"BANDAGE"},
 	"potion": {"name":"Healing potion", "seconds":0.5, "heal":50.0, "heal_seconds":0.0, "clip":"Potion_Drink", "phase":"DRINK"},
 }
-## Two-handed staves reuse the greatsword combat profile; only the visible
-## shaft endpoints differ, so blade sweeps follow the real staff length.
+## Two-handed staves reuse the greatsword's clips and its sweep geometry, never
+## its weight: each row names the blow it lands and the clock it swings on, so a
+## retune of the sword does not move a staff. The fire staff is the caster's
+## sidearm - a fifth of a greatsword's blow - and it swings on that clock and no
+## other: its cut, its overhead and its stab all take `seconds`, which is what
+## keeps casting, not swinging, the answer for a body holding it.
 const STAFF_DATA = [
-	{"name":"Ember staff", "length":1.75},
-	{"name":"Bone staff", "length":1.60},
+	{"name":"Ember staff", "length":1.75, "damage":20.0, "seconds":3.0},
+	{"name":"Bone staff", "length":1.60, "damage":50.0, "seconds":3.0},
 ]
 ## A shield skill presents the disc ahead of the body. These are the minimum
 ## plane distances in front of the chest and head bones: the skinned chest
@@ -217,6 +226,10 @@ var blood_loss := 0.0
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
 const RECOVER_SECONDS := 0.95
+## A Magical Nock bow's whole recovery: the shaft is already back on the string,
+## so there is nothing to fetch or nock - only the loose to come off and the bow
+## to lower into the carry. It is the same beat the raise takes, played back.
+const MAGICAL_SETTLE_SECONDS := 0.30
 const MAX_ELEVATION := deg_to_rad(25.0)
 const STANCE_YAW := deg_to_rad(-80.0)
 const MELEE_SAMPLE_SECONDS := 1.0 / 120.0
@@ -272,7 +285,7 @@ var focus_index := 0
 var focus_active := false
 ## Worn trinket kit ({neck, ring1, ring2, off}) and its summed modifiers.
 ## Presentation never reads these; the damage/timing getters below do.
-var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
+var trinkets := {"off":""}
 var trinket_stats := {}
 ## The abilities the player has equipped on this body, by ability id, in key
 ## order. `SeatLoadout` rewrites it on every dressing from the mercenary's own
@@ -280,6 +293,12 @@ var trinket_stats := {}
 ## hands the body is holding, so a bow skill disappears when the sword comes out
 ## and comes back with the bow. It is not a grant: the unlock is the player's.
 var ability_loadout: Array[String] = []
+
+## The keys a run's own upgrades have bought this session (`Widened Bar`): the bar
+## is `AbilityRules.SLOT_COUNT` plus this, clamped at `MAX_SLOT_COUNT`. `RunPlayer`
+## writes it from the run engine, and `AbilityRules.granted` lays the row out to it,
+## so the extra key is one the fight can fire and not a promise on a screen.
+var ability_extra_slots := 0
 
 ## Set the equipped ability ids on this body, keeping only real catalog ids.
 func set_ability_loadout(ids: Variant) -> void:
@@ -1202,7 +1221,7 @@ func ability_progress() -> float:
 ## is compressed, which is what makes a bow skill a fast, normal bow shot.
 ## x is 0 for the release and 1 for the recover; y is that phase's pose time.
 func _bow_shot_clock() -> Vector2:
-	var pose_time := ability_progress()*(RELEASE_SECONDS+RECOVER_SECONDS)
+	var pose_time := ability_progress()*(RELEASE_SECONDS+recover_seconds())
 	if pose_time < RELEASE_SECONDS:
 		return Vector2(0.0,pose_time)
 	return Vector2(1.0,pose_time-RELEASE_SECONDS)
@@ -1899,7 +1918,12 @@ func _duration_for(hand: String, variant: String) -> float:
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
 	var size := off_weapon_index if hand == "left" else sword_index
 	var base := float(SWORD_DATA[size].seconds)
-	if variant in ["diagonal_left","diagonal_right"]:
+	if hand != "left" and _staff_shown():
+		# A staff swings on its own clock and no other: the cut, the overhead and
+		# the stab all take the piece's authored seconds. A sidearm that could be
+		# flicked at a dagger's rhythm was a better knife than it was a staff.
+		base = float(STAFF_DATA[staff_index].seconds)
+	elif variant in ["diagonal_left","diagonal_right"]:
 		base = 0.42 if dagger else float(DIAGONAL_SECONDS[clampi(size, 0, DIAGONAL_SECONDS.size() - 1)])
 	elif variant == "stab" or dagger:
 		# A stab is the dagger clock, whichever hand swings it: a sword's thrust
@@ -2064,16 +2088,26 @@ func melee_seconds(hand: String = "") -> float:
 		return _right_melee_duration
 	if weapon == "dagger":
 		return float(profile_for_hand(key).seconds)
+	if _staff_shown():
+		return float(STAFF_DATA[staff_index].seconds)
 	return float(SWORD_DATA[sword_index].seconds)
 
-func melee_damage(hand: String = "") -> float:
+## The authored damage of one hand's piece, before trinkets, the flat bonus and
+## the variant's own rule. A staff carries its own row: it shares the greatsword's
+## index and none of its weight, and a mob priced off the hand it swings has to
+## read the same figure the body does.
+func melee_base_damage(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	var base := float(SWORD_DATA[sword_index].damage)
 	if key == "left":
-		base = float(_off_profile().damage)
-	elif weapon == "dagger":
-		base = float(profile_for_hand(key).damage)
-	return base*melee_scale() + flat_bonus("flat_melee")
+		return float(_off_profile().damage)
+	if weapon == "dagger":
+		return float(profile_for_hand(key).damage)
+	if _staff_shown():
+		return float(STAFF_DATA[staff_index].damage)
+	return float(SWORD_DATA[sword_index].damage)
+
+func melee_damage(hand: String = "") -> float:
+	return melee_base_damage(hand)*melee_scale() + flat_bonus("flat_melee")
 
 ## The damage one committed swing carries: the hand's own profile scaled by the
 ## body's trinkets and flat welds, then by whatever this piece names for the
@@ -2113,8 +2147,8 @@ func throw_scale() -> float:
 ## profile of the piece in the hand. Worn trinkets still compose beside it, so a
 ## ring of haste means in a run exactly what it means in the wood.
 var run_rate_scale := 1.0
-## The bow's own draw channel: Quick Draw and Magical Nock write these in a run.
-## A campaign body leaves them at the authored 1.0 / false.
+## The bow's own draw channel: Quick Draw writes the scale and Magical Nock the
+## no-nock flag in a run. A campaign body leaves them at the authored 1.0 / false.
 var bow_draw_scale := 1.0
 var bow_no_nock := false
 
@@ -2228,15 +2262,40 @@ func charge_seconds() -> float:
 	var base := float(SWORD_DATA[sword_index].seconds)
 	var rate := attack_rate()
 	if weapon == "bow":
-		# Magical Nock is the one row that removes the draw entirely; Quick
-		# Draw scales the same clock the trinkets and the run's rate already do.
-		if bow_no_nock:
-			return 0.001
+		# Every bow draws, Magical Nock included: the row takes the nock away, not
+		# the string. Quick Draw scales the same clock the trinkets and the run's
+		# rate already do.
 		base = float(BOW_DATA[bow_index].draw_seconds)
 		rate *= maxf(bow_draw_scale, 0.01)
 	elif weapon == "dagger":
 		base = float(profile_for_hand(_melee_hand).seconds)
 	return base/maxf(rate,0.01)
+
+## This bow's retrieval-and-re-nock clock, in seconds: the release's own
+## follow-through plus the delay before the next draw is allowed. A row that
+## names no `recover_seconds` plays the authored `RECOVER_SECONDS`; the scout
+## bow names half of it, which is what makes it the rapid-fire piece while its
+## draw stays the 1.0 s every scout bow draws. A Magical Nock bow has no
+## retrieval and no re-nock to wait for: it only settles out of its release.
+func recover_seconds() -> float:
+	if bow_no_nock:
+		return MAGICAL_SETTLE_SECONDS
+	return maxf(0.0, float(BOW_DATA[clampi(bow_index,0,BOW_DATA.size()-1)] \
+		.get("recover_seconds",RECOVER_SECONDS)))
+
+
+## One authored beat of the recovery, mapped onto this bow's own nock clock: a
+## bow that re-nocks in half the time plays the same retrieval at twice the
+## speed, so the hand still goes to the shoulder, the quiver and the nock.
+func recover_beat(seconds: float) -> float:
+	return seconds*recover_seconds()/RECOVER_SECONDS
+
+
+## What a landed shaft from this bow pays its shooter back, in health. Zero for
+## every bow that names nothing.
+func bow_heal_on_hit() -> float:
+	return maxf(0.0, float(BOW_DATA[clampi(bow_index,0,BOW_DATA.size()-1)] \
+		.get("heal_on_hit",0.0)))
 
 func throw_weapon_name() -> String:
 	return "dagger" if weapon == "dagger" else "sword"
@@ -2265,7 +2324,10 @@ func cast_origin() -> Vector3:
 	return get_throw_origin()
 
 func get_recovery_progress() -> float:
-	var duration := RELEASE_SECONDS + RECOVER_SECONDS
+	# The bow's own nock clock is the one a loose plays; a thrown blade keeps
+	# the authored recovery, which is why the two are read from their own phase.
+	var recover := recover_seconds() if phase in ["RELEASE","RECOVER"] else RECOVER_SECONDS
+	var duration := RELEASE_SECONDS + recover
 	if phase in ["RELEASE","T_RELEASE"]:
 		return clampf(_phase_time/duration,0,1)
 	if phase in ["RECOVER","T_RECOVER"]:
@@ -2351,6 +2413,19 @@ func cancel_draw() -> void:
 	phase = "READY"
 	draw_amount = 0.0
 	_phase_time = 0.0
+	_update_pose(0.0)
+
+
+## End the recovery tail of a released throw or a loosed arrow so the hands are
+## free this frame. The piece has already left the hand; only the animation was
+## still playing. Melee and skills end through `end_melee`/`cancel_ability`,
+## which own their own state - this only closes what those leave behind.
+func finish_recovery() -> void:
+	if phase not in ["RELEASE","RECOVER","T_RELEASE","T_RECOVER"]:
+		return
+	phase = "READY"
+	_phase_time = 0.0
+	draw_amount = 0.0
 	_update_pose(0.0)
 
 
@@ -2542,17 +2617,24 @@ func in_strike_window(hand: String = "") -> bool:
 	return (has_melee("left") and in_strike_window("left")) \
 		or (has_melee("right") and in_strike_window("right"))
 
-func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
+## `world_velocity` is the ground the body actually covered, and it drives the
+## gait. It is *displacement*, not intent: a blow the guard stopped shoves the
+## body a step backwards, and a rig turned onto that shove ends the block facing
+## away from the attacker it just stopped. `facing` is the travel the body asked
+## for, so a shove, a clash bounce or a crowd push never steers it. Left out, it
+## answers the displacement - what a mob sampler whose walk *is* its travel wants.
+func set_locomotion(world_velocity: Vector3, grounded: bool, facing: Vector3 = Vector3.INF) -> void:
 	if grounded and not _grounded and _velocity.y < -1.0:
 		_landing_weight = 1.0
 	if not grounded and _grounded:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not heading_locked and not _cover_active and not _blocking and not is_consuming() and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	var heading := facing if facing.is_finite() else world_velocity
+	if not heading_locked and not _cover_active and not _blocking and not is_consuming() and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(heading.x,heading.z).length_squared() > 0.01:
 		# A quick step keeps the original facing; its travel is applied by the
 		# hips and shoulders below instead of snapping the whole body sideways.
-		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
+		global_basis = Basis(Vector3.UP,atan2(-heading.x,-heading.z))
 
 func set_ground_sampler(sampler: Callable) -> void:
 	_ground_sampler = sampler
@@ -3050,9 +3132,13 @@ func _advance_step(delta: float) -> void:
 			_phase_time = minf(_phase_time, ability_duration)
 	if phase == "ABILITY" and _phase_time >= ability_duration-0.000001:
 		_reset_ability_state()
-	if phase in ["RECOVER","T_RECOVER"] and _phase_time >= RECOVER_SECONDS-0.000001:
-		phase = "READY"
-		_phase_time = 0.0
+	# A loose ends on the bow's own retrieval clock; a throw keeps the authored
+	# recovery, which is the same phase family and a different piece in hand.
+	if phase in ["RECOVER","T_RECOVER"]:
+		var recover := recover_seconds() if phase == "RECOVER" else RECOVER_SECONDS
+		if _phase_time >= recover-0.000001:
+			phase = "READY"
+			_phase_time = 0.0
 	_update_pose(delta)
 
 func _melee_clip_for(hand: String, variant: String) -> Dictionary:
@@ -3122,7 +3208,7 @@ func _archery_weight() -> float:
 		var clock := _bow_shot_clock()
 		if clock.x < 0.5:
 			return _release_raise
-		return _release_raise*(1.0-smoothstep(0.18,0.72,clock.y))
+		return _release_raise*(1.0-smoothstep(recover_beat(0.18),recover_beat(0.72),clock.y))
 	if phase == "DRAWING":
 		return smoothstep(0.0,RAISE_SECONDS,_phase_time)
 	if phase == "HOLDING":
@@ -3130,7 +3216,11 @@ func _archery_weight() -> float:
 	if phase == "RELEASE":
 		return _release_raise
 	if phase == "RECOVER":
-		return _release_raise*(1.0-smoothstep(0.18,0.72,_phase_time))
+		# The stance comes down on the bow's own recovery clock, not on raw
+		# seconds: a bow that re-nocks in half the time - or a Magical Nock bow,
+		# which only settles - has to be out of the archery stance by the frame it
+		# hands back to READY.
+		return _release_raise*(1.0-smoothstep(recover_beat(0.18),recover_beat(0.72),_phase_time))
 	return 0.0
 
 func _sample_clip(clip: String, time: float) -> void:
@@ -3340,8 +3430,13 @@ func _solve_pose(delta: float) -> void:
 	_apply_melee_swing_path()
 	# A two-hander's raised block is solved, not authored: the socket puts the
 	# blade wherever the main hand is, and an authored wrist can hold a metre and
-	# a half of steel across its owner's own chest.
-	if _blocking and swings_two_handed() and not _staff_shown():
+	# a half of steel across its owner's own chest. A staff is the same problem
+	# doubled - 1.75 m of shaft gripped below its middle - so it gets its own
+	# solve rather than the one-handed guard the level pose would send through
+	# the ribs.
+	if _blocking and _staff_shown():
+		_pose_staff_guard()
+	elif _blocking and swings_two_handed():
 		_pose_two_hand_guard()
 	elif _blocking:
 		_pose_one_hand_guard()
@@ -3425,13 +3520,14 @@ func _pose_two_hand_guard() -> void:
 	# than a statue with a sword welded to its fist.
 	var breath := sin(_motion_time*TAU/maxf(_clip_length("Sword_Block_Loop"),0.001))
 	var pivot := (_bone_world(_arms[0][0]).origin+_bone_world(_arms[1][0]).origin)*0.5
-	# The eye decides the height of the guard: looking up turns the blade from
-	# standing over the face to lying over the head, looking down drops it toward
-	# the knees, and the whole hilt rises with it.
+	# The eye decides the height of the guard: looking up tilts the blade back over
+	# the head and lifts the hilt with it, looking down drops the whole line toward
+	# the knees. The tilt is a share of the eye's and not all of it, so the guard
+	# stays a diagonal instead of flattening into a point.
 	var tilt := -_block_pitch
 	var blade := (Vector3.UP+forward*(GUARD_LEAN+GUARD_BREATH_LEAN*breath) \
 		+right*GUARD_CANT).normalized()
-	blade = blade.rotated(right,tilt)
+	blade = blade.rotated(right,tilt*GUARD_PITCH_SHARE)
 	pivot += Vector3.UP*(maxf(_block_pitch,0.0)*0.24)
 	var wanted_lift := GUARD_HILT_LIFT+GUARD_BREATH*breath+maxf(_block_pitch,0.0)*0.16
 	# `looking_at` puts the weapon's -Z on the blade and its +Y on the flat, and
@@ -3469,32 +3565,76 @@ func _pose_two_hand_guard() -> void:
 		(-right*0.9+forward*0.25-Vector3.UP*0.75).normalized())
 
 ## A one-handed guard, solved from the eye. The authored clip has no idea where
-## the crosshair is pointing and a wrist alone cannot lift a guard, so the hilt
-## is placed on the guard line: level it sits in front of the chest, raised it
-## goes overhead with the elbow under it, dropped it covers the legs.
+## the crosshair is pointing and a wrist alone cannot lift a guard, so the hilt is
+## placed in front of the sternum and the blade laid across the body: up and over
+## toward the off shoulder, out in front, with the flat turned to the blow. Steel
+## offered straight down the guard line reads as a thrust, not a block, and a blade
+## laid flat across the chest cuts the owner. The eye still sets the height - a
+## raised guard lays the blade back over the head, a dropped one puts the whole
+## line at the legs.
 func _pose_one_hand_guard() -> void:
 	var forward := _block_forward
 	forward.y = 0.0
 	if forward.length_squared() < 0.000001:
 		forward = -global_basis.z
 	forward = forward.normalized()
-	var guard := _block_normal
-	if guard.length_squared() < 0.000001:
-		guard = forward
-	guard = guard.normalized()
 	var right := forward.cross(Vector3.UP).normalized()
 	var chest := _bone_world(_bones.spine_03).origin
-	# A shiv guards close to the chest; a sword holds its line further out.
-	var reach := 0.46 if weapon == "dagger" else 0.58
-	var hilt := chest+guard*reach+right*0.06-Vector3.UP*0.02
-	var up_hint := Vector3.UP
-	if absf(guard.dot(Vector3.UP)) > 0.94:
-		up_hint = forward
-	var basis := Basis.looking_at(guard,up_hint)
-	var grip := _sword_grip
-	_solve_limb(_arms[1],hilt,basis*grip.basis.inverse(),
-		(right*0.6-forward*0.25-Vector3.UP*0.7).normalized())
+	var dagger := weapon == "dagger"
+	var across := DAGGER_GUARD_ACROSS if dagger else ONE_HAND_GUARD_ACROSS
+	var lean := DAGGER_GUARD_LEAN if dagger else ONE_HAND_GUARD_LEAN
+	var reach := DAGGER_GUARD_REACH if dagger else ONE_HAND_GUARD_REACH
+	var blade := (Vector3.UP-right*across+forward*lean).normalized()
+	blade = blade.rotated(right,-_block_pitch*GUARD_PITCH_SHARE)
+	# The eye lifts or drops the hilt, but the fist keeps its distance: a guard
+	# dropped against a low blow would otherwise swing the blade back through its
+	# owner's own hip, so the whole line steps out as it comes down.
+	var high := maxf(_block_pitch,0.0)
+	var low := maxf(-_block_pitch,0.0)
+	var lift := ONE_HAND_GUARD_LIFT+high*0.22-low*0.10
+	var hilt := chest+forward*(reach+high*0.10+low*0.18) \
+		+right*ONE_HAND_GUARD_SIDE+Vector3.UP*lift
+	# The flat of the blade is what faces the blow, so the socket's +Y is the
+	# guard's own forward pushed off the blade axis.
+	var flat := forward-blade*forward.dot(blade)
+	if flat.length_squared() < 0.0001:
+		flat = Vector3.UP-blade*blade.y
+	var basis := Basis.looking_at(blade,flat.normalized())
+	_solve_limb(_arms[1],hilt,basis*_sword_grip.basis.inverse(),
+		(right*0.55-forward*0.20-Vector3.UP*0.80).normalized())
 
+## The staff's guard. The socket grips the shaft below its middle, so a level line
+## from the fist sends a metre of butt through the owner's own chest - the one
+## pose no authored wrist can fix. The shaft is laid on the diagonal in front of
+## the sternum, head end up over the off shoulder and butt end down and outside
+## the hip, with both hands on it a hand's width apart; the eye's elevation tips
+## the whole line, so a raised guard lays it back over the head.
+func _pose_staff_guard() -> void:
+	var forward := _block_forward
+	forward.y = 0.0
+	if forward.length_squared() < 0.000001:
+		forward = -global_basis.z
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	var chest := _bone_world(_bones.spine_03).origin
+	var shaft := (Vector3.UP-right*STAFF_GUARD_ACROSS+forward*STAFF_GUARD_LEAN).normalized()
+	shaft = shaft.rotated(right,-_block_pitch*GUARD_PITCH_SHARE)
+	var high := maxf(_block_pitch,0.0)
+	var low := maxf(-_block_pitch,0.0)
+	var lift := STAFF_GUARD_LIFT+high*0.22-low*0.10
+	var grip := chest+forward*(STAFF_GUARD_FORWARD+high*0.10+low*0.18) \
+		+right*STAFF_GUARD_SIDE+Vector3.UP*lift
+	var flat := forward-shaft*forward.dot(shaft)
+	if flat.length_squared() < 0.0001:
+		flat = right
+	var basis := Basis.looking_at(shaft,flat.normalized())
+	_solve_limb(_arms[1],grip,basis*_sword_grip.basis.inverse(),
+		(right*0.55-forward*0.20-Vector3.UP*0.80).normalized())
+	# The support hand closes on the shaft itself, a hand's width up it toward the
+	# head end, so the piece is held by the body and not floated on one fist.
+	_solve_limb(_arms[0],grip+shaft*STAFF_GUARD_SUPPORT,
+		basis*_sword_grip_left.basis.inverse(),
+		(-right*0.55-forward*0.20-Vector3.UP*0.80).normalized())
 
 func _pose_dual_arms(moving: bool) -> void:
 	# Precision strikes extend the left hand along the crosshair. Diagonal
@@ -4340,13 +4480,24 @@ func _update_bow_pose(drawing: bool, shot_phase := "", shot_time := 0.0, shot_dr
 		if pose_phase == "RELEASE":
 			grip = to_global(_release_grip)
 			bow_basis = global_basis*Basis(_release_bow_rotation)
+		elif pose_phase == "RECOVER" and bow_no_nock:
+			# Magical Nock: the string re-nocks itself, so the bow never leaves the
+			# aim for the quiver. It comes off the release straight back onto the
+			# aim at brace - the next shaft is already on the string - then eases
+			# down into the carry. That settle is the whole of its recovery.
+			var clock := recover_seconds()
+			var settle := smoothstep(0.0,clock*0.45,pose_time)
+			var unwind := smoothstep(clock*0.50,clock,pose_time)
+			var brace_grip := anchor-aim_basis.z*(Bow.BRACE_DISTANCE+0.12)
+			grip = to_global(_release_grip).lerp(brace_grip,settle).lerp(carry_grip,unwind)
+			bow_basis = (global_basis*Basis(_release_bow_rotation)).slerp(aim_basis,settle).slerp(bow_basis,unwind)
 		elif pose_phase == "RECOVER":
 			# Load in front of the centreline, within both arms' reach. A far-left
 			# target straightens the right elbow and drives its forearm through the chest.
 			var nocking_grip := chest+body_right*0.04+body_forward*0.46-Vector3.UP*0.05
 			var nocking_basis := Basis.looking_at(body_forward,Vector3.UP)
-			var lower := smoothstep(0.18,0.40,pose_time)
-			var relax := smoothstep(0.72,RECOVER_SECONDS,pose_time)
+			var lower := smoothstep(recover_beat(0.18),recover_beat(0.40),pose_time)
+			var relax := smoothstep(recover_beat(0.72),recover_seconds(),pose_time)
 			grip = to_global(_release_grip).lerp(nocking_grip,lower).lerp(carry_grip,relax)
 			bow_basis = (global_basis*Basis(_release_bow_rotation)).slerp(nocking_basis,lower).slerp(bow_basis,relax)
 		var left_basis := bow_basis*_bow_grip_basis.inverse()
@@ -4366,16 +4517,26 @@ func _update_bow_pose(drawing: bool, shot_phase := "", shot_time := 0.0, shot_dr
 			var follow := smoothstep(0.0,RELEASE_SECONDS,pose_time) if pose_phase == "RELEASE" else 1.0
 			contact = to_global(_release_contact)+global_basis*Basis(_release_bow_rotation).z*(0.12*follow*_release_raise*_release_charge)
 			if pose_phase == "RECOVER":
-				var quiver_top := _quiver.to_global(Vector3(0,0.29,0))
-				if pose_time < 0.40:
-					contact = _hand_arc(contact,shoulder_gate,shoulder_gate,quiver_top,smoothstep(0.03,0.40,pose_time))
-				elif pose_time < 0.68:
-					contact = _hand_arc(quiver_top,shoulder_gate,front_gate,active_bow.get_nock_position(),smoothstep(0.40,0.68,pose_time))
-				else:
-					var relax := smoothstep(0.72,RECOVER_SECONDS,pose_time)
+				if bow_no_nock:
+					# Magical Nock: nothing is fetched from the quiver and nothing is
+					# nocked by hand. The drawing hand falls out of its own
+					# follow-through into the carry while the bow settles back onto
+					# the aim with the next shaft already on the string.
+					var unwind := smoothstep(recover_seconds()*0.50,recover_seconds(),pose_time)
 					var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
-					contact = _hand_arc(active_bow.get_nock_position(),hip_gate,hip_gate,carry_contact,relax)
-					right_basis = right_basis.slerp(right.basis.orthonormalized(),relax)
+					contact = _hand_arc(contact,hip_gate,hip_gate,carry_contact,unwind)
+					right_basis = right_basis.slerp(right.basis.orthonormalized(),unwind)
+				else:
+					var quiver_top := _quiver.to_global(Vector3(0,0.29,0))
+					if pose_time < recover_beat(0.40):
+						contact = _hand_arc(contact,shoulder_gate,shoulder_gate,quiver_top,smoothstep(recover_beat(0.03),recover_beat(0.40),pose_time))
+					elif pose_time < recover_beat(0.68):
+						contact = _hand_arc(quiver_top,shoulder_gate,front_gate,active_bow.get_nock_position(),smoothstep(recover_beat(0.40),recover_beat(0.68),pose_time))
+					else:
+						var relax := smoothstep(recover_beat(0.72),recover_seconds(),pose_time)
+						var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
+						contact = _hand_arc(active_bow.get_nock_position(),hip_gate,hip_gate,carry_contact,relax)
+						right_basis = right_basis.slerp(right.basis.orthonormalized(),relax)
 		var elbow_pole := body_right*0.65+body_forward*0.40+Vector3.UP*0.12
 		if pose_phase == "DRAWING":
 			elbow_pole = (_bone_world(_arms[1][1]).origin-shoulder).lerp(elbow_pole,draw_reach)
@@ -4385,9 +4546,12 @@ func _update_bow_pose(drawing: bool, shot_phase := "", shot_time := 0.0, shot_dr
 		active_bow.global_transform = Transform3D(bow_basis.scaled_local(girth),grip)
 		active_bow.set_draw(0.0)
 	# A bow skill never shows a nocked shaft: the key looses it, so the rig has
-	# nothing on the string to draw from.
+	# nothing on the string to draw from. A Magical Nock bow has the next shaft on
+	# the string the instant the shot settles; every other bow shows it only once
+	# the fetching hand has carried one back from the quiver to the nock.
+	var shaft_nocked := bow_no_nock or _phase_time >= recover_beat(0.68)
 	active_bow.set_arrow_visible(_roll_progress < 0.0 and (phase in ["READY","DRAWING","HOLDING"] \
-		or (phase == "RECOVER" and _phase_time >= 0.68)))
+		or (phase == "RECOVER" and shaft_nocked)))
 	_update_hand_contacts()
 
 func _jaw_anchor() -> Vector3:
@@ -4440,13 +4604,45 @@ func offhand_anchor() -> Transform3D:
 const GUARD_HILT_FORWARD := 0.34
 const GUARD_HILT_LIFT := -0.18
 const GUARD_LEAN := 0.24
-const GUARD_CANT := -0.14
+const GUARD_CANT := -0.70
 const GUARD_BREATH := 0.010
 const GUARD_BREATH_LEAN := 0.030
+## How much of the eye's elevation reaches the held line. The whole of it lays a
+## diagonal guard flat the moment the player looks up - the blade swings from a
+## bar across the chest to a spear pointed at the sky - so the eye tilts the guard
+## and never flattens it.
+const GUARD_PITCH_SHARE := 0.40
 ## How far down the handle the support hand sits, in metres along the weapon's
 ## own +Z (toward the pommel). The greatsword's grip is 0.31 m long and the
 ## branch's is gripped 0.20 m up, so this lands on both.
 const GUARD_SUPPORT_DEPTH := 0.12
+
+## The one-handed guard is a bar held across the body, not a point offered at it:
+## the fist sits in front of the sternum (`REACH`) and `SIDE` of it, `LIFT` high,
+## with the blade running up and across toward the off shoulder (`ACROSS`) and
+## leaning at the attacker (`LEAN`). The shiv guards closer and flatter because
+## there is less of it to lay across the chest.
+const ONE_HAND_GUARD_REACH := 0.34
+const ONE_HAND_GUARD_SIDE := 0.10
+const ONE_HAND_GUARD_LIFT := -0.10
+const ONE_HAND_GUARD_ACROSS := 0.66
+const ONE_HAND_GUARD_LEAN := 0.30
+const DAGGER_GUARD_REACH := 0.28
+const DAGGER_GUARD_ACROSS := 0.58
+const DAGGER_GUARD_LEAN := 0.36
+
+## A staff is 1.75 m of shaft gripped below its middle, so a level line from the
+## fist puts a metre of butt through its owner's chest. The guard lays it on the
+## diagonal in front of the sternum - head end up over the off shoulder, butt end
+## down and outside the hip - and the support hand closes on the shaft `SUPPORT`
+## metres up it. `ACROSS` and `LEAN` are the two ends of the same line, the way
+## the blade's are for a sword.
+const STAFF_GUARD_FORWARD := 0.34
+const STAFF_GUARD_SIDE := 0.02
+const STAFF_GUARD_LIFT := -0.06
+const STAFF_GUARD_ACROSS := 1.30
+const STAFF_GUARD_LEAN := 0.30
+const STAFF_GUARD_SUPPORT := 0.34
 
 ## A carried piece hangs forward from the fist: below the horizontal by
 ## `CARRY_PITCH`, out from the body by `CARRY_CANT`, with its flat rolled

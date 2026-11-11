@@ -2,10 +2,17 @@ extends Node
 ## Shift+Space requests one directional roll per airborne cycle; Space only jumps.
 const DURATION := 0.68
 const SPEED := 8.5
+## The roll's own travel: its speed across its whole clock. Speed rows move the
+## speed, never the duration - the rig animates the roll on `DURATION`, and a
+## roll whose clock moved would play its pose out before the body landed.
+const TRAVEL := SPEED * DURATION
 var active := false
 var direction := Vector3.FORWARD
 var progress := 0.0
 var takeoff_pending := false
+## Per-instance tuning: a run's `roll_distance` and `roll_speed` land here, and a
+## campaign body rolls on the constant above.
+var speed := SPEED
 var _used_in_air := false
 
 func press_jump(movement: Vector3, facing: Vector3, grounded: bool, roll_requested: bool) -> bool:
@@ -30,6 +37,12 @@ func advance(delta: float, grounded: bool) -> void:
 			active = false
 	elif grounded:
 		_used_in_air = false
+
+## The frame's committed velocity, at whatever speed the run has tuned in.
+func velocity() -> Vector3:
+	if not active:
+		return Vector3.ZERO
+	return Vector3(direction.x * speed,0.0,direction.z * speed)
 
 func reset() -> void:
 	active = false

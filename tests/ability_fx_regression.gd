@@ -83,7 +83,7 @@ func _check_icons() -> void:
 	for id in CONSUMABLES:
 		_check_icon(str(id), seen)
 		count += 1
-	check(count == 37, "the catalog is 35 skills plus 2 consumables, got %d" % count)
+	check(count == 38, "the catalog is 36 skills plus 2 consumables, got %d" % count)
 	check(seen.size() == count, "every skill has its own icon (%d files for %d rows)"
 		% [seen.size(), count])
 
